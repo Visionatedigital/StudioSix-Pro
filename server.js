@@ -1,12 +1,28 @@
 #!/usr/bin/env node
 
+console.log('Starting StudioSix Pro server...');
+console.log('Node version:', process.version);
+console.log('Environment:', process.env.NODE_ENV);
+console.log('Port:', process.env.PORT);
+
 const express = require('express');
 const path = require('path');
 const compression = require('compression');
 const helmet = require('helmet');
+const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Check if build directory exists
+const buildPath = path.join(__dirname, 'build');
+console.log('Checking build directory:', buildPath);
+if (!fs.existsSync(buildPath)) {
+  console.error('ERROR: Build directory does not exist at:', buildPath);
+  console.error('Available files in current directory:', fs.readdirSync(__dirname));
+  process.exit(1);
+}
+console.log('Build directory found successfully');
 
 // Security middleware
 app.use(helmet({

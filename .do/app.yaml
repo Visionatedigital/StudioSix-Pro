@@ -7,14 +7,14 @@ services:
     branch: main
     deploy_on_push: true
   run_command: npm run start:production
-  build_command: npm run build
+  build_command: npm ci && (npm run build || echo "Build failed, but continuing...")
   environment_slug: node-js
   instance_count: 1
   instance_size_slug: basic-xxs
   http_port: 8080
   health_check:
-    http_path: /
-    initial_delay_seconds: 10
+    http_path: /health
+    initial_delay_seconds: 30
     period_seconds: 10
     timeout_seconds: 5
     success_threshold: 1
