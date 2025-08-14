@@ -40,7 +40,7 @@
     "start:dev": "HOST=localhost PORT=3000 craco start",
     "start:email-proxy": "node email-proxy-server.js",
     "start:with-email": "concurrently \"npm run start:email-proxy\" \"npm run start\"",
-    "start:production": "serve -s build -l 3000",
+    "start:production": "node server.js",
     "build": "craco build",
     "test": "craco test",
     "eject": "react-scripts eject",

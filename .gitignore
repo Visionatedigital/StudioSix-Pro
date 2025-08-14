@@ -75,3 +75,6 @@ temp/
 *.mp4
 *.mov
 *.avi
+
+# Docker
+.dockerignore
