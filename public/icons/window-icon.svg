@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Window Frame -->
+  <rect x="4" y="6" width="24" height="20" 
+        fill="#e0f2fe" 
+        stroke="#1e40af" 
+        stroke-width="2" 
+        rx="1"/>
+  
+  <!-- Window Sash (Outer Frame) -->
+  <rect x="5.5" y="7.5" width="21" height="17" 
+        fill="none" 
+        stroke="#1e40af" 
+        stroke-width="1" 
+        rx="0.5"/>
+  
+  <!-- Center Cross Bars -->
+  <!-- Vertical -->
+  <line x1="16" y1="7.5" 
+        x2="16" y2="24.5" 
+        stroke="#1e40af" 
+        stroke-width="1.5"/>
+  
+  <!-- Horizontal -->
+  <line x1="5.5" y1="16" 
+        x2="26.5" y2="16" 
+        stroke="#1e40af" 
+        stroke-width="1.5"/>
+  
+  <!-- Glass Panes (subtle gradient effect) -->
+  <defs>
+    <linearGradient id="glassGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f0f9ff;stop-opacity:0.8"/>
+      <stop offset="50%" style="stop-color:#bae6fd;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#e0f2fe;stop-opacity:0.9"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Four glass panes -->
+  <!-- Top Left -->
+  <rect x="6" y="8" width="9" height="7" 
+        fill="url(#glassGradient)" 
+        opacity="0.7"/>
+  
+  <!-- Top Right -->
+  <rect x="17" y="8" width="9" height="7" 
+        fill="url(#glassGradient)" 
+        opacity="0.7"/>
+  
+  <!-- Bottom Left -->
+  <rect x="6" y="17" width="9" height="7" 
+        fill="url(#glassGradient)" 
+        opacity="0.7"/>
+  
+  <!-- Bottom Right -->
+  <rect x="17" y="17" width="9" height="7" 
+        fill="url(#glassGradient)" 
+        opacity="0.7"/>
+  
+  <!-- Window Handle -->
+  <circle cx="24" cy="14" r="1" 
+          fill="#1e40af" 
+          opacity="0.8"/>
+  
+  <!-- Light Reflection Effects -->
+  <path d="M7 9 L13 9 L11 11 L9 11 Z" 
+        fill="#ffffff" 
+        opacity="0.4"/>
+  
+  <path d="M18 18 L24 18 L22 20 L20 20 Z" 
+        fill="#ffffff" 
+        opacity="0.3"/>
+  
+  <!-- Shadow effect -->
+  <rect x="4.5" y="6.5" width="24" height="20" 
+        fill="none" 
+        stroke="#1e40af" 
+        stroke-width="0.5" 
+        opacity="0.3"
+        rx="1"/>
+</svg>

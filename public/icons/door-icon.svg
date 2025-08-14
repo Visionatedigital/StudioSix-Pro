@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="DoorIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <style>
+      .door-primary {
+        fill: #92400e;
+        stroke: #78350f;
+        stroke-width: 0.5;
+      }
+      .door-accent {
+        fill: #b45309;
+      }
+      .door-shadow {
+        fill: #451a03;
+        opacity: 0.4;
+      }
+      .door-highlight {
+        fill: #d97706;
+      }
+      .door-frame {
+        fill: #6b7280;
+        stroke: #4b5563;
+        stroke-width: 0.5;
+      }
+      .door-handle {
+        fill: #fbbf24;
+        stroke: #f59e0b;
+        stroke-width: 0.3;
+      }
+    </style>
+  </defs>
+  
+  <!-- Shadow underneath door -->
+  <ellipse class="door-shadow" cx="16" cy="29" rx="12" ry="2" opacity="0.3"/>
+  
+  <!-- Door frame -->
+  <rect class="door-frame" x="6" y="8" width="20" height="20" rx="0.5"/>
+  
+  <!-- Door opening (showing swing arc) -->
+  <path class="door-shadow" d="M7,8 Q7,8 7,28 Q7,28 7,28" stroke="#4b5563" stroke-width="1" fill="none" opacity="0.5"/>
+  
+  <!-- Main door panel -->
+  <rect class="door-primary" x="7" y="8" width="16" height="20" rx="0.3"/>
+  
+  <!-- Door panels (traditional design) -->
+  <!-- Top panel -->
+  <rect class="door-accent" x="9" y="10" width="12" height="7" rx="0.2" opacity="0.8"/>
+  
+  <!-- Bottom panel -->
+  <rect class="door-accent" x="9" y="19" width="12" height="7" rx="0.2" opacity="0.8"/>
+  
+  <!-- Panel borders for depth -->
+  <rect x="9" y="10" width="12" height="7" rx="0.2" fill="none" stroke="#78350f" stroke-width="0.3"/>
+  <rect x="9" y="19" width="12" height="7" rx="0.2" fill="none" stroke="#78350f" stroke-width="0.3"/>
+  
+  <!-- Door handle -->
+  <circle class="door-handle" cx="19" cy="18" r="1.2"/>
+  <circle cx="19" cy="18" r="0.8" fill="#fcd34d"/>
+  
+  <!-- Door hinge details -->
+  <rect class="door-frame" x="7" y="10" width="1" height="3" rx="0.5"/>
+  <rect class="door-frame" x="7" y="16" width="1" height="3" rx="0.5"/>
+  <rect class="door-frame" x="7" y="22" width="1" height="3" rx="0.5"/>
+  
+  <!-- Door swing indication (arc) -->
+  <path d="M23,28 A16,16 0 0,0 7,28" stroke="#92400e" stroke-width="1" fill="none" opacity="0.3" stroke-dasharray="2,2"/>
+  
+  <!-- Top highlight -->
+  <rect class="door-highlight" x="7" y="8" width="16" height="1" rx="0.3" opacity="0.6"/>
+  
+  <!-- Side highlight -->
+  <rect class="door-highlight" x="7" y="8" width="1" height="20" rx="0.3" opacity="0.4"/>
+</svg>

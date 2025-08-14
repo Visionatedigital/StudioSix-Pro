@@ -1,0 +1,7 @@
+export { default as WallIcon } from './WallIcon';
+export { default as SlabIcon } from './SlabIcon';
+export { default as DoorIcon } from './DoorIcon';
+export { default as WindowIcon } from './WindowIcon';
+export { default as RoofIcon } from './RoofIcon';
+export { default as StairIcon } from './StairIcon';
+export { default as TagIcon } from './TagIcon';

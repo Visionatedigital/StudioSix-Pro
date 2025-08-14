@@ -1,0 +1,45 @@
+# Bugatti Chiron Sports Car - Test Model
+# Simple car-like shape for testing
+
+# Vertices
+v -2.0 0.0 -4.0    # rear left bottom
+v  2.0 0.0 -4.0    # rear right bottom
+v  2.0 0.0  4.0    # front right bottom
+v -2.0 0.0  4.0    # front left bottom
+v -1.5 1.5 -3.0    # rear left top
+v  1.5 1.5 -3.0    # rear right top
+v  1.5 1.5  3.0    # front right top
+v -1.5 1.5  3.0    # front left top
+
+# Texture coordinates
+vt 0.0 0.0
+vt 1.0 0.0
+vt 1.0 1.0
+vt 0.0 1.0
+
+# Vertex normals
+vn 0.0 -1.0 0.0    # bottom
+vn 0.0  1.0 0.0    # top
+vn 0.0  0.0 -1.0   # rear
+vn 0.0  0.0  1.0   # front
+vn -1.0 0.0 0.0    # left
+vn  1.0 0.0 0.0    # right
+
+# Faces (car body)
+# Bottom
+f 1/1/1 2/2/1 3/3/1 4/4/1
+
+# Top
+f 8/1/2 7/2/2 6/3/2 5/4/2
+
+# Rear
+f 1/1/3 5/2/3 6/3/3 2/4/3
+
+# Front
+f 4/1/4 3/2/4 7/3/4 8/4/4
+
+# Left side
+f 1/1/5 4/2/5 8/3/5 5/4/5
+
+# Right side
+f 2/1/6 6/2/6 7/3/6 3/4/6

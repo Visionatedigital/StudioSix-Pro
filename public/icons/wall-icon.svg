@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="WallIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <style>
+      .wall-primary {
+        fill: #8b7355;
+        stroke: #6b5635;
+        stroke-width: 0.5;
+      }
+      .wall-accent {
+        fill: #a78851;
+      }
+      .wall-shadow {
+        fill: #5a4628;
+        opacity: 0.3;
+      }
+      .wall-highlight {
+        fill: #b89a65;
+      }
+    </style>
+  </defs>
+  
+  <!-- Wall foundation/shadow -->
+  <rect class="wall-shadow" x="1" y="25" width="30" height="6" rx="0.5"/>
+  
+  <!-- Main wall structure -->
+  <rect class="wall-primary" x="2" y="6" width="28" height="20" rx="1"/>
+  
+  <!-- Brick pattern -->
+  <!-- Row 1 -->
+  <rect class="wall-accent" x="3" y="7" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="10" y="7" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="17" y="7" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="24" y="7" width="5" height="3" rx="0.2"/>
+  
+  <!-- Row 2 (offset) -->
+  <rect class="wall-accent" x="3" y="11" width="3" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="7" y="11" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="14" y="11" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="21" y="11" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="28" y="11" width="1" height="3" rx="0.2"/>
+  
+  <!-- Row 3 -->
+  <rect class="wall-accent" x="3" y="15" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="10" y="15" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="17" y="15" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="24" y="15" width="5" height="3" rx="0.2"/>
+  
+  <!-- Row 4 (offset) -->
+  <rect class="wall-accent" x="3" y="19" width="3" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="7" y="19" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="14" y="19" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="21" y="19" width="6" height="3" rx="0.2"/>
+  <rect class="wall-accent" x="28" y="19" width="1" height="3" rx="0.2"/>
+  
+  <!-- Top row -->
+  <rect class="wall-accent" x="3" y="23" width="6" height="2" rx="0.2"/>
+  <rect class="wall-accent" x="10" y="23" width="6" height="2" rx="0.2"/>
+  <rect class="wall-accent" x="17" y="23" width="6" height="2" rx="0.2"/>
+  <rect class="wall-accent" x="24" y="23" width="5" height="2" rx="0.2"/>
+  
+  <!-- Highlight on top edge -->
+  <rect class="wall-highlight" x="2" y="6" width="28" height="1" rx="0.5"/>
+</svg>

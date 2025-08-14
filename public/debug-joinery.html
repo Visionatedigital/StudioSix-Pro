@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Wall Joinery Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .debug-container { max-width: 800px; margin: 0 auto; }
+        .debug-output { 
+            background: #f5f5f5; 
+            padding: 15px; 
+            border-radius: 5px; 
+            margin: 10px 0; 
+            font-family: monospace;
+        }
+        button { 
+            background: #007cba; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            margin: 5px;
+        }
+        button:hover { background: #005a87; }
+    </style>
+</head>
+<body>
+    <div class="debug-container">
+        <h1>🔍 Wall Joinery Debug Test</h1>
+        
+        <div class="debug-output">
+            <strong>Instructions:</strong><br>
+            1. Make sure the main app is loaded at <a href="http://localhost:3000" target="_blank">http://localhost:3000</a><br>
+            2. Click the "Run Debug Test" button below<br>
+            3. Open the browser console (F12) to see detailed output<br>
+            4. Check both the 2D and 3D views for wall connections
+        </div>
+        
+        <button onclick="runDebugTest()">🧪 Run Debug Test</button>
+        <button onclick="clearConsole()">🧹 Clear Console</button>
+        <button onclick="forceJoinery()">🔧 Force Joinery Refresh</button>
+        
+        <div class="debug-output" id="status">
+            <strong>Status:</strong> Ready to run debug test
+        </div>
+        
+        <div class="debug-output">
+            <strong>What this test does:</strong><br>
+            • Creates two walls that should connect at a corner<br>
+            • Applies joinery calculations<br>
+            • Shows detailed debug output in console<br>
+            • Helps identify where the joinery issue occurs
+        </div>
+    </div>
+
+    <script>
+        function updateStatus(message) {
+            document.getElementById('status').innerHTML = '<strong>Status:</strong> ' + message;
+        }
+        
+        function clearConsole() {
+            console.clear();
+            updateStatus('Console cleared');
+        }
+        
+        function forceJoinery() {
+            updateStatus('Forcing joinery refresh...');
+            
+            // Try to access the main app window
+            try {
+                const mainWindow = window.opener || window.parent || window;
+                if (mainWindow.standaloneCADEngine) {
+                    console.log('🔧 Manual joinery refresh...');
+                    mainWindow.standaloneCADEngine.applyWallJoinery({
+                        tolerance: 0.05,
+                        cornerStyle: 'butt',
+                        tightCorners: true
+                    });
+                    updateStatus('Joinery refresh attempted');
+                } else {
+                    updateStatus('Could not access CAD engine - open main app first');
+                }
+            } catch (error) {
+                console.error('Error accessing main app:', error);
+                updateStatus('Error: Could not access main app');
+            }
+        }
+        
+        function runDebugTest() {
+            updateStatus('Running debug test...');
+            console.log('🔍 STARTING WALL JOINERY DEBUG TEST');
+            
+            // Try to access the main app window
+            try {
+                const mainWindow = window.opener || window.parent || window;
+                
+                if (!mainWindow.standaloneCADEngine) {
+                    updateStatus('❌ CAD Engine not found - make sure main app is loaded');
+                    console.error('❌ StandaloneCADEngine not available');
+                    console.log('Please open the main app at http://localhost:3000 first');
+                    return;
+                }
+                
+                const engine = mainWindow.standaloneCADEngine;
+                
+                // Simple Debug Test Function
+                function simpleJoineryDebugTest() {
+                    console.log('🔍 SIMPLE JOINERY DEBUG TEST');
+                    console.log('This will create two walls and show detailed debug output');
+                    
+                    // Clear everything
+                    console.log('🧹 Clearing scene...');
+                    engine.objects.clear();
+                    engine.scene3D.clear();
+                    engine.scene2D.clear();
+                    
+                    // Create two simple walls that should connect
+                    console.log('\\n🏗️ Creating two walls that should connect at (2,0,0)...');
+                    
+                    console.log('Creating Wall 1: (0,0,0) to (2,0,0)');
+                    const wall1Id = engine.createObject('wall', {
+                        length: 2,
+                        height: 2.5,
+                        thickness: 0.2,
+                        material: 'concrete',
+                        startPoint: { x: 0, y: 0, z: 0 },
+                        endPoint: { x: 2, y: 0, z: 0 }
+                    });
+                    
+                    console.log('Creating Wall 2: (2,0,0) to (2,0,1.5)');
+                    const wall2Id = engine.createObject('wall', {
+                        length: 1.5,
+                        height: 2.5,
+                        thickness: 0.2,
+                        material: 'concrete',
+                        startPoint: { x: 2, y: 0, z: 0 },
+                        endPoint: { x: 2, y: 0, z: 1.5 }
+                    });
+                    
+                    console.log(`\\n✅ Created walls: ${wall1Id} and ${wall2Id}`);
+                    
+                    // Wait for creation to complete, then check initial state
+                    setTimeout(() => {
+                        console.log('\\n📊 INITIAL STATE CHECK:');
+                        
+                        const wall1 = engine.getObject(wall1Id);
+                        const wall2 = engine.getObject(wall2Id);
+                        
+                        console.log('Wall 1 initial state:', {
+                            id: wall1.id,
+                            position: wall1.position,
+                            mesh3DPos: wall1.mesh3D?.position,
+                            mesh2DPos: wall1.mesh2D?.position,
+                            startPoint: wall1.params?.startPoint,
+                            endPoint: wall1.params?.endPoint,
+                            hasJoinery: wall1.params?.adjustForJoinery
+                        });
+                        
+                        console.log('Wall 2 initial state:', {
+                            id: wall2.id,
+                            position: wall2.position,
+                            mesh3DPos: wall2.mesh3D?.position,
+                            mesh2DPos: wall2.mesh2D?.position,
+                            startPoint: wall2.params?.startPoint,
+                            endPoint: wall2.params?.endPoint,
+                            hasJoinery: wall2.params?.adjustForJoinery
+                        });
+                        
+                        // Now apply joinery
+                        console.log('\\n🔧 APPLYING JOINERY...');
+                        console.log('Watch for debug output from applyWallJoinery...');
+                        
+                        engine.applyWallJoinery({
+                            tolerance: 0.05,
+                            cornerStyle: 'butt',
+                            tightCorners: true
+                        });
+                        
+                        // Check state after joinery
+                        setTimeout(() => {
+                            console.log('\\n📊 POST-JOINERY STATE CHECK:');
+                            
+                            const wall1After = engine.getObject(wall1Id);
+                            const wall2After = engine.getObject(wall2Id);
+                            
+                            console.log('Wall 1 after joinery:', {
+                                id: wall1After.id,
+                                position: wall1After.position,
+                                mesh3DPos: wall1After.mesh3D?.position,
+                                mesh2DPos: wall1After.mesh2D?.position,
+                                hasJoinery: wall1After.params?.adjustForJoinery,
+                                adjustedStartPoint: wall1After.params?.adjustedStartPoint,
+                                adjustedEndPoint: wall1After.params?.adjustedEndPoint,
+                                startAdjustment: wall1After.params?.startAdjustment,
+                                endAdjustment: wall1After.params?.endAdjustment,
+                                actualLength: wall1After.params?.actualLength
+                            });
+                            
+                            console.log('Wall 2 after joinery:', {
+                                id: wall2After.id,
+                                position: wall2After.position,
+                                mesh3DPos: wall2After.mesh3D?.position,
+                                mesh2DPos: wall2After.mesh2D?.position,
+                                hasJoinery: wall2After.params?.adjustForJoinery,
+                                adjustedStartPoint: wall2After.params?.adjustedStartPoint,
+                                adjustedEndPoint: wall2After.params?.adjustedEndPoint,
+                                startAdjustment: wall2After.params?.startAdjustment,
+                                endAdjustment: wall2After.params?.endAdjustment,
+                                actualLength: wall2After.params?.actualLength
+                            });
+                            
+                            // Check joinery info
+                            const joineryInfo = engine.getJoineryInfo();
+                            console.log('\\nJoinery Info:', joineryInfo);
+                            
+                            // Force viewport refresh to trigger 2D rendering debug
+                            console.log('\\n🔄 FORCING VIEWPORT REFRESH...');
+                            console.log('Watch for debug output from 2D viewport rendering...');
+                            
+                            engine.emit('objects_changed', {
+                                objects: engine.getAllObjects(),
+                                reason: 'debug_test'
+                            });
+                            
+                            console.log('\\n✅ DEBUG TEST COMPLETE');
+                            console.log('Check the console output above to see:');
+                            console.log('1. Initial wall state (should have no joinery)');
+                            console.log('2. Joinery calculation process');
+                            console.log('3. Final wall state after joinery (should have adjusted points)');
+                            console.log('4. 2D viewport rendering debug output');
+                            
+                            updateStatus('✅ Debug test complete - check console output');
+                            
+                        }, 800);
+                        
+                    }, 1000);
+                    
+                    return { wall1Id, wall2Id };
+                }
+                
+                // Run the test
+                simpleJoineryDebugTest();
+                
+            } catch (error) {
+                console.error('Error running debug test:', error);
+                updateStatus('❌ Error running test: ' + error.message);
+            }
+        }
+        
+        // Auto-detect if we're in an iframe or popup
+        window.addEventListener('load', function() {
+            if (window.opener || window.parent !== window) {
+                updateStatus('Connected to main app - ready to run tests');
+            } else {
+                updateStatus('Open this from the main app or ensure main app is running at localhost:3000');
+            }
+        });
+    </script>
+</body>
+</html>

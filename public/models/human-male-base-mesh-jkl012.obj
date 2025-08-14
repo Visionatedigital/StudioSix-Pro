@@ -1,0 +1,66 @@
+# Human Male Base Mesh - Test Model
+# Simple humanoid shape for testing
+
+# Head vertices
+v -0.4 1.6 -0.2    # head left back
+v  0.4 1.6 -0.2    # head right back
+v  0.4 1.6  0.2    # head right front
+v -0.4 1.6  0.2    # head left front
+v -0.3 2.0 -0.15   # head top left back
+v  0.3 2.0 -0.15   # head top right back
+v  0.3 2.0  0.15   # head top right front
+v -0.3 2.0  0.15   # head top left front
+
+# Torso vertices
+v -0.6 0.8 -0.3    # torso bottom left back
+v  0.6 0.8 -0.3    # torso bottom right back
+v  0.6 0.8  0.3    # torso bottom right front
+v -0.6 0.8  0.3    # torso bottom left front
+v -0.5 1.6 -0.25   # torso top left back
+v  0.5 1.6 -0.25   # torso top right back
+v  0.5 1.6  0.25   # torso top right front
+v -0.5 1.6  0.25   # torso top left front
+
+# Arms (simplified)
+v -1.2 1.4 0.0     # left arm outer
+v -0.8 1.4 0.0     # left arm inner
+v  0.8 1.4 0.0     # right arm inner
+v  1.2 1.4 0.0     # right arm outer
+
+# Legs (simplified)
+v -0.3 0.0 0.0     # left foot
+v -0.3 0.8 0.0     # left leg top
+v  0.3 0.0 0.0     # right foot
+v  0.3 0.8 0.0     # right leg top
+
+# Texture coordinates
+vt 0.0 0.0
+vt 1.0 0.0
+vt 1.0 1.0
+vt 0.0 1.0
+
+# Vertex normals
+vn 0.0  1.0 0.0    # up
+vn 0.0 -1.0 0.0    # down
+vn 0.0  0.0 -1.0   # back
+vn 0.0  0.0  1.0   # front
+
+# Faces
+# Head (simplified)
+f 1/1/2 2/2/2 3/3/2 4/4/2
+f 8/1/1 7/2/1 6/3/1 5/4/1
+
+# Torso
+f 9/1/2 10/2/2 11/3/2 12/4/2
+f 16/1/1 15/2/1 14/3/1 13/4/1
+f 9/1/3 13/2/3 14/3/3 10/4/3
+f 12/1/4 11/2/4 15/3/4 16/4/4
+
+# Arms (simple lines)
+f 17/1/1 18/2/1 14/3/1 13/4/1
+f 19/1/1 20/2/1 15/3/1 14/4/1
+
+# Legs (simple)
+f 21/1/2 22/2/2 12/3/2 9/4/2
+f 23/1/2 24/2/2 11/3/2 10/4/2
+EOF < /dev/null

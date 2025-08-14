@@ -1,0 +1,353 @@
+/* Interactive Chat Message Styles */
+
+/* Custom Slider Styles */
+.slider {
+  background: #475569; /* slate-600 */
+  outline: none;
+  border-radius: 6px;
+  height: 8px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #a855f7); /* studiosix gradient */
+  cursor: pointer;
+  border: 2px solid #1e293b; /* slate-800 */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+}
+
+.slider::-webkit-slider-thumb:hover {
+  background: linear-gradient(135deg, #8b5cf6, #c084fc);
+  transform: scale(1.1);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.4);
+}
+
+.slider::-webkit-slider-thumb:active {
+  transform: scale(0.95);
+}
+
+.slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  cursor: pointer;
+  border: 2px solid #1e293b;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  transition: all 0.2s ease;
+}
+
+.slider::-moz-range-thumb:hover {
+  background: linear-gradient(135deg, #8b5cf6, #c084fc);
+  transform: scale(1.1);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.4);
+}
+
+.slider::-moz-range-track {
+  width: 100%;
+  height: 8px;
+  cursor: pointer;
+  background: #475569;
+  border-radius: 6px;
+  border: none;
+}
+
+.slider:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+}
+
+/* Parameter control animations */
+.parameter-control {
+  transition: all 0.3s ease;
+}
+
+.parameter-control:hover {
+  transform: translateY(-1px);
+}
+
+/* Button animations and states */
+.interactive-button {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+.interactive-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.interactive-button:active {
+  transform: translateY(0);
+}
+
+.interactive-button.loading::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    left: -100%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+/* Status badge animations */
+.status-badge {
+  animation: fadeInScale 0.3s ease-out;
+}
+
+@keyframes fadeInScale {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Parameter section expand/collapse */
+.parameters-section {
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+}
+
+.parameters-section.collapsed {
+  max-height: 0;
+  opacity: 0;
+}
+
+.parameters-section.expanded {
+  max-height: 500px;
+  opacity: 1;
+}
+
+/* Advanced settings panel */
+.advanced-panel {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Interactive elements hover effects */
+.glass-interactive {
+  background: rgba(30, 41, 59, 0.4);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  transition: all 0.3s ease;
+}
+
+.glass-interactive:hover {
+  background: rgba(30, 41, 59, 0.6);
+  border-color: rgba(124, 58, 237, 0.3);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+/* Checkbox custom styling */
+.custom-checkbox {
+  position: relative;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #4b5563;
+  border-radius: 3px;
+  background: #1e293b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.custom-checkbox:checked {
+  background: linear-gradient(135deg, #7c3aed, #a855f7);
+  border-color: #7c3aed;
+}
+
+.custom-checkbox:checked::after {
+  content: '✓';
+  position: absolute;
+  top: -2px;
+  left: 1px;
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.custom-checkbox:hover {
+  border-color: #7c3aed;
+  box-shadow: 0 0 8px rgba(124, 58, 237, 0.2);
+}
+
+/* Select dropdown custom styling */
+.custom-select {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+  background-position: right 8px center;
+  background-repeat: no-repeat;
+  background-size: 16px;
+  padding-right: 32px;
+}
+
+/* Loading dots animation */
+.loading-dots::after {
+  content: '';
+  animation: dots 1.5s infinite;
+}
+
+@keyframes dots {
+  0%, 20% {
+    content: '.';
+  }
+  40% {
+    content: '..';
+  }
+  60%, 100% {
+    content: '...';
+  }
+}
+
+/* Pulse animation for active elements */
+.pulse-active {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Step indicator styles */
+.step-indicator {
+  position: relative;
+}
+
+.step-indicator::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 100%;
+  border-radius: 2px;
+  transition: background-color 0.3s ease;
+}
+
+.step-indicator.pending::before {
+  background-color: #6b7280;
+}
+
+.step-indicator.running::before {
+  background-color: #f59e0b;
+  animation: pulse 1s infinite;
+}
+
+.step-indicator.completed::before {
+  background-color: #10b981;
+}
+
+.step-indicator.failed::before {
+  background-color: #ef4444;
+}
+
+.step-indicator.skipped::before {
+  background-color: #6b7280;
+  opacity: 0.5;
+}
+
+/* Responsive design */
+@media (max-width: 640px) {
+  .interactive-button {
+    font-size: 10px;
+    padding: 6px 12px;
+  }
+  
+  .interactive-button svg {
+    width: 12px;
+    height: 12px;
+  }
+  
+  .slider::-webkit-slider-thumb {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+  }
+  
+  .parameters-section.expanded {
+    max-height: 300px;
+  }
+}
+
+/* Accessibility improvements */
+.interactive-button:focus-visible,
+.slider:focus-visible,
+.custom-checkbox:focus-visible,
+.custom-select:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+/* Dark theme optimizations */
+@media (prefers-color-scheme: dark) {
+  .glass-interactive {
+    background: rgba(15, 23, 42, 0.6);
+  }
+  
+  .custom-checkbox {
+    background: #0f172a;
+    border-color: #334155;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .slider::-webkit-slider-thumb {
+    border: 3px solid #ffffff;
+  }
+  
+  .interactive-button {
+    border: 2px solid currentColor;
+  }
+  
+  .custom-checkbox {
+    border: 2px solid currentColor;
+  }
+} 

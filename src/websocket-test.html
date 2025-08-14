@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .log { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        button { padding: 10px 20px; margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>WebSocket FreeCAD Test</h1>
+    <button onclick="connect()">Connect</button>
+    <button onclick="createWall()">Create Wall</button>
+    <button onclick="sendChatMessage()">Send Chat Message</button>
+    <button onclick="clearLog()">Clear Log</button>
+    
+    <div id="status">Not connected</div>
+    <div id="objects">Objects: 0</div>
+    <div id="log"></div>
+
+    <script>
+        let ws = null;
+        let objects = [];
+        
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log ${type}`;
+            entry.innerHTML = `${new Date().toLocaleTimeString()}: ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        function updateStatus(message) {
+            document.getElementById('status').textContent = message;
+        }
+        
+        function updateObjects() {
+            document.getElementById('objects').textContent = `Objects: ${objects.length}`;
+        }
+        
+        function connect() {
+            if (ws) {
+                ws.close();
+            }
+            
+            updateStatus('Connecting...');
+            log('Connecting to ws://127.0.0.1:8001...', 'info');
+            
+            ws = new WebSocket('ws://127.0.0.1:8001');
+            
+            ws.onopen = function(event) {
+                updateStatus('Connected');
+                log('✅ Connected successfully!', 'success');
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    log(`📨 Received: ${data.type}`, 'info');
+                    console.log('Received data:', data);
+                    
+                    if (data.type === 'object_created') {
+                        objects.push(data.object);
+                        updateObjects();
+                        log(`🎉 Object created: ${data.object.type} (${data.object.id})`, 'success');
+                        console.log('Object data:', data.object);
+                    } else if (data.type === 'model_state') {
+                        if (data.objects) {
+                            objects = data.objects;
+                            updateObjects();
+                            log(`📋 Model state: ${objects.length} objects`, 'info');
+                        }
+                    } else if (data.type === 'chat_response') {
+                        log(`💬 Chat response: ${data.response.substring(0, 100)}...`, 'info');
+                    }
+                } catch (error) {
+                    log(`❌ Error parsing message: ${error}`, 'error');
+                }
+            };
+            
+            ws.onclose = function(event) {
+                updateStatus('Disconnected');
+                log(`🔌 Disconnected: ${event.code} ${event.reason}`, 'error');
+            };
+            
+            ws.onerror = function(error) {
+                log(`❌ WebSocket error: ${error}`, 'error');
+            };
+        }
+        
+        function createWall() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('❌ Not connected', 'error');
+                return;
+            }
+            
+            const message = {
+                type: 'create_wall',
+                length: 3000,
+                width: 200,
+                height: 2800
+            };
+            
+            log(`📤 Creating wall...`, 'info');
+            ws.send(JSON.stringify(message));
+        }
+        
+        function sendChatMessage() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('❌ Not connected', 'error');
+                return;
+            }
+            
+            const message = {
+                type: 'chat_message',
+                messageId: `chat_${Date.now()}`,
+                message: 'Create a wall that is 4 meters long and 3 meters high',
+                context: {},
+                timestamp: new Date().toISOString()
+            };
+            
+            log(`💬 Sending chat message...`, 'info');
+            ws.send(JSON.stringify(message));
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // Auto-connect on page load
+        window.onload = function() {
+            connect();
+        };
+    </script>
+</body>
+</html>

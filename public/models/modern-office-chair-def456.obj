@@ -1,0 +1,36 @@
+# Simple test chair model for import testing
+# Created for StudioSix 3D Model System
+
+# Vertices
+v -0.5 0.0 -0.5  # Bottom front left
+v  0.5 0.0 -0.5  # Bottom front right
+v  0.5 0.0  0.5  # Bottom back right
+v -0.5 0.0  0.5  # Bottom back left
+
+v -0.5 0.1 -0.5  # Seat front left
+v  0.5 0.1 -0.5  # Seat front right
+v  0.5 0.1  0.5  # Seat back right
+v -0.5 0.1  0.5  # Seat back left
+
+v -0.4 1.0 -0.4  # Back top left
+v  0.4 1.0 -0.4  # Back top right
+v  0.4 0.1  0.4  # Back bottom right
+v -0.4 0.1  0.4  # Back bottom left
+
+# Chair seat (quad)
+f 5 6 7 8
+
+# Chair back (quad)
+f 9 10 11 12
+
+# Chair legs (simple lines)
+f 1 5
+f 2 6
+f 3 7
+f 4 8
+
+# Chair connection
+f 8 12
+f 7 11
+
+g chair_object
