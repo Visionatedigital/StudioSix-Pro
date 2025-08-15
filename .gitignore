@@ -71,7 +71,7 @@ temp/
 # *.gltf
 
 # Large media files
-*.gif
+# *.gif
 *.mp4
 *.mov
 *.avi
