@@ -27,31 +27,19 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Simple root endpoint
-app.get('/', (req, res) => {
-  res.status(200).send(`
-    <html>
-      <head><title>StudioSix Pro</title></head>
-      <body>
-        <h1>StudioSix Pro Server</h1>
-        <p>Server is running on port ${PORT}</p>
-        <p>Node version: ${process.version}</p>
-        <p>Environment: ${process.env.NODE_ENV}</p>
-        <p>Current time: ${new Date().toISOString()}</p>
-        <p><a href="/health">Health Check</a></p>
-      </body>
-    </html>
-  `);
-});
-
 // Check if build directory exists and serve it if available
 const buildPath = path.join(__dirname, 'build');
 if (fs.existsSync(buildPath)) {
   console.log('Build directory found, serving static files');
   app.use(express.static(buildPath));
   
-  // Catch all for SPA routing
+  // Catch all for SPA routing - serve React app for all routes except /health
   app.get('*', (req, res) => {
+    // Skip serving React app for health check
+    if (req.path === '/health') {
+      return;
+    }
+    
     const indexPath = path.join(buildPath, 'index.html');
     if (fs.existsSync(indexPath)) {
       res.sendFile(indexPath);
@@ -61,6 +49,23 @@ if (fs.existsSync(buildPath)) {
   });
 } else {
   console.log('Build directory not found, serving development mode');
+  
+  // Simple root endpoint for when no build exists
+  app.get('/', (req, res) => {
+    res.status(200).send(`
+      <html>
+        <head><title>StudioSix Pro</title></head>
+        <body>
+          <h1>StudioSix Pro Server</h1>
+          <p>Server is running on port ${PORT}</p>
+          <p>Node version: ${process.version}</p>
+          <p>Environment: ${process.env.NODE_ENV}</p>
+          <p>Current time: ${new Date().toISOString()}</p>
+          <p><a href="/health">Health Check</a></p>
+        </body>
+      </html>
+    `);
+  });
   
   app.get('*', (req, res) => {
     res.status(503).send(`

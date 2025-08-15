@@ -1,6 +1,64 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowUpIcon, SparklesIcon, PlayIcon } from '@heroicons/react/24/outline';
+import { ArrowUpIcon, SparklesIcon, PlayIcon, UserPlusIcon, CalendarIcon } from '@heroicons/react/24/outline';
 import { ArrowRightIcon, CheckIcon, StarIcon } from '@heroicons/react/24/solid';
+
+// Countdown Timer Component
+const CountdownTimer = () => {
+  const [timeLeft, setTimeLeft] = useState({
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0
+  });
+
+  useEffect(() => {
+    const targetDate = new Date('2025-09-01T00:00:00').getTime();
+    
+    const updateCountdown = () => {
+      const now = new Date().getTime();
+      const difference = targetDate - now;
+      
+      if (difference > 0) {
+        setTimeLeft({
+          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
+          hours: Math.floor((difference % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+          minutes: Math.floor((difference % (1000 * 60 * 60)) / (1000 * 60)),
+          seconds: Math.floor((difference % (1000 * 60)) / 1000)
+        });
+      } else {
+        setTimeLeft({ days: 0, hours: 0, minutes: 0, seconds: 0 });
+      }
+    };
+
+    updateCountdown();
+    const interval = setInterval(updateCountdown, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="text-center">
+      <div className="grid grid-cols-4 gap-2 mb-3">
+        <div className="bg-studiosix-500/20 border border-studiosix-500/30 rounded-lg p-2">
+          <div className="text-lg font-bold text-white">{timeLeft.days}</div>
+          <div className="text-xs text-studiosix-300">DAYS</div>
+        </div>
+        <div className="bg-studiosix-500/20 border border-studiosix-500/30 rounded-lg p-2">
+          <div className="text-lg font-bold text-white">{timeLeft.hours}</div>
+          <div className="text-xs text-studiosix-300">HOURS</div>
+        </div>
+        <div className="bg-studiosix-500/20 border border-studiosix-500/30 rounded-lg p-2">
+          <div className="text-lg font-bold text-white">{timeLeft.minutes}</div>
+          <div className="text-xs text-studiosix-300">MIN</div>
+        </div>
+        <div className="bg-studiosix-500/20 border border-studiosix-500/30 rounded-lg p-2">
+          <div className="text-lg font-bold text-white">{timeLeft.seconds}</div>
+          <div className="text-xs text-studiosix-300">SEC</div>
+        </div>
+      </div>
+      <p className="text-xs text-gray-400">Until StudioSix Pro Launch</p>
+    </div>
+  );
+};
 
 // Typewriter Effect for Hero Section with GIF sync
 const TypewriterPrompt = ({ suggestions, className = "", onSuggestionChange }) => {
@@ -118,7 +176,7 @@ const CyclingGIF = ({ currentIndex }) => {
 };
 
 // Header Component
-const LandingHeader = () => {
+const LandingHeader = ({ onEmailCapture }) => {
   const [isScrolled, setIsScrolled] = useState(false);
 
   useEffect(() => {
@@ -169,7 +227,7 @@ const LandingHeader = () => {
               Sign In
             </button>
             <button 
-              onClick={() => window.location.href = '/app'}
+              onClick={() => onEmailCapture('I want to try StudioSix Pro for free')}
               className="bg-studiosix-500 hover:bg-studiosix-600 text-white px-4 py-2 rounded-lg transition-all duration-200 transform hover:scale-105"
             >
               Try for Free
@@ -268,15 +326,19 @@ const HeroSection = ({ onEmailCapture }) => {
 
             {/* Quick Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-              <button className="bg-studiosix-500 hover:bg-studiosix-600 text-white px-8 py-4 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 hover:shadow-xl hover:shadow-studiosix-500/25">
-                Get Early Access
+              <button 
+                onClick={() => onEmailCapture('I want early access to StudioSix Pro')}
+                className="bg-studiosix-500 hover:bg-studiosix-600 text-white px-8 py-4 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 hover:shadow-xl hover:shadow-studiosix-500/25 flex items-center justify-center space-x-2 group"
+              >
+                <UserPlusIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                <span>Get Early Access</span>
               </button>
               <button 
                 onClick={() => window.open('https://calendly.com/visionatedigital/30min', '_blank')}
                 className="bg-slate-800/50 hover:bg-slate-700/50 text-white px-8 py-4 rounded-xl font-semibold border border-gray-600/50 transition-all duration-200 flex items-center justify-center space-x-2 group"
               >
-                <PlayIcon className="w-5 h-5 group-hover:text-studiosix-400 transition-colors" />
-                <span>Watch Demo</span>
+                <CalendarIcon className="w-5 h-5 group-hover:text-studiosix-400 transition-colors" />
+                <span>Book Personal Demo</span>
               </button>
             </div>
           </div>
@@ -519,6 +581,18 @@ const EmailCaptureModal = ({ isOpen, onClose, promptText }) => {
       <div className="bg-slate-800 rounded-2xl p-8 max-w-md w-full border border-gray-700">
         {isSuccess ? (
           <div className="text-center">
+            {/* StudioSix Logo for Success State */}
+            <div className="flex items-center justify-center mb-4">
+              <img 
+                src="/studiosix-icon.svg" 
+                alt="StudioSix Icon" 
+                className="w-12 h-12 mr-3"
+              />
+              <span className="text-2xl font-bold text-white">
+                Studio<span className="text-studiosix-400">Six</span> Pro
+              </span>
+            </div>
+            
             <div className="w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckIcon className="w-8 h-8 text-green-400" />
             </div>
@@ -528,13 +602,45 @@ const EmailCaptureModal = ({ isOpen, onClose, promptText }) => {
         ) : (
           <>
             <div className="text-center mb-6">
-              <h3 className="text-2xl font-bold text-white mb-2">Get Early Access</h3>
-              <p className="text-gray-400">Join thousands of designers already using StudioSix</p>
-              {promptText && (
-                <div className="mt-4 p-3 bg-studiosix-500/10 border border-studiosix-500/20 rounded-lg">
-                  <p className="text-studiosix-300 text-sm">Your idea: "{promptText}"</p>
+              {/* StudioSix Logo */}
+              <div className="flex items-center justify-center mb-4">
+                <img 
+                  src="/studiosix-icon.svg" 
+                  alt="StudioSix Icon" 
+                  className="w-12 h-12 mr-3"
+                />
+                <span className="text-2xl font-bold text-white">
+                  Studio<span className="text-studiosix-400">Six</span> Pro
+                </span>
+              </div>
+              
+              {/* Countdown Timer */}
+              <CountdownTimer />
+              
+              <div className="mt-4 mb-4">
+                <h3 className="text-xl font-bold text-white mb-2">Get Access 3 Days Earlier!</h3>
+                <p className="text-gray-400 text-sm">Early access members get StudioSix Pro on August 29th, 2025</p>
+              </div>
+              
+              {/* Early Access Benefits */}
+              <div className="mt-4 mb-2 space-y-2">
+                <div className="flex items-center space-x-3">
+                  <CheckIcon className="w-4 h-4 text-studiosix-400 flex-shrink-0" />
+                  <span className="text-gray-300 text-sm">First access to new features and tools</span>
                 </div>
-              )}
+                <div className="flex items-center space-x-3">
+                  <CheckIcon className="w-4 h-4 text-studiosix-400 flex-shrink-0" />
+                  <span className="text-gray-300 text-sm">Exclusive early access pricing</span>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <CheckIcon className="w-4 h-4 text-studiosix-400 flex-shrink-0" />
+                  <span className="text-gray-300 text-sm">Launch notification for September 1st</span>
+                </div>
+                <div className="flex items-center space-x-3">
+                  <CheckIcon className="w-4 h-4 text-studiosix-400 flex-shrink-0" />
+                  <span className="text-gray-300 text-sm">Priority support and feedback channel</span>
+                </div>
+              </div>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -544,7 +650,7 @@ const EmailCaptureModal = ({ isOpen, onClose, promptText }) => {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Enter your email"
                 required
-                className="w-full bg-slate-700 text-white px-4 py-3 rounded-lg border border-gray-600 focus:border-studiosix-500 outline-none transition-colors"
+                className="w-full bg-white text-gray-900 px-4 py-3 rounded-lg border border-gray-300 focus:border-studiosix-500 focus:ring-2 focus:ring-studiosix-500/20 outline-none transition-all placeholder:text-gray-500"
               />
               <div className="flex space-x-3">
                 <button
@@ -559,7 +665,7 @@ const EmailCaptureModal = ({ isOpen, onClose, promptText }) => {
                   disabled={isLoading}
                   className="flex-1 bg-studiosix-500 text-white px-4 py-3 rounded-lg hover:bg-studiosix-600 transition-colors disabled:opacity-50"
                 >
-                  {isLoading ? 'Joining...' : 'Get Early Access'}
+                  {isLoading ? 'Joining...' : 'Notify Me'}
                 </button>
               </div>
             </form>
@@ -582,7 +688,7 @@ const LandingPage = () => {
 
   return (
     <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-studiosix-950 overflow-y-auto">
-      <LandingHeader />
+      <LandingHeader onEmailCapture={handleEmailCapture} />
       <HeroSection onEmailCapture={handleEmailCapture} />
       <FeaturesSection />
       <TestimonialsSection />
