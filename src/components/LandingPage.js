@@ -221,8 +221,9 @@ const LandingHeader = ({ onEmailCapture }) => {
           {/* CTA Buttons */}
           <div className="flex items-center space-x-4">
             <button 
-              onClick={() => window.location.href = '/app'}
-              className="text-gray-300 hover:text-white transition-colors"
+              disabled
+              className="text-gray-500 cursor-not-allowed opacity-50"
+              title="Coming soon - sign in temporarily disabled"
             >
               Sign In
             </button>

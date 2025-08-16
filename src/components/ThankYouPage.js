@@ -85,11 +85,12 @@ const ThankYouPage = () => {
               </button>
               
               <button
-                onClick={handleDownloadApp}
-                className="bg-slate-700/50 hover:bg-slate-600/50 text-white px-8 py-4 rounded-xl font-semibold border border-gray-600/50 transition-all duration-200 flex items-center space-x-2 group"
+                disabled
+                className="bg-slate-700/30 text-gray-400 px-8 py-4 rounded-xl font-semibold border border-gray-600/30 cursor-not-allowed opacity-50 flex items-center space-x-2"
+                title="Coming soon - access temporarily disabled"
               >
                 <span>Try StudioSix Now</span>
-                <ArrowRightIcon className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                <ArrowRightIcon className="w-5 h-5" />
               </button>
             </div>
           </div>
