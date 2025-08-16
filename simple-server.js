@@ -119,7 +119,7 @@ app.post('/api/add-to-waitlist', async (req, res) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'StudioSix Pro <onboarding@resend.dev>',
+        from: 'StudioSix Pro <onboarding@studiosix.ai>',
         to: [email],
         subject: '🎉 Welcome to StudioSix Pro Early Access!',
         html: htmlContent
