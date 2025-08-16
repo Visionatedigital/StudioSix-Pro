@@ -197,6 +197,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`StudioSix Pro server is running on port ${PORT}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`Health check available at: http://localhost:${PORT}/health`);
+  console.log(`Email API endpoint available at: /api/add-to-waitlist`);
 });
 
 // Graceful shutdown
