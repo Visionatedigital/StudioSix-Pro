@@ -61,6 +61,30 @@ app.post('/api/add-to-waitlist', async (req, res) => {
   }
 
   try {
+    // Add contact to Resend audience
+    try {
+      const audienceResponse = await fetch('https://api.resend.com/audiences/6f7cbb8f-8de2-479d-9c89-2249cf098d1a/contacts', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          first_name: email.split('@')[0], // Extract name from email as fallback
+          unsubscribed: false
+        })
+      });
+      
+      if (audienceResponse.ok) {
+        console.log('✅ Contact added to audience successfully');
+      } else {
+        console.log('📋 Failed to add contact to audience (continuing anyway)');
+      }
+    } catch (audienceError) {
+      console.log('📋 Audience error (continuing anyway):', audienceError.message);
+    }
+
     const htmlContent = `
     <!DOCTYPE html>
     <html>
