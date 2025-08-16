@@ -10,6 +10,7 @@ const path = require('path');
 const compression = require('compression');
 const helmet = require('helmet');
 const fs = require('fs');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -93,8 +94,6 @@ app.post('/api/add-to-waitlist', async (req, res) => {
   }
 
   try {
-    // Import fetch dynamically
-    const fetch = (await import('node-fetch')).default;
     
     const htmlContent = `
     <!DOCTYPE html>
