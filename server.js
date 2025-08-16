@@ -61,7 +61,17 @@ app.get('*.wasm', (req, res, next) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+  res.status(200).json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    version: 'v2.0-with-email-api',
+    emailApiAvailable: true
+  });
+});
+
+// Simple test endpoint
+app.get('/test', (req, res) => {
+  res.json({ message: 'Test endpoint working', timestamp: new Date().toISOString() });
 });
 
 // Email API endpoints (integrated from email-proxy-server.js)
