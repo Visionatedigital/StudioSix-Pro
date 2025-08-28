@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Pricing Page Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .test-container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+        .test-item { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .success { background: #d4edda; border-color: #c3e6cb; }
+        .error { background: #f8d7da; border-color: #f5c6cb; }
+        .info { background: #d1ecf1; border-color: #bee5eb; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 Offline Pricing Page Test</h1>
+        <p>This tests the pricing page functionality without external API calls.</p>
+
+        <div class="test-item info">
+            <h3>🌍 Timezone Detection</h3>
+            <p>Your timezone: <strong id="timezone"></strong></p>
+            <p>Detected country: <strong id="country"></strong></p>
+            <p>Detected currency: <strong id="currency"></strong></p>
+        </div>
+
+        <div class="test-item">
+            <h3>💰 Pricing Display</h3>
+            <div id="pricing-display"></div>
+        </div>
+
+        <div class="test-item">
+            <h3>🔄 Currency Conversion Test</h3>
+            <button onclick="testCurrency('USD')">Test USD</button>
+            <button onclick="testCurrency('EUR')">Test EUR</button>
+            <button onclick="testCurrency('GBP')">Test GBP</button>
+            <button onclick="testCurrency('ZAR')">Test ZAR</button>
+            <div id="conversion-results"></div>
+        </div>
+
+        <div class="test-item">
+            <h3>🚀 Action</h3>
+            <button onclick="openPricingPage()" style="background: #007bff; color: white; padding: 15px 30px; font-size: 16px;">
+                Open Real Pricing Page
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Timezone detection logic (same as PricingPage.js)
+        function getLocationFromTimezone() {
+            try {
+                const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                
+                const timezoneToCountry = {
+                    'Africa/Johannesburg': { country: 'ZA', countryName: 'South Africa' },
+                    'America/New_York': { country: 'US', countryName: 'United States' },
+                    'America/Los_Angeles': { country: 'US', countryName: 'United States' },
+                    'Europe/London': { country: 'GB', countryName: 'United Kingdom' },
+                    'Europe/Paris': { country: 'FR', countryName: 'France' },
+                    'Europe/Berlin': { country: 'DE', countryName: 'Germany' },
+                    'Asia/Tokyo': { country: 'JP', countryName: 'Japan' },
+                    'Australia/Sydney': { country: 'AU', countryName: 'Australia' },
+                };
+                
+                const location = timezoneToCountry[timezone];
+                if (location) return { timezone, ...location };
+                
+                // Fallback logic
+                if (timezone.startsWith('Africa/')) return { timezone, country: 'ZA', countryName: 'South Africa' };
+                if (timezone.startsWith('America/')) return { timezone, country: 'US', countryName: 'United States' };
+                if (timezone.startsWith('Europe/')) return { timezone, country: 'GB', countryName: 'United Kingdom' };
+                
+                return { timezone, country: 'ZA', countryName: 'South Africa' };
+            } catch (error) {
+                return { timezone: 'Unknown', country: 'ZA', countryName: 'South Africa' };
+            }
+        }
+
+        function getCurrencyFromCountry(country) {
+            const locationCurrencyMap = {
+                'US': 'USD', 'CA': 'CAD', 'GB': 'GBP', 'AU': 'AUD', 'JP': 'JPY',
+                'NG': 'NGN', 'ZA': 'ZAR', 'KE': 'KES', 'GH': 'GHS', 'IN': 'INR',
+                'CN': 'CNY', 'DE': 'EUR', 'FR': 'EUR', 'ES': 'EUR', 'IT': 'EUR'
+            };
+            return locationCurrencyMap[country] || 'ZAR';
+        }
+
+        function getOfflineExchangeRates() {
+            return {
+                'USD': 0.054, 'EUR': 0.049, 'GBP': 0.043, 'CAD': 0.073,
+                'AUD': 0.081, 'JPY': 7.8, 'CNY': 0.39, 'INR': 4.5,
+                'NGN': 85, 'KES': 7.0, 'GHS': 0.85, 'ZAR': 1
+            };
+        }
+
+        function formatPrice(priceZAR, currency) {
+            const rates = getOfflineExchangeRates();
+            const convertedPrice = Math.round(priceZAR * rates[currency]);
+            
+            const symbols = {
+                'USD': '$', 'EUR': '€', 'GBP': '£', 'ZAR': 'R',
+                'CAD': 'C$', 'AUD': 'A$', 'JPY': '¥', 'CNY': '¥', 'INR': '₹'
+            };
+            
+            return `${symbols[currency] || currency} ${convertedPrice}`;
+        }
+
+        // Initialize page
+        window.onload = function() {
+            const location = getLocationFromTimezone();
+            const currency = getCurrencyFromCountry(location.country);
+
+            document.getElementById('timezone').textContent = location.timezone;
+            document.getElementById('country').textContent = `${location.countryName} (${location.country})`;
+            document.getElementById('currency').textContent = currency;
+
+            // Show pricing
+            const prices = {
+                'Pro Monthly': 352,
+                'Pro Yearly': 3515,
+                'Studio Monthly': 1092,
+                'Studio Yearly': 10915
+            };
+
+            let pricingHtml = '<table border="1" style="width:100%; border-collapse: collapse;">';
+            pricingHtml += '<tr><th>Plan</th><th>ZAR Price</th><th>Your Currency</th></tr>';
+            
+            for (const [plan, zarPrice] of Object.entries(prices)) {
+                const yourPrice = formatPrice(zarPrice, currency);
+                pricingHtml += `<tr><td>${plan}</td><td>R${zarPrice}</td><td>${yourPrice}</td></tr>`;
+            }
+            
+            pricingHtml += '</table>';
+            document.getElementById('pricing-display').innerHTML = pricingHtml;
+        };
+
+        function testCurrency(testCurrency) {
+            const zarPrice = 352; // Pro monthly price
+            const convertedPrice = formatPrice(zarPrice, testCurrency);
+            
+            const results = document.getElementById('conversion-results');
+            results.innerHTML += `<p>R352 → ${convertedPrice}</p>`;
+        }
+
+        function openPricingPage() {
+            window.open('http://localhost:3000/pricing', '_blank');
+        }
+    </script>
+</body>
+</html>

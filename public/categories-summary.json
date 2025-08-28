@@ -1,0 +1,23 @@
+{
+  "timestamp": "2025-08-22T15:43:12.009Z",
+  "categoriesFound": [
+    {
+      "name": "floor lamps",
+      "displayName": "Floor lamps",
+      "modelCount": 15,
+      "sampleModel": "CGT_Floor_Lamp_001"
+    },
+    {
+      "name": "Lounge Chairs",
+      "displayName": "Lounge Chairs",
+      "modelCount": 8,
+      "sampleModel": "CGT_Lounge_Chair_001"
+    },
+    {
+      "name": "Side Tables",
+      "displayName": "Side Tables",
+      "modelCount": 3,
+      "sampleModel": "Side-Table_01-330pl"
+    }
+  ]
+}

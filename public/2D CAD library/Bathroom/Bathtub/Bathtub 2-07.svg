@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 66.9 66.9">
+  <defs>
+    <style>
+      .cls-1 {
+        stroke-width: 1.1px;
+      }
+
+      .cls-1, .cls-2 {
+        stroke: #000;
+        stroke-linecap: square;
+        stroke-miterlimit: 10;
+      }
+
+      .cls-1, .cls-2, .cls-3 {
+        fill: #fff;
+      }
+
+      .cls-2 {
+        stroke-width: .4px;
+      }
+    </style>
+  </defs>
+  <!-- Generator: Adobe Illustrator 28.6.0, SVG Export Plug-In . SVG Version: 1.2.0 Build 709)  -->
+  <g>
+    <g id="Layer_1">
+      <g>
+        <rect class="cls-1" x=".5" y=".5" width="65.8" height="65.8"/>
+        <rect class="cls-1" x="4.5" y="4.5" width="57.9" height="57.9" rx="4.4" ry="4.4" transform="translate(66.9 0) rotate(90)"/>
+        <path class="cls-2" d="M31.3,33.5c0-1.2,1-2.2,2.2-2.2s2.2,1,2.2,2.2-1,2.2-2.2,2.2-2.2-1-2.2-2.2Z"/>
+        <g>
+          <line class="cls-3" x1="15.1" y1="15.1" x2="27.2" y2="27.2"/>
+          <path d="M27.2,27.4s0,0-.1,0l-12.1-12.1c0,0,0-.2,0-.3s.2,0,.3,0l12.1,12.1c0,0,0,.2,0,.3s0,0-.1,0Z"/>
+        </g>
+        <g>
+          <line class="cls-3" x1="52.1" y1="15.1" x2="40" y2="27.2"/>
+          <path d="M40,27.4s0,0-.1,0c0,0,0-.2,0-.3l12.1-12.1c0,0,.2,0,.3,0s0,.2,0,.3l-12.1,12.1s0,0-.1,0Z"/>
+        </g>
+        <g>
+          <line class="cls-3" x1="51.5" y1="52.4" x2="39.5" y2="40.3"/>
+          <path d="M51.5,52.6s0,0-.1,0l-12.1-12.1c0,0,0-.2,0-.3s.2,0,.3,0l12.1,12.1c0,0,0,.2,0,.3s0,0-.1,0Z"/>
+        </g>
+        <g>
+          <line class="cls-3" x1="15.4" y1="52.6" x2="27.5" y2="40.5"/>
+          <path d="M15.4,52.8s0,0-.1,0c0,0,0-.2,0-.3l12.1-12.1c0,0,.2,0,.3,0,0,0,0,.2,0,.3l-12.1,12.1s0,0-.1,0Z"/>
+        </g>
+      </g>
+    </g>
+  </g>
+</svg>

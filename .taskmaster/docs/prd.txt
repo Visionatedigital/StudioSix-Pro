@@ -1,0 +1,86 @@
+# PRD: Stair Drawing & Rendering Tool (2D + 3D)
+
+## Overview
+The Stair Tool exists in the React app’s ribbon toolbar but currently has no functionality.  
+This PRD defines requirements to implement a lightweight but architectural staircase drawing and rendering feature for 2D drafting and 3D visualization.
+
+---
+
+## Objectives
+- Provide a **simple staircase drawing workflow** (straight stair first, extendable later).  
+- Support **2D representation** (plan + elevation) and **3D rendering**.  
+- Allow **editing risers, treads, and landings** after creation.  
+- Maintain **lightweight BIM-style functionality** without bloating the app.  
+
+---
+
+## Functional Requirements
+
+### 1. Stair Creation
+- User selects the **Stair Tool** from ribbon.
+- Click-drag or point-to-point input for defining stair run.
+- Auto-generate stair geometry with default values:
+  - Default riser height: `175mm`
+  - Default tread depth: `280mm`
+  - Default width: `1000mm`
+  - Default number of steps: auto-calculated based on input length and riser height.
+
+### 2. Parametric Editing
+- **Riser Height**: Editable numeric field (updates tread count automatically).
+- **Tread Depth**: Editable numeric field (updates total stair length).
+- **Stair Width**: Editable numeric field.
+- **Landing**: Option to insert a landing after a defined number of risers.
+- Live preview updates in 2D and 3D.
+
+### 3. 2D Representation
+- Plan view: show stair run with arrows, riser lines.
+- Elevation view: show risers and treads in profile.
+- Lineweights consistent with other drawing tools.
+
+### 4. 3D Representation
+- Extruded geometry:
+  - Treads (rectangular solids).
+  - Risers (vertical faces).
+  - Optional landing (rectangular slab).
+- Lightweight mesh representation for performance.
+- Materials: default concrete/wood texture.
+
+### 5. Selection & Editing
+- Click stair object to select.
+- Editable via properties panel:
+  - Riser height, tread depth, width, number of risers.
+  - Add/remove landing.
+- Drag handles for graphical adjustment in canvas.
+
+---
+
+## Non-Functional Requirements
+- **Performance**: Keep meshes low-poly and optimized.
+- **Cross-Platform**: Must run smoothly in browser (React + WebGL/Three.js).
+- **Interoperability**: Export to IFC/DXF includes stair as an object with riser/tread metadata.
+
+---
+
+## User Workflow Example
+1. User selects **Stair Tool** from toolbar.  
+2. Click start + end point in plan view.  
+3. Default staircase is generated with calculated risers.  
+4. User edits riser height = `160mm` → treads auto-update.  
+5. User inserts a landing after 8 risers → stair regenerates.  
+6. Switch to 3D → stairs visible as extruded geometry.  
+
+---
+
+## Future Extensions (Not in MVP)
+- Curved stairs, spiral stairs.  
+- Handrail and balustrade generation.  
+- Code compliance checker for riser/tread ratios.  
+
+---
+
+## Deliverables
+- **MVP Implementation**: Straight stair with editable risers, treads, landings (2D + 3D).  
+- **Properties Panel Integration**: Editing parameters live.  
+- **Export Support**: IFC/DXF with stair metadata.  
+
+---

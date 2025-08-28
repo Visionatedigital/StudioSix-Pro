@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 302.6 122.4">
+  <defs>
+    <style>
+      .cls-1 {
+        stroke-width: 1.1px;
+      }
+
+      .cls-1, .cls-2, .cls-3, .cls-4, .cls-5, .cls-6, .cls-7, .cls-8 {
+        stroke: #000;
+      }
+
+      .cls-1, .cls-2, .cls-3, .cls-4, .cls-6, .cls-7, .cls-8 {
+        fill: #fff;
+      }
+
+      .cls-1, .cls-2, .cls-3, .cls-5, .cls-6 {
+        stroke-miterlimit: 10;
+      }
+
+      .cls-1, .cls-4 {
+        stroke-linecap: square;
+      }
+
+      .cls-2, .cls-3, .cls-7, .cls-8 {
+        stroke-linecap: round;
+      }
+
+      .cls-2, .cls-6 {
+        stroke-width: 1.1px;
+      }
+
+      .cls-3, .cls-4, .cls-7 {
+        stroke-width: .7px;
+      }
+
+      .cls-4, .cls-7, .cls-8 {
+        stroke-linejoin: round;
+      }
+
+      .cls-5 {
+        fill: none;
+        stroke-width: .4px;
+      }
+
+      .cls-8 {
+        stroke-width: 1px;
+      }
+    </style>
+  </defs>
+  <!-- Generator: Adobe Illustrator 28.6.0, SVG Export Plug-In . SVG Version: 1.2.0 Build 709)  -->
+  <g>
+    <g id="Layer_1">
+      <g>
+        <g>
+          <rect class="cls-6" x="147.5" y=".5" width="55.2" height="45.2"/>
+          <rect class="cls-6" x="147.5" y="45.7" width="55.2" height="5"/>
+          <g>
+            <g>
+              <path class="cls-5" d="M163.4,46.7c-.6.2-1,.8-1,1.5s.4,1.3,1,1.5v-3.1Z"/>
+              <path class="cls-5" d="M164.7,46.7v3.1c.6-.2,1-.8,1-1.5s-.4-1.3-1-1.5Z"/>
+            </g>
+            <rect class="cls-5" x="163.4" y="46.2" width="1.3" height="4"/>
+          </g>
+          <g>
+            <g>
+              <path class="cls-5" d="M170.9,46.7c-.6.2-1,.8-1,1.5s.4,1.3,1,1.5v-3.1Z"/>
+              <path class="cls-5" d="M172.2,46.7v3.1c.6-.2,1-.8,1-1.5s-.4-1.3-1-1.5Z"/>
+            </g>
+            <rect class="cls-5" x="170.9" y="46.2" width="1.3" height="4"/>
+          </g>
+          <g>
+            <g>
+              <path class="cls-5" d="M178.4,46.7c-.6.2-1,.8-1,1.5s.4,1.3,1,1.5v-3.1Z"/>
+              <path class="cls-5" d="M179.7,46.7v3.1c.6-.2,1-.8,1-1.5s-.4-1.3-1-1.5Z"/>
+            </g>
+            <rect class="cls-5" x="178.4" y="46.2" width="1.3" height="4"/>
+          </g>
+          <g>
+            <g>
+              <path class="cls-5" d="M185.9,46.7c-.6.2-1,.8-1,1.5s.4,1.3,1,1.5v-3.1Z"/>
+              <path class="cls-5" d="M187.1,46.7v3.1c.6-.2,1-.8,1-1.5s-.4-1.3-1-1.5Z"/>
+            </g>
+            <rect class="cls-5" x="185.9" y="46.2" width="1.3" height="4"/>
+          </g>
+          <path class="cls-6" d="M182.9,11.5c0-2.5,2.1-4.5,4.6-4.4,2.5,0,4.5,2.1,4.4,4.6,0,2.5-2.1,4.5-4.6,4.4-2.5,0-4.5-2.1-4.4-4.6Z"/>
+          <path class="cls-6" d="M153.2,11.4c.1-4.7,4-8.4,8.7-8.3,4.7.1,8.4,4,8.3,8.7s-4,8.4-8.7,8.3c-4.7-.1-8.4-4-8.3-8.7Z"/>
+          <path class="cls-6" d="M197.6,31.8c-.1,5.6-4.8,10.1-10.4,9.9-5.6-.1-10.1-4.8-9.9-10.4.1-5.6,4.8-10.1,10.4-9.9,5.6.1,10.1,4.8,9.9,10.4Z"/>
+          <circle class="cls-6" cx="161.7" cy="31.6" r="6.8" transform="translate(22.8 120.1) rotate(-43.6)"/>
+        </g>
+        <g>
+          <rect class="cls-2" x="252.9" y=".5" width="50.1" height="50.1"/>
+          <rect class="cls-6" x="252.9" y="47.5" width="50.1" height="3.2"/>
+          <path d="M283.7,18.9l-4.5,5.9h0c0,0,7.1-.8,7.1-.8v3.2l-7.1-.8h0c0,0,4.5,5.7,4.5,5.7l-3,1.7-2.8-6.6h0l-3.1,6.6-2.7-1.7,4.5-5.7h0c0,0-7,.8-7,.8v-3.2l6.9.9h0c0,0-4.4-5.8-4.4-5.8l2.9-1.6,2.9,6.5h0l2.9-6.6,2.8,1.6Z"/>
+        </g>
+        <rect class="cls-2" x="202.8" y=".5" width="50.1" height="50.1"/>
+        <g>
+          <rect class="cls-2" x="1.5" y="71.7" width="50.1" height="50.1" transform="translate(-70.1 123.4) rotate(-90)"/>
+          <rect class="cls-6" x="25" y="95.1" width="50.1" height="3.2" transform="translate(-46.7 146.8) rotate(-90)"/>
+        </g>
+        <polygon class="cls-2" points="72.1 .6 72.1 50.7 51.7 71.7 1.5 71.7 1.5 .6 72.1 .6"/>
+        <g>
+          <path class="cls-8" d="M14.3,48.7L49,14c.5-.5,1.3-.8,2-.8h14.8c1.6,0,2.8,1.3,2.8,2.8v32.9c0,.8-.3,1.5-.8,2l-16.7,16.7c-.5.5-1.3.8-2,.8H16.3c-1.6,0-2.8-1.3-2.8-2.8v-14.8c0-.8.3-1.5.8-2Z"/>
+          <rect class="cls-8" x="31.5" y="27.8" width="27.9" height="34.3" rx="5" ry="5" transform="translate(-18.5 45.3) rotate(-45)"/>
+          <rect class="cls-8" x="31.4" y="34.1" width="28" height="21.6" rx="5" ry="5" transform="translate(45.1 -18.9) rotate(45)"/>
+          <path class="cls-8" d="M51.2,28.8l10.8,10.8c1.5,1.5,4.2.4,4.2-1.7v-19.4c0-1.3-1.1-2.4-2.4-2.4h-10.8c-1.3,0-2.4,1.1-2.4,2.4v8.7c0,.6.3,1.3.7,1.7Z"/>
+          <polygon class="cls-3" points="16.7 57 26.4 47.4 24 45 16.7 52.4 16.7 57"/>
+          <polygon class="cls-3" points="16.7 63.9 29.8 50.8 27.4 48.4 16.7 59.2 16.7 63.9"/>
+          <polygon class="cls-3" points="24.4 64.8 34.1 55.1 36.5 57.4 29.1 64.8 24.4 64.8"/>
+          <polygon class="cls-3" points="17.6 64.8 30.7 51.7 33 54 22.3 64.8 17.6 64.8"/>
+          <polygon class="cls-3" points="31.1 64.8 37.5 58.5 39.8 60.8 35.8 64.8 31.1 64.8"/>
+          <circle class="cls-4" cx="43.4" cy="37.4" r="3.5"/>
+          <path class="cls-4" d="M53.8,27.7c1.4,1.4,3.6,1.4,5,0s1.4-3.6,0-5c-1.4-1.4-3.6-1.4-5,0-1.4,1.4-1.4,3.6,0,5Z"/>
+          <path class="cls-4" d="M54.8,26.7c.8.8,2.2.8,3,0s.8-2.2,0-3c-.8-.8-2.2-.8-3,0-.8.8-.8,2.2,0,3Z"/>
+          <g>
+            <g>
+              <path class="cls-7" d="M44.7,20.7l-2.7,16.5c-.1.7.3,1.5,1.1,1.6.7.2,1.5-.3,1.7-1l4.7-16.1c-.2.5-4.8-.5-4.8-1Z"/>
+              <polygon class="cls-7" points="49.6 21.4 49.6 21.4 49.6 21.4 49.6 21.4"/>
+            </g>
+            <g>
+              <polygon class="cls-7" points="49.6 21.4 49.6 21.4 49.6 21.4 49.6 21.4"/>
+              <path class="cls-7" d="M48.5,23c-.5.3-2.6,6.9-3.3,6.7-.8-.2.3-6.8,0-7.5-.3-.5-.4-1-.4-1.5l-2.7,16.5c-.1.7.3,1.5,1.1,1.6.7.2,1.5-.3,1.7-1l4.7-16.1c-.2.5-.5.9-1,1.2Z"/>
+            </g>
+            <g>
+              <path class="cls-4" d="M47.9,18.6c-.2,0-.3,0-.5-.1h.3c0,0,.3.1.3.1Z"/>
+              <path class="cls-4" d="M45.1,22.2c.7,1.1,2.2,1.5,3.4.8,1.1-.7,1.5-2.2.8-3.4-.3-.5-.8-.8-1.3-1,0,0-.2,0-.3,0,0,0-.2,0-.3,0-.5,0-1.1,0-1.6.4-1.1.7-1.5,2.2-.8,3.4Z"/>
+              <path class="cls-4" d="M48,18.6s0,0,0,0h-.3c0,0,.2,0,.3,0Z"/>
+              <path class="cls-4" d="M47.4,18.5s0,0,0,0c0,0,.2,0,.3,0h-.3Z"/>
+            </g>
+          </g>
+        </g>
+        <rect class="cls-1" x="72.3" y=".6" width="75.2" height="49.9"/>
+      </g>
+    </g>
+  </g>
+</svg>

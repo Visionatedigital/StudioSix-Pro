@@ -335,7 +335,7 @@ const PropertyField = ({
         </label>
         {type === 'number' || type === 'integer' ? (
           <span className="text-xs text-gray-400">
-            {typeof value === 'number' ? value.toFixed(type === 'integer' ? 0 : 2) : value}{unit}
+            {typeof value === 'number' && !isNaN(value) ? value.toFixed(type === 'integer' ? 0 : 2) : (value || '0')}{unit}
           </span>
         ) : null}
       </div>

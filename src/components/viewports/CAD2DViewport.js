@@ -5,12 +5,18 @@
  * Shows top-down orthographic view of CAD objects with drafting capabilities
  */
 
-import React, { useRef, useEffect, useCallback, useState } from 'react';
+import React, { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import * as martinez from 'martinez-polygon-clipping';
 import standaloneCADEngine from '../../services/StandaloneCADEngine';
 import { wallEdgeDetector, SNAP_TYPES } from '../../utils/WallEdgeDetection';
 import { wallJoineryDebugger } from '../../utils/WallJoineryDebug';
 import ifcService from '../../services/IFCService';
+import * as Door2DRenderer from '../../plan2d/door2dRenderer';
+
+// Toggle architect3D debug logging for this viewport only
+const A3D_DEBUG = false;
+
 
 /**
  * CAD 2D Viewport Component
@@ -26,6 +32,8 @@ const CAD2DViewport = ({
   onDraftCurrentPointUpdate, // 🌉 COORDINATE BRIDGE: Callback to send snapped coordinates to App.js
   onIFCImport, // Callback to pass IFC data to parent for Xeokit display
   doorParams, // Door tool parameters for preview
+  architect3DService, // 🏗️ Architect3D Wall Service for advanced wall creation
+  onToolChange, // Callback to change the active tool
   style = {}
 }) => {
   const svgRef = useRef(null);
@@ -52,6 +60,23 @@ const CAD2DViewport = ({
   const [draftStartPoint, setDraftStartPoint] = useState(null);
   const [draftCurrentPoint, setDraftCurrentPoint] = useState(null);
   const [draftPreview, setDraftPreview] = useState(null);
+
+  // Door placement cursor tracking
+  const [cursorPosition, setCursorPosition] = useState({ x: 0, y: 0 });
+  
+  // 2D CAD Block placement state
+  const [pendingCADBlock, setPendingCADBlock] = useState(null);
+  const [cadBlockCursorPos, setCadBlockCursorPos] = useState({ x: 0, y: 0 });
+  const [cadBlockSVGContent, setCadBlockSVGContent] = useState('');
+  const cadBlockGhostContent = useMemo(() => {
+    if (!cadBlockSVGContent) return '';
+    try {
+      // Strip outer <svg> wrapper to safely inject into current SVG
+      return cadBlockSVGContent.replace(/<\/?svg[^>]*>/g, '');
+    } catch {
+      return cadBlockSVGContent;
+    }
+  }, [cadBlockSVGContent]);
 
   // Unified Element Selection System
   const detectElementType = useCallback((element) => {
@@ -310,6 +335,89 @@ const CAD2DViewport = ({
       }
     };
   }, [importIFCFile]);
+
+  // 2D CAD Block placement functions
+  const startSVGPlacement = useCallback(async (blockData) => {
+    console.log('🎨 CAD2DViewport: Starting SVG placement for:', blockData.name);
+    
+    try {
+      // Load SVG content
+      console.log('📥 Loading SVG content from:', blockData.path);
+      const response = await fetch(blockData.path);
+      if (!response.ok) {
+        throw new Error(`Failed to load SVG: ${response.statusText}`);
+      }
+      const svgContent = await response.text();
+      
+      // Set up placement state
+      setPendingCADBlock(blockData);
+      setCadBlockSVGContent(svgContent);
+      setCadBlockCursorPos({ x: 0, y: 0 });
+      
+      console.log('✅ CAD2DViewport: SVG placement ready - cursor will follow mouse until clicked');
+      
+    } catch (error) {
+      console.error('❌ Failed to start SVG placement:', error);
+      setPendingCADBlock(null);
+      setCadBlockSVGContent('');
+    }
+  }, []);
+
+  const completeSVGPlacement = useCallback((worldPosition) => {
+    if (!pendingCADBlock) return;
+    
+    console.log('🎯 CAD2DViewport: Placing SVG block at position:', worldPosition);
+    
+    // Create a new 2D CAD object
+    const cadBlock = {
+      id: `cad2d-block-${Date.now()}`,
+      type: '2d-cad-block',
+      name: pendingCADBlock.name,
+      position: { x: worldPosition.x, y: worldPosition.y, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      category: pendingCADBlock.category,
+      subcategory: pendingCADBlock.subcategory,
+      svgPath: pendingCADBlock.path,
+      svgContent: cadBlockSVGContent,
+      scale: { x: 1, y: 1, z: 1 },
+      visible: true
+    };
+    
+    // Add to objects list for rendering
+    setObjects(prevObjects => [...prevObjects, cadBlock]);
+    
+    // Also add to standalone CAD engine
+    standaloneCADEngine.addObject(cadBlock);
+    
+    // Clear placement state
+    setPendingCADBlock(null);
+    setCadBlockSVGContent('');
+    setCadBlockCursorPos({ x: 0, y: 0 });
+    
+    console.log('✅ CAD2DViewport: SVG block placed successfully:', cadBlock.name);
+    
+    return cadBlock;
+  }, [pendingCADBlock, cadBlockSVGContent]);
+
+  // Expose placement functions to parent component
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.cad2DViewportRef = { current: { startSVGPlacement } };
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        delete window.cad2DViewportRef;
+      }
+    };
+  }, [startSVGPlacement]);
+
+  // Check for pending CAD block on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.pendingCAD2DBlock) {
+      startSVGPlacement(window.pendingCAD2DBlock);
+      delete window.pendingCAD2DBlock;
+    }
+  }, [startSVGPlacement]);
   
   // Continuous drawing state for room creation
   const [isContinuousDrawing, setIsContinuousDrawing] = useState(false);
@@ -325,18 +433,16 @@ const CAD2DViewport = ({
 
   // Create unified element handlers (defined after state declarations to avoid hoisting issues)
   const createUnifiedElementHandlers = useCallback((element) => {
-    // Disable wall hover handlers when door tool is active for placement
+    // Disable wall selection when door tool is active for placement
     if (selectedTool === 'door' && element.type === 'wall') {
       return {
         onClick: (e) => {
           e.stopPropagation();
-          // Allow wall selection only if not in door placement mode
-          if (doorPlacementStep === 0) {
-            handleElementSelection(element);
-          }
+          // Don't select walls when door tool is active - let the SVG mouse handler take care of door placement
+          window.console.warn('🚪 Wall clicked but door tool is active - ignoring wall selection');
         },
-        style: { cursor: selectedTool === 'door' ? 'crosshair' : 'pointer' },
-        className: 'selectable-element'
+        style: { cursor: 'crosshair' },
+        className: 'door-placement-target'
       };
     }
     
@@ -383,66 +489,178 @@ const CAD2DViewport = ({
     }
   }, [selectedTool, doorPlacementStep]);
 
+  // Sanity checks for debugging
+  useEffect(() => {
+    console.warn("👀 CAD2DViewport mounted");
+    return () => console.warn("👋 CAD2DViewport unmounted");
+  }, []);
+
+  useEffect(() => {
+    console.warn("🔁 objects changed →", objects.length);
+    // Also check if objects contains doors
+    const doors = objects.filter(obj => obj.type === 'door');
+    if (doors.length > 0) {
+      console.warn("🚪 DOORS IN OBJECTS STATE:", doors.map(d => d.id));
+    }
+  }, [objects]);
+
   // Door tool workflow management
   useEffect(() => {
     if (selectedTool === 'door') {
-      console.log('🚪 Door tool selected, current step:', doorPlacementStep);
-      // Step 0: Hover and preview (no automatic advancement)
-      // Step 1: Position confirmed, waiting for swing direction
-      // Step 2: Swing direction confirmed, ready to place
+      // Automatically set to step 1 when door tool is activated
+      console.log('🚪 Door tool useEffect: setting step to 1, current step:', doorPlacementStep);
+      setDoorPlacementStep(1);
+      window.console.warn('🚪 Door tool ready for placement');
+    } else {
+      // Reset step when switching away from door tool
+      setDoorPlacementStep(0);
     }
-  }, [selectedTool, doorPlacementStep]);
+  }, [selectedTool]);
+
+  // Reset cursor when switching away from opening tool
+  useEffect(() => {
+    if (svgRef.current && selectedTool !== 'opening') {
+      svgRef.current.style.cursor = 'default';
+    }
+  }, [selectedTool]);
+
+  // Calculate proper wall intersection points for corner joinery
+  const calculateWallIntersections = useCallback((points, wallThickness) => {
+    if (points.length <= 2) return points;
+    
+    console.log('🎯 Calculating wall intersections for proper corners...');
+    const adjustedPoints = [...points];
+    const halfThickness = wallThickness * 0.5;
+    
+    // Process each interior point (not the first or last)
+    for (let i = 1; i < points.length - 1; i++) {
+      const prevPoint = points[i - 1];
+      const currentPoint = points[i];
+      const nextPoint = points[i + 1];
+      
+      // Calculate wall directions
+      const dir1 = {
+        x: currentPoint.x - prevPoint.x,
+        z: currentPoint.z - prevPoint.z
+      };
+      const dir2 = {
+        x: nextPoint.x - currentPoint.x,
+        z: nextPoint.z - currentPoint.z
+      };
+      
+      // Normalize directions
+      const len1 = Math.sqrt(dir1.x * dir1.x + dir1.z * dir1.z);
+      const len2 = Math.sqrt(dir2.x * dir2.x + dir2.z * dir2.z);
+      
+      if (len1 > 0 && len2 > 0) {
+        dir1.x /= len1;
+        dir1.z /= len1;
+        dir2.x /= len2;
+        dir2.z /= len2;
+        
+        // Calculate wall centerlines extended
+        const line1Start = {
+          x: prevPoint.x - dir1.x * halfThickness,
+          z: prevPoint.z - dir1.z * halfThickness
+        };
+        const line1End = {
+          x: currentPoint.x + dir1.x * halfThickness,
+          z: currentPoint.z + dir1.z * halfThickness
+        };
+        
+        const line2Start = {
+          x: currentPoint.x - dir2.x * halfThickness,
+          z: currentPoint.z - dir2.z * halfThickness
+        };
+        const line2End = {
+          x: nextPoint.x + dir2.x * halfThickness,
+          z: nextPoint.z + dir2.z * halfThickness
+        };
+        
+        // Find intersection of the two wall centerlines
+        const intersection = lineIntersection(line1Start, line1End, line2Start, line2End);
+        
+        if (intersection) {
+          console.log(`🎯 Adjusted corner ${i}: (${currentPoint.x.toFixed(3)}, ${currentPoint.z.toFixed(3)}) -> (${intersection.x.toFixed(3)}, ${intersection.z.toFixed(3)})`);
+          adjustedPoints[i] = {
+            x: intersection.x,
+            y: currentPoint.y, // Keep same height
+            z: intersection.z
+          };
+        }
+      }
+    }
+    
+    return adjustedPoints;
+  }, []);
+  
+  // Helper function to find intersection of two lines
+  const lineIntersection = useCallback((p1, p2, p3, p4) => {
+    const x1 = p1.x, y1 = p1.z, x2 = p2.x, y2 = p2.z;
+    const x3 = p3.x, y3 = p3.z, x4 = p4.x, y4 = p4.z;
+    
+    const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denom) < 0.0001) {
+      // Lines are parallel
+      return null;
+    }
+    
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+    
+    return {
+      x: x1 + t * (x2 - x1),
+      z: y1 + t * (y2 - y1)
+    };
+  }, []);
 
   // Function to create walls with proper joinery
   const createWallsWithJoinery = (points) => {
     if (points.length < 2) return [];
     
-    console.log('🏗️ Creating walls with joinery for points:', points);
+    console.log('🏗️ Creating walls with proper corner joinery for points:', points);
     const createdWalls = [];
+    const wallThickness = 0.2; // Wall thickness in meters
     
-    // Create walls between consecutive points
-    for (let i = 0; i < points.length - 1; i++) {
-      const startPoint = points[i];
-      const endPoint = points[i + 1];
+    // Calculate proper intersection points for corner joinery
+    const adjustedPoints = calculateWallIntersections(points, wallThickness);
+    
+    // Create walls between adjusted intersection points
+    for (let i = 0; i < adjustedPoints.length - 1; i++) {
+      const startPoint = adjustedPoints[i];
+      const endPoint = adjustedPoints[i + 1];
       
+      // Calculate wall direction vector
       const deltaX = endPoint.x - startPoint.x;
       const deltaZ = endPoint.z - startPoint.z;
       const length = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
       
       if (length > 0.1) { // Minimum wall length
-        console.log(`🧱 WALL CREATION DEBUG - Segment ${i + 1}:`, {
-          'startPoint (2D drawing)': {
+        console.log(`🧱 WALL CREATION DEBUG - Segment ${i + 1} (PROPER CORNERS):`, {
+          'length': length.toFixed(3),
+          'startPoint (adjusted)': {
             x: startPoint.x.toFixed(3),
             y: startPoint.y.toFixed(3),
             z: startPoint.z.toFixed(3)
           },
-          'endPoint (2D drawing)': {
+          'endPoint (adjusted)': {
             x: endPoint.x.toFixed(3),
             y: endPoint.y.toFixed(3),
             z: endPoint.z.toFixed(3)
-          },
-          'calculated length': length.toFixed(3),
-          'wall parameters': {
-            length: length,
-            height: 2.5,
-            thickness: 0.2,
-            material: 'concrete',
-            startPoint: startPoint,
-            endPoint: endPoint
           }
         });
         
         const wallId = standaloneCADEngine.createObject('wall', {
           length: length,
           height: 2.5,
-          thickness: 0.2,
+          thickness: wallThickness,
           material: 'concrete',
           startPoint: startPoint,
           endPoint: endPoint,
-          autoExtend: true  // Enable auto-extend for better corner connections
+          autoExtend: true,  // Enable auto-extend for better corner connections
+          forceCornerExtension: true  // Force extension for proper corner joinery
         });
         
-        console.log(`🧱 WALL CREATED: ID ${wallId} from 2D drawing coordinates`);
+        console.log(`🧱 WALL CREATED: ID ${wallId} with proper corner intersection`);
         
         createdWalls.push({
           id: wallId,
@@ -517,7 +735,6 @@ const CAD2DViewport = ({
 
   // Function to reset door placement workflow
   const resetDoorPlacement = () => {
-    console.log('🚪 Resetting door placement workflow');
     setDoorPlacementStep(0);
     setDoorPlacementData(null);
     setDoorSwingDirection('right');
@@ -642,7 +859,7 @@ const CAD2DViewport = ({
 
   // Tools that support click-and-drag drafting
   const isDraftingTool = useCallback((tool) => {
-    return ['wall', 'beam', 'slab'].includes(tool);
+    return ['wall', 'beam', 'slab', 'ramp'].includes(tool);
   }, []);
 
   // Tools that support wall placement
@@ -701,6 +918,13 @@ const CAD2DViewport = ({
         x: endPoint.x,
         y: endPoint.z
       };
+      
+      // Validate required variables before using
+      if (!point || typeof point.x !== 'number' || typeof point.y !== 'number' ||
+          !centerStart || typeof centerStart.x !== 'number' || typeof centerStart.y !== 'number' ||
+          !centerEnd || typeof centerEnd.x !== 'number' || typeof centerEnd.y !== 'number') {
+        continue;
+      }
       
       // Project point onto wall center line
       const toPoint = {
@@ -766,9 +990,11 @@ const CAD2DViewport = ({
 
   // Debug: Log current tool selection and update wall selection mode
   useEffect(() => {
-    console.log(`🔧 2D Viewport: Selected tool changed to "${selectedTool}"`);
-    console.log(`🎯 2D Viewport: Is drafting tool? ${isDraftingTool(selectedTool)}`);
-    console.log(`🏗️ 2D Viewport: Is wall placement tool? ${isWallPlacementTool(selectedTool)}`);
+    // Initialize cursor position for door tool
+    if (selectedTool === 'door') {
+      setCursorPosition({ x: 0, y: 0 });
+      window.console.warn('🚪 Door tool activated');
+    }
     
     // Enable wall selection mode for door/window tools and wall tool
     const isWallMode = isWallPlacementTool(selectedTool) || selectedTool === 'wall';
@@ -778,7 +1004,9 @@ const CAD2DViewport = ({
       // Mark all walls as selectable when entering wall selection mode
       const wallIds = new Set(objects.filter(obj => obj.type === 'wall').map(obj => obj.id));
       setSelectableWalls(wallIds);
-      console.log('🏗️ Wall selection mode enabled. Selectable walls:', wallIds.size);
+      if (selectedTool === 'door') {
+        window.console.warn('🚪 Wall selection mode enabled for door placement. Walls available:', wallIds.size);
+      }
     } else {
       setSelectableWalls(new Set());
     }
@@ -792,35 +1020,127 @@ const CAD2DViewport = ({
   // Convert 3D position to 2D plan view (X-Z plane, Y is height)
   // Using standard CAD coordinate system: 1 unit = 1 meter
   const to2D = useCallback((pos3d) => {
+    try {
+      // Defensive: accept inputs shaped as XY (architect3d) or XZ (app world)
+      if (!pos3d || (typeof pos3d.x !== 'number' && typeof pos3d.z !== 'number')) {
+        return { x: 400, y: 300 };
+      }
+      
     const scale = 100 * zoom; // Increased scale for more intuitive drawing (100px per meter)
-    return {
-      x: 400 + (pos3d.x * scale) - (viewCenter.x * scale),
-      y: 300 + (pos3d.z * scale) - (viewCenter.y * scale) // Direct Z mapping (no flip)
-    };
+      if (!isFinite(scale) || scale === 0) {
+        console.warn('🔧 to2D: Invalid scale', { zoom, scale });
+        return { x: 400, y: 300 };
+      }
+      
+      const x = typeof pos3d.x === 'number' ? pos3d.x : 0;
+      // If z is missing but y exists (architect3d XY), treat y as z
+      const z = typeof pos3d.z === 'number' ? pos3d.z : (typeof pos3d.y === 'number' ? pos3d.y : 0);
+      
+      const result = {
+        x: 400 + Math.round((x - viewCenter.x) * scale),
+        y: 300 + Math.round((z - viewCenter.y) * scale)
+      };
+      
+      if (!isFinite(result.x) || !isFinite(result.y)) {
+        console.warn('🔧 to2D: Non-finite result', { pos3d, result, viewCenter, scale });
+        return { x: 400, y: 300 };
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('🔧 to2D: Exception caught', error, { pos3d, viewCenter, zoom });
+      return { x: 400, y: 300 };
+    }
   }, [viewCenter, zoom]);
 
   // Convert 2D click back to 3D position
   const to3D = useCallback((pos2d) => {
     const scale = 100 * zoom; // Match the scale above
-    const worldPos = {
-      x: (pos2d.x - 400 + (viewCenter.x * scale)) / scale,
-      y: 0, // Default ground level
-      z: (pos2d.y - 300 + (viewCenter.y * scale)) / scale // Direct mapping (no flip)
-    };
-    
-    console.log('🔄 COORDINATE TRANSFORM DEBUG:', {
-      '2D screen pos': pos2d,
-      'zoom': zoom,
-      'scale': scale,
-      'viewCenter': viewCenter,
-      '3D world pos': worldPos
-    });
+    const xWorld = viewCenter.x + (pos2d.x - 400) / scale;
+    const zWorld = viewCenter.y + (pos2d.y - 300) / scale;
+    const worldPos = { x: xWorld, y: 0, z: zWorld };
+
+    // Optional: enable this if you need transform diagnostics
+    // if (A3D_DEBUG) console.log('🔄 COORDINATE TRANSFORM DEBUG:', { pos2d, zoom, scale, viewCenter, worldPos });
     
     return worldPos;
   }, [viewCenter, zoom]);
 
+  // Helper function to find the nearest wall to a position
+  const findNearestWall = useCallback((position) => {
+    const walls = objects.filter(obj => obj.type === 'wall');
+    let nearestWall = null;
+    let minDistance = Infinity;
+    
+    walls.forEach(wall => {
+      if (!wall.startPoint || !wall.endPoint) return;
+      
+      // Calculate distance from position to wall line segment
+      const wallStart = { x: wall.startPoint.x, z: wall.startPoint.z };
+      const wallEnd = { x: wall.endPoint.x, z: wall.endPoint.z };
+      const pos = { x: position.x, z: position.z };
+      
+      // Calculate closest point on line segment to position
+      const A = pos.x - wallStart.x;
+      const B = pos.z - wallStart.z;
+      const C = wallEnd.x - wallStart.x;
+      const D = wallEnd.z - wallStart.z;
+      
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      
+      if (lenSq === 0) return; // Degenerate wall
+      
+      let param = dot / lenSq;
+      param = Math.max(0, Math.min(1, param)); // Clamp to line segment
+      
+      const closestPoint = {
+        x: wallStart.x + param * C,
+        z: wallStart.z + param * D
+      };
+      
+      const distance = Math.sqrt(
+        Math.pow(pos.x - closestPoint.x, 2) + 
+        Math.pow(pos.z - closestPoint.z, 2)
+      );
+      
+      // Consider wall if click is within reasonable distance (1 meter)
+      if (distance < minDistance && distance <= 1.0) {
+        minDistance = distance;
+        nearestWall = wall;
+      }
+    });
+    
+    return nearestWall;
+  }, [objects]);
+
   // Handle SVG mouse down for drafting or selection
   const handleSvgMouseDown = useCallback((event) => {
+    window.console.warn('🖱️ SVG MOUSE DOWN EVENT START:', {
+      selectedTool: selectedTool,
+      button: event.button,
+      ctrlKey: event.ctrlKey,
+      metaKey: event.metaKey,
+      timestamp: Date.now()
+    });
+    
+    // Prevent tool switching during door placement
+    if (selectedTool === 'door' && doorPlacementStep >= 1) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    // Debug door tool clicks
+    if (selectedTool === 'door') {
+      window.console.warn('🚪 DOOR TOOL SVG CLICK:', { 
+        tool: selectedTool, 
+        step: doorPlacementStep,
+        wallMode: wallSelectionMode,
+        hoveredEdge: !!hoveredWallEdge,
+        hoveredEdgeId: hoveredWallEdge?.wallId || 'none'
+      });
+    }
+
     // Handle panning first
     if (event.button === 1 || (event.button === 0 && (event.ctrlKey || event.metaKey))) {
       event.preventDefault();
@@ -854,10 +1174,12 @@ const CAD2DViewport = ({
 
     if (clickedObject) {
       // Select object using unified system
+      window.console.warn('🎯 CLICKED ON OBJECT:', clickedObject.id, clickedObject.type);
       handleElementSelection(clickedObject);
-    } else if (wallSelectionMode && hoveredWallEdge) {
+    } else if (wallSelectionMode && selectedTool === 'door') {
+      window.console.warn('🎯 WALL SELECTION MODE + HOVERED WALL EDGE PATH');
       // Handle professional door/window placement workflow
-      console.log('🚪 Wall edge clicked for', selectedTool, 'placement');
+      window.console.warn('🚪 Wall edge clicked for', selectedTool, 'placement');
       
       const worldPos = to3D(clickPos);
       const queryPoint = { x: worldPos.x, y: worldPos.z };
@@ -871,59 +1193,72 @@ const CAD2DViewport = ({
       const dims = objectDimensions[selectedTool] || objectDimensions.door;
         
         if (selectedTool === 'door') {
-        // For doors, use our custom wall surface detection
-        if (hoveredWallEdge) {
-          console.log('✅ Valid door placement found on wall surface:', hoveredWallEdge.wallId);
+        // For doors, detect wall surface at click point
+        const clickWallEdge = findWallSurfaceAtPoint(queryPoint, objects);
+        window.console.warn('🚪 Wall surface at click:', !!clickWallEdge);
+        
+        if (clickWallEdge) {
+          window.console.warn('✅ Valid door placement found on wall surface:', clickWallEdge.wallId);
           // Professional door placement workflow
           if (doorPlacementStep === 1) {
-            // Step 1: Store door position and move to swing direction selection
-            console.log('🚪 Step 1 complete: Door position selected, now choose swing direction');
-            setDoorPlacementData({
-              dims,
-              wallId: hoveredWallEdge.wallId,
-              position: {
-                x: hoveredWallEdge.closestPoint.x,
-                y: dims.height / 2,
-                z: hoveredWallEdge.closestPoint.y
-              },
-              rotation: hoveredWallEdge.edge.angle,
-              wallWidth: hoveredWallEdge.wallWidth || 0.2,
-              wallCenter: hoveredWallEdge.wallCenter,
-              projectionRatio: hoveredWallEdge.projectionRatio || 0.5
-            });
-            setDoorPlacementStep(2);
-          } else if (doorPlacementStep === 2) {
-            // Step 2: Final door creation with swing direction
-            console.log('🚪 Step 2 complete: Creating door with swing direction:', doorSwingDirection);
-            
+            // Step 1: Immediate door creation with default swing direction (single-click placement)
             // Use door parameters from tool if available
             const actualDoorParams = doorParams || {};
+            window.console.warn('🚪 Creating door now with params:', actualDoorParams);
             const doorId = standaloneCADEngine.createObject('door', {
-              width: actualDoorParams.width || doorPlacementData.dims.width,
-              height: actualDoorParams.height || doorPlacementData.dims.height,
-              thickness: actualDoorParams.thickness || doorPlacementData.dims.thickness,
-              wallId: doorPlacementData.wallId,
-              position: doorPlacementData.position,
+              width: actualDoorParams.width || dims.width,
+              height: actualDoorParams.height || dims.height,
+              thickness: actualDoorParams.thickness || dims.thickness,
+              wallId: clickWallEdge.wallId,
+              position: {
+                x: clickWallEdge.closestPoint.x,
+                y: dims.height / 2,
+                z: clickWallEdge.closestPoint.y
+              },
               rotation: {
                 x: 0,
-                y: doorPlacementData.rotation,
+                y: clickWallEdge.edge.angle,
                 z: 0
               },
               material: actualDoorParams.material || 'wood',
               openingDirection: actualDoorParams.openingDirection || doorSwingDirection,
               frameWidth: actualDoorParams.frameWidth || 0.05,
               insertionMode: 'insert_in_wall',
-              hostWallId: doorPlacementData.wallId
+              hostWallId: clickWallEdge.wallId
             });
             
-            console.log(`✅ Door placed with swing direction "${doorSwingDirection}" - ID:`, doorId);
+            window.console.warn(`✅ Door placed with single click - ID:`, doorId);
             
-            // Reset door placement workflow
-            resetDoorPlacement();
+            // Force refresh objects to show new door
+            if (doorId) {
+              const currentObjects = standaloneCADEngine.getAllObjects();
+              window.console.warn('🚪 Refreshing objects after door creation. Total objects:', currentObjects.length);
+              window.console.warn('🚪 Door object:', currentObjects.find(obj => obj.id === doorId));
+              window.console.warn('🚪 ALL OBJECTS:', currentObjects.map(obj => ({ id: obj.id, type: obj.type })));
+              
+              // Use flushSync to force React to re-render immediately
+              console.warn('🔥 CALLING setObjects with flushSync, objects:', currentObjects.length);
+              flushSync(() => {
+                setObjects([...currentObjects]);
+                console.warn('🔥 setObjects called inside flushSync');
+              });
+              console.warn('🔥 flushSync completed');
+            }
+            
+            // Clear placement data but keep door tool active for continuous placement
+            setDoorPlacementData(null);
+            setDoorSwingDirection('right');
             
             // Clear hover state after placement
             setHoveredWallEdge(null);
             setNearbyEdges([]);
+            
+            // Keep door tool active (step 1) for multiple door placements
+            // User can switch to pointer tool manually if desired
+          } else {
+            window.console.warn('🚪 No hovered wall edge found for door placement');
+            window.console.warn('🚪 Available walls:', objects.filter(obj => obj.type === 'wall').length);
+            window.console.warn('🚪 Wall selection mode:', wallSelectionMode);
           }
           }
         } else {
@@ -966,14 +1301,61 @@ const CAD2DViewport = ({
           console.warn('❌ Invalid placement for non-door tool');
         }
       }
+    } else {
+      window.console.warn('🎯 NO CLICK CONDITIONS MET:', {
+        clickedObject: !!clickedObject,
+        wallSelectionMode: wallSelectionMode,
+        hoveredWallEdge: !!hoveredWallEdge,
+        selectedTool: selectedTool
+      });
+    }
+
+    if (selectedTool === 'opening') {
+      // 🕳️ OPENING: Handle opening tool
+      console.log('🕳️ OPENING: Opening tool clicked in 2D viewport');
+      
+      const worldPos3D = to3D(clickPos);
+      console.log('🕳️ OPENING: Click position:', { clickPos, worldPos3D });
+      
+      // Find the nearest wall to create an opening
+      const nearestWall = findNearestWall(worldPos3D);
+      if (nearestWall) {
+        console.log('🕳️ OPENING: Found nearest wall:', nearestWall.id);
+        
+        // Create an opening object on the wall
+        const opening = {
+          id: `opening_${Date.now()}`,
+          type: 'opening',
+          wallId: nearestWall.id,
+          position: worldPos3D,
+          width: 1.0, // Default 1m wide opening
+          height: 2.0, // Default 2m high opening
+          created: new Date().toISOString()
+        };
+        
+        // Add opening to the CAD engine
+        const addedOpening = standaloneCADEngine.addObject(opening);
+        
+        if (addedOpening) {
+          console.log('🕳️ OPENING: Created opening:', opening.id);
+          
+          // Force objects refresh to show the opening
+          const currentObjects = standaloneCADEngine.getAllObjects();
+          setObjects([...currentObjects]);
+        } else {
+          console.warn('🕳️ OPENING: Failed to add opening to CAD engine');
+        }
+      } else {
+        console.warn('🕳️ OPENING: No wall found near click position');
+      }
     } else if (selectedTool && selectedTool !== 'pointer') {
       console.log(`🖱️ 2D Viewport: Mouse down with tool "${selectedTool}"`);
       
       if (isDraftingTool(selectedTool)) {
         let worldPos = to3D(clickPos);
         
-        // Apply shift lock constraint for wall drawing if shift is held
-        if (selectedTool === 'wall' && event.shiftKey && draftStartPoint) {
+        // Apply automatic angle snapping for wall drawing (same as mouse move logic)
+        if (selectedTool === 'wall' && draftStartPoint) {
           const deltaX = worldPos.x - draftStartPoint.x;
           const deltaZ = worldPos.z - draftStartPoint.z;
           const distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
@@ -985,67 +1367,67 @@ const CAD2DViewport = ({
             // Normalize angle to 0-2π range
             if (angle < 0) angle += 2 * Math.PI;
             
-            // Define snap angles (in radians) with exact values
-            const snapAngles = [
+            // Same cardinal-only angle snapping as mouse move
+            const cardinalAngles = [
               0,                           // 0° - East (horizontal right)
-              Math.PI / 4,                 // 45° - Northeast
-              Math.PI / 2,                 // 90° - North (vertical up)
-              3 * Math.PI / 4,             // 135° - Northwest
+              Math.PI / 2,                 // 90° - North (vertical up)  
               Math.PI,                     // 180° - West (horizontal left)
-              5 * Math.PI / 4,             // 225° - Southwest
-              3 * Math.PI / 2,             // 270° - South (vertical down)
-              7 * Math.PI / 4              // 315° - Southeast
+              3 * Math.PI / 2              // 270° - South (vertical down)
             ];
             
-            // Find the closest snap angle with improved precision
-            let snappedAngle = snapAngles[0];
-            let minDiff = Math.abs(angle - snapAngles[0]);
+            // Gentle tolerance for cardinal directions only - no diagonal snapping
+            const cardinalTolerance = Math.PI / 9; // 20 degree tolerance for horizontal/vertical only
             
-            for (const snapAngle of snapAngles) {
-              // Calculate difference considering circular nature of angles
+            let snappedAngle = null;
+            
+            // Check cardinal directions only - users have full freedom for angled walls
+            for (const snapAngle of cardinalAngles) {
               let diff = Math.abs(angle - snapAngle);
               if (diff > Math.PI) {
                 diff = 2 * Math.PI - diff;
               }
               
-              if (diff < minDiff) {
-                minDiff = diff;
+              if (diff <= cardinalTolerance || (event.shiftKey)) {
                 snappedAngle = snapAngle;
+                break;
               }
             }
             
-            // Round to exact cardinal/diagonal directions for perfect precision
-            const tolerance = 0.01; // Small tolerance for float comparison
-            if (Math.abs(snappedAngle - 0) < tolerance || Math.abs(snappedAngle - 2 * Math.PI) < tolerance) {
-              snappedAngle = 0; // Perfect horizontal (right)
-            } else if (Math.abs(snappedAngle - Math.PI) < tolerance) {
-              snappedAngle = Math.PI; // Perfect horizontal (left)
-            } else if (Math.abs(snappedAngle - Math.PI / 2) < tolerance) {
-              snappedAngle = Math.PI / 2; // Perfect vertical (up)
-            } else if (Math.abs(snappedAngle - 3 * Math.PI / 2) < tolerance) {
-              snappedAngle = 3 * Math.PI / 2; // Perfect vertical (down)
+            // Apply snapping if found (same logic as mouse move)
+            if (snappedAngle !== null) {
+              // Round to exact cardinal directions for perfect precision
+              const tolerance = 0.01; // Small tolerance for float comparison
+              if (Math.abs(snappedAngle - 0) < tolerance || Math.abs(snappedAngle - 2 * Math.PI) < tolerance) {
+                snappedAngle = 0; // Perfect horizontal (right)
+              } else if (Math.abs(snappedAngle - Math.PI) < tolerance) {
+                snappedAngle = Math.PI; // Perfect horizontal (left)
+              } else if (Math.abs(snappedAngle - Math.PI / 2) < tolerance) {
+                snappedAngle = Math.PI / 2; // Perfect vertical (up)
+              } else if (Math.abs(snappedAngle - 3 * Math.PI / 2) < tolerance) {
+                snappedAngle = 3 * Math.PI / 2; // Perfect vertical (down)
+              }
+              
+              // Calculate snapped position with high precision
+              const cosAngle = Math.cos(snappedAngle);
+              const sinAngle = Math.sin(snappedAngle);
+              
+              // Round to avoid floating point drift for cardinal directions
+              const precision = 0.0001;
+              const roundedCos = Math.abs(cosAngle) < precision ? 0 : (Math.abs(Math.abs(cosAngle) - 1) < precision ? Math.sign(cosAngle) : cosAngle);
+              const roundedSin = Math.abs(sinAngle) < precision ? 0 : (Math.abs(Math.abs(sinAngle) - 1) < precision ? Math.sign(sinAngle) : sinAngle);
+              
+              worldPos = {
+                x: Number((draftStartPoint.x + distance * roundedCos).toFixed(6)),
+                y: worldPos.y, // Keep Y unchanged
+                z: Number((draftStartPoint.z + distance * roundedSin).toFixed(6))
+              };
+              
+              console.log('🎯 AUTOMATIC ANGLE SNAP ON CLICK:', {
+                'original cursor pos': to3D(clickPos),
+                'snapped pos': worldPos,
+                'snapped angle (deg)': (snappedAngle * 180 / Math.PI).toFixed(0)
+              });
             }
-            
-            // Calculate snapped position with high precision
-            const cosAngle = Math.cos(snappedAngle);
-            const sinAngle = Math.sin(snappedAngle);
-            
-            // Round to avoid floating point drift for cardinal directions
-            const precision = 0.0001;
-            const roundedCos = Math.abs(cosAngle) < precision ? 0 : (Math.abs(Math.abs(cosAngle) - 1) < precision ? Math.sign(cosAngle) : cosAngle);
-            const roundedSin = Math.abs(sinAngle) < precision ? 0 : (Math.abs(Math.abs(sinAngle) - 1) < precision ? Math.sign(sinAngle) : sinAngle);
-            
-            worldPos = {
-              x: Number((draftStartPoint.x + distance * roundedCos).toFixed(6)),
-              y: worldPos.y, // Keep Y unchanged
-              z: Number((draftStartPoint.z + distance * roundedSin).toFixed(6))
-            };
-            
-            console.log('🔒 SHIFT LOCK APPLIED ON CLICK:', {
-              'original cursor pos': to3D(clickPos),
-              'constrained pos': worldPos,
-              'snapped angle (deg)': (snappedAngle * 180 / Math.PI).toFixed(0)
-            });
           }
         }
         
@@ -1176,6 +1558,58 @@ const CAD2DViewport = ({
             setDraftStartPoint(null);
             setDraftCurrentPoint(null);
             setDraftPreview(null);
+          } else if (selectedTool === 'ramp') {
+            const width = Math.abs(worldPos.x - draftStartPoint.x);
+            const depth = Math.abs(worldPos.z - draftStartPoint.z);
+            
+            if (width > 0.1 && depth > 0.1) { // Minimum ramp dimensions
+              console.log('🛤️ Creating ramp via drag:', {
+                width,
+                depth,
+                startPoint: draftStartPoint,
+                endPoint: worldPos
+              });
+              
+              // Calculate ramp properties based on drag
+              const centerX = (draftStartPoint.x + worldPos.x) / 2;
+              const centerZ = (draftStartPoint.z + worldPos.z) / 2;
+              
+              // Determine slope direction based on drag direction
+              const deltaX = worldPos.x - draftStartPoint.x;
+              const deltaZ = worldPos.z - draftStartPoint.z;
+              
+              let slopeDirection = 'north';
+              if (Math.abs(deltaX) > Math.abs(deltaZ)) {
+                slopeDirection = deltaX > 0 ? 'east' : 'west';
+              } else {
+                slopeDirection = deltaZ > 0 ? 'north' : 'south';
+              }
+              
+              // Use CAD engine to create ramp
+              const rampId = standaloneCADEngine.createObject('ramp', {
+                width: width,
+                depth: depth,
+                thickness: 0.2, // Standard ramp thickness
+                height: 1.0, // Default rise height
+                material: 'concrete',
+                shape: 'rectangular',
+                slopeDirection: slopeDirection,
+                grade: (1.0 / depth) * 100, // Calculate grade from height and depth
+                isRamp: true,
+                type: 'ramp',
+                position: { x: centerX, y: 0, z: centerZ },
+                startPoint: draftStartPoint,
+                endPoint: worldPos
+              });
+              
+              console.log('✅ Ramp created with ID:', rampId);
+            }
+            
+            // Reset drafting state for non-wall tools
+            setIsDrafting(false);
+            setDraftStartPoint(null);
+            setDraftCurrentPoint(null);
+            setDraftPreview(null);
           // Wall clicks are handled above in the continuous drawing logic
           } else if (selectedTool === 'beam') {
             const deltaX = worldPos.x - draftStartPoint.x;
@@ -1218,14 +1652,49 @@ const CAD2DViewport = ({
           console.log('🧹 2D Viewport: Drafting mode cleared');
         }
       } else {
-        // Clear selection if clicking on empty space with pointer tool
-        handleElementSelection(null);
+        // RAMP TOOL FIX: Handle ground clicks for creation tools (but only for non-drafting tools)
+        const creationTools = ['stair', 'column', 'door', 'window', 'furniture', 'fixture'];
+        if (creationTools.includes(selectedTool)) {
+          console.log(`🏗️ 2D VIEWPORT GROUND CLICK: ${selectedTool} tool detected, calling onGroundClick`);
+          const worldPos = to3D(clickPos);
+          console.log(`🏗️ 2D VIEWPORT GROUND CLICK: Position:`, worldPos);
+          onGroundClick?.(worldPos);
+        } else {
+          // Clear selection if clicking on empty space with pointer tool
+          handleElementSelection(null);
+        }
       }
     } else {
-      // Deselect all
-      handleElementSelection(null);
+      // 🎨 2D CAD BLOCK: Handle click-to-place for pending CAD blocks
+      if (pendingCADBlock) {
+        const worldPos = to3D(clickPos);
+        console.log('🎯 2D CAD BLOCK: Placing block at world position:', worldPos);
+        
+        const placedBlock = completeSVGPlacement(worldPos);
+        if (placedBlock) {
+          console.log('✅ 2D CAD BLOCK: Block placed successfully, auto-returning to select tool');
+          
+          // Auto-return to select tool as requested
+          if (onToolChange) {
+            onToolChange('pointer');
+          }
+        }
+        return;
+      }
+
+      // RAMP TOOL FIX: Handle ground clicks for creation tools (but only for non-drafting tools)
+      const creationTools = ['stair', 'column', 'door', 'window', 'furniture', 'fixture'];
+      if (creationTools.includes(selectedTool)) {
+        console.log(`🏗️ 2D VIEWPORT GROUND CLICK: ${selectedTool} tool detected, calling onGroundClick`);
+        const worldPos = to3D(clickPos);
+        console.log(`🏗️ 2D VIEWPORT GROUND CLICK: Position:`, worldPos);
+        onGroundClick?.(worldPos);
+      } else {
+        // Deselect all
+        handleElementSelection(null);
+      }
     }
-  }, [selectedTool, objects, to2D, to3D, zoom, isDraftingTool, isDrafting, draftStartPoint, handleElementSelection, onGroundClick]);
+  }, [selectedTool, objects, to2D, to3D, zoom, isDraftingTool, isDrafting, draftStartPoint, handleElementSelection, onGroundClick, pendingCADBlock, completeSVGPlacement, onToolChange]);
 
   // Handle mouse move for panning and drafting preview
   const handleSvgMouseMove = useCallback((event) => {
@@ -1239,13 +1708,57 @@ const CAD2DViewport = ({
       }));
       
       setLastPanPoint({ x: event.clientX, y: event.clientY });
-    } else if (wallSelectionMode && !isDrafting) {
-      // Wall edge detection for door/window placement
+    } else if (selectedTool === 'opening') {
+      // 🕳️ OPENING: Handle opening tool mouse move for preview
+      if (!svgRef.current) return;
+      
       const rect = svgRef.current.getBoundingClientRect();
+      const movePos = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+      
+      const worldPos3D = to3D(movePos);
+      
+      // Find nearest wall for opening preview
+      const nearestWall = findNearestWall(worldPos3D);
+      if (nearestWall) {
+        // Update cursor to indicate wall is available for opening
+        svgRef.current.style.cursor = 'crosshair';
+      } else {
+        // Use default cursor when no walls nearby instead of not-allowed
+        svgRef.current.style.cursor = 'default';
+      }
+    } else if (pendingCADBlock) {
+      // 🎨 2D CAD BLOCK: Handle cursor-following ghost mode
+      if (!svgRef.current) return;
+      
+      const rect = svgRef.current.getBoundingClientRect();
+      const movePos = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+      
+      // Update cursor position for CAD block ghost preview
+      setCadBlockCursorPos(movePos);
+      
+      // Set cursor style for CAD block placement
+      svgRef.current.style.cursor = 'crosshair';
+    } else if (selectedTool === 'door' || (wallSelectionMode && !isDrafting)) {
+      // Handle door tool cursor tracking and wall edge detection for door/window placement
+      if (!svgRef.current) return;
+      const rect = svgRef.current.getBoundingClientRect();
+      if (!rect || typeof event.clientX === 'undefined' || typeof event.clientY === 'undefined') return;
+      
       const mousePos = {
         x: event.clientX - rect.left,
         y: event.clientY - rect.top
       };
+      
+      // Update cursor position for door tool preview with validation
+      if (selectedTool === 'door' && isFinite(mousePos.x) && isFinite(mousePos.y)) {
+        setCursorPosition(mousePos);
+      }
       
       const worldPos = to3D(mousePos);
       const queryPoint = { x: worldPos.x, y: worldPos.z }; // Convert 3D to 2D for wall edge detection
@@ -1254,21 +1767,22 @@ const CAD2DViewport = ({
       if (isWallPlacementTool(selectedTool)) {
         if (selectedTool === 'door') {
           // For doors, find wall surfaces instead of edges
-          console.log('🚪 DOOR TOOL: Mouse move - looking for wall surface at:', queryPoint);
-          console.log('🚪 DOOR TOOL: Objects available:', objects.filter(obj => obj.type === 'wall').length, 'walls');
           
-          const wallSurface = findWallSurfaceAtPoint(queryPoint, objects);
+          let wallSurface = null;
+          try {
+            wallSurface = findWallSurfaceAtPoint(queryPoint, objects);
+            // Wall surface detection completed
+            
           setNearbyEdges(wallSurface ? [wallSurface] : []);
           setHoveredWallEdge(wallSurface);
+          } catch (error) {
+            window.console.warn('🚪 DOOR TOOL: Error in findWallSurfaceAtPoint:', error);
+            setNearbyEdges([]);
+            setHoveredWallEdge(null);
+          }
           
           if (wallSurface) {
-            console.log('🚪 ✅ Hovering over wall surface:', {
-              wallId: wallSurface.wallId,
-              positionAlongWall: (wallSurface.projectionRatio * 100).toFixed(1) + '%',
-              distance: wallSurface.distance.toFixed(3) + 'm'
-            });
-          } else {
-            console.log('🚪 ❌ No wall surface found at point');
+            window.console.warn('🚪 ✅ Wall surface detected for door placement:', wallSurface.wallId);
           }
         } else {
           // For other tools, use edge detection
@@ -1362,12 +1876,35 @@ const CAD2DViewport = ({
           width: width.toFixed(2),
           depth: depth.toFixed(2)
         });
+      } else if (selectedTool === 'ramp') {
+        const width = Math.abs(worldPos.x - draftStartPoint.x);
+        const depth = Math.abs(worldPos.z - draftStartPoint.z);
+        
+        // Calculate slope direction based on drag direction
+        const deltaX = worldPos.x - draftStartPoint.x;
+        const deltaZ = worldPos.z - draftStartPoint.z;
+        
+        let slopeDirection = 'north';
+        if (Math.abs(deltaX) > Math.abs(deltaZ)) {
+          slopeDirection = deltaX > 0 ? 'east' : 'west';
+        } else {
+          slopeDirection = deltaZ > 0 ? 'north' : 'south';
+        }
+        
+        setDraftPreview({
+          type: 'ramp',
+          start: draftStartPoint,
+          end: worldPos,
+          width: width.toFixed(2),
+          depth: depth.toFixed(2),
+          slopeDirection: slopeDirection
+        });
       } else if (selectedTool === 'wall') {
         let finalWorldPos = worldPos;
         let snappedAngleDeg = null;
         
-        // SHIFT LOCK: Snap to 45-degree increments when shift is held
-        if (event.shiftKey) {
+        // AUTOMATIC AGGRESSIVE ANGLE SNAPPING: Snap to cardinal directions (90/180) and diagonal (45) angles
+        if (draftStartPoint) {
           const deltaX = worldPos.x - draftStartPoint.x;
           const deltaZ = worldPos.z - draftStartPoint.z;
           const distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
@@ -1379,78 +1916,75 @@ const CAD2DViewport = ({
             // Normalize angle to 0-2π range
             if (angle < 0) angle += 2 * Math.PI;
             
-            // Define snap angles (in radians) with exact values
-            const snapAngles = [
+            // Only snap to cardinal directions (0°, 90°, 180°, 270°) for horizontal/vertical walls
+            const cardinalAngles = [
               0,                           // 0° - East (horizontal right)
-              Math.PI / 4,                 // 45° - Northeast
-              Math.PI / 2,                 // 90° - North (vertical up)
-              3 * Math.PI / 4,             // 135° - Northwest
+              Math.PI / 2,                 // 90° - North (vertical up)  
               Math.PI,                     // 180° - West (horizontal left)
-              5 * Math.PI / 4,             // 225° - Southwest
-              3 * Math.PI / 2,             // 270° - South (vertical down)
-              7 * Math.PI / 4              // 315° - Southeast
+              3 * Math.PI / 2              // 270° - South (vertical down)
             ];
             
-            // Find the closest snap angle with improved precision
-            let snappedAngle = snapAngles[0];
-            let minDiff = Math.abs(angle - snapAngles[0]);
+            // Gentle tolerance for cardinal directions only - no diagonal snapping
+            const cardinalTolerance = Math.PI / 9; // 20 degree tolerance for horizontal/vertical only
             
-            for (const snapAngle of snapAngles) {
-              // Calculate difference considering circular nature of angles
+            let snappedAngle = null;
+            
+            // Check cardinal directions only - users have full freedom for angled walls
+            for (const snapAngle of cardinalAngles) {
               let diff = Math.abs(angle - snapAngle);
               if (diff > Math.PI) {
                 diff = 2 * Math.PI - diff;
               }
               
-              if (diff < minDiff) {
-                minDiff = diff;
+              if (diff <= cardinalTolerance || (event.shiftKey)) {
                 snappedAngle = snapAngle;
+                break;
               }
             }
             
-            // Round to exact cardinal/diagonal directions for perfect precision
-            const tolerance = 0.01; // Small tolerance for float comparison
-            if (Math.abs(snappedAngle - 0) < tolerance || Math.abs(snappedAngle - 2 * Math.PI) < tolerance) {
-              snappedAngle = 0; // Perfect horizontal (right)
-            } else if (Math.abs(snappedAngle - Math.PI) < tolerance) {
-              snappedAngle = Math.PI; // Perfect horizontal (left)
-            } else if (Math.abs(snappedAngle - Math.PI / 2) < tolerance) {
-              snappedAngle = Math.PI / 2; // Perfect vertical (up)
-            } else if (Math.abs(snappedAngle - 3 * Math.PI / 2) < tolerance) {
-              snappedAngle = 3 * Math.PI / 2; // Perfect vertical (down)
-            }
-            
-            // Calculate snapped position with high precision
-            const cosAngle = Math.cos(snappedAngle);
-            const sinAngle = Math.sin(snappedAngle);
-            
-            // Round to avoid floating point drift for cardinal directions
-            const precision = 0.0001;
-            const roundedCos = Math.abs(cosAngle) < precision ? 0 : (Math.abs(Math.abs(cosAngle) - 1) < precision ? Math.sign(cosAngle) : cosAngle);
-            const roundedSin = Math.abs(sinAngle) < precision ? 0 : (Math.abs(Math.abs(sinAngle) - 1) < precision ? Math.sign(sinAngle) : sinAngle);
-            
-            finalWorldPos = {
-              x: Number((draftStartPoint.x + distance * roundedCos).toFixed(6)),
-              y: worldPos.y, // Keep Y unchanged
-              z: Number((draftStartPoint.z + distance * roundedSin).toFixed(6))
-            };
-            
-            snappedAngleDeg = (snappedAngle * 180 / Math.PI).toFixed(0);
-            console.log('🔒 ENHANCED SHIFT LOCK:', {
-              'original angle (deg)': (angle * 180 / Math.PI).toFixed(1),
-              'snapped angle (deg)': snappedAngleDeg,
-              'distance': distance.toFixed(6),
-              'cos/sin': [roundedCos.toFixed(6), roundedSin.toFixed(6)],
-              'finalWorldPos': finalWorldPos
-            });
-            
-            // 🌉 COORDINATE BRIDGE: Send snapped coordinates to App.js
-            if (onDraftCurrentPointUpdate) {
-              console.log('🌉 COORDINATE BRIDGE: Sending snapped coordinates to App.js', {
-                snappedWorldPos: finalWorldPos,
-                isShiftPressed: event.shiftKey
+            // Apply snapping if found
+            if (snappedAngle !== null) {
+              // Round to exact cardinal directions for perfect precision
+              const tolerance = 0.01; // Small tolerance for float comparison
+              if (Math.abs(snappedAngle - 0) < tolerance || Math.abs(snappedAngle - 2 * Math.PI) < tolerance) {
+                snappedAngle = 0; // Perfect horizontal (right)
+              } else if (Math.abs(snappedAngle - Math.PI) < tolerance) {
+                snappedAngle = Math.PI; // Perfect horizontal (left)
+              } else if (Math.abs(snappedAngle - Math.PI / 2) < tolerance) {
+                snappedAngle = Math.PI / 2; // Perfect vertical (up)
+              } else if (Math.abs(snappedAngle - 3 * Math.PI / 2) < tolerance) {
+                snappedAngle = 3 * Math.PI / 2; // Perfect vertical (down)
+              }
+              
+              // Calculate snapped position with high precision
+              const cosAngle = Math.cos(snappedAngle);
+              const sinAngle = Math.sin(snappedAngle);
+              
+              // Round to avoid floating point drift for cardinal directions
+              const precision = 0.0001;
+              const roundedCos = Math.abs(cosAngle) < precision ? 0 : (Math.abs(Math.abs(cosAngle) - 1) < precision ? Math.sign(cosAngle) : cosAngle);
+              const roundedSin = Math.abs(sinAngle) < precision ? 0 : (Math.abs(Math.abs(sinAngle) - 1) < precision ? Math.sign(sinAngle) : sinAngle);
+              
+              finalWorldPos = {
+                x: Number((draftStartPoint.x + distance * roundedCos).toFixed(6)),
+                y: worldPos.y, // Keep Y unchanged
+                z: Number((draftStartPoint.z + distance * roundedSin).toFixed(6))
+              };
+              
+              snappedAngleDeg = (snappedAngle * 180 / Math.PI).toFixed(0);
+              console.log('🎯 AUTOMATIC ANGLE SNAP:', {
+                'original angle (deg)': (angle * 180 / Math.PI).toFixed(1),
+                'snapped angle (deg)': snappedAngleDeg,
+                'distance': distance.toFixed(6),
+                'type': 'cardinal direction (horizontal/vertical)',
+                'tolerance used': 'gentle (20°)',
+                'finalWorldPos': finalWorldPos
               });
-              onDraftCurrentPointUpdate(finalWorldPos);
+              
+              // 🌉 COORDINATE BRIDGE: Send snapped coordinates to App.js
+              if (onDraftCurrentPointUpdate) {
+                onDraftCurrentPointUpdate(finalWorldPos);
+              }
             }
           }
         }
@@ -1591,17 +2125,18 @@ const CAD2DViewport = ({
     // Convert mouse position to world coordinates before zoom
     const worldPosBeforeZoom = to3D({ x: mouseX, y: mouseY });
     
-    const delta = event.deltaY * -0.001;
-    const newZoom = Math.max(0.1, Math.min(5, zoom + delta));
+    // Natural zoom: trackpad/wheel delta positive -> zoom out, negative -> zoom in
+    const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+    const newZoom = Math.max(0.1, Math.min(5, zoom * zoomFactor));
     
     if (newZoom !== zoom) {
-      // Convert the same mouse position to world coordinates after zoom
-      const scale = 40 * newZoom;
-      const worldPosAfterZoom = {
-        x: (mouseX - 400 + (viewCenter.x * scale)) / scale,
-        y: 0,
-        z: -(mouseY - 300 - (viewCenter.y * scale)) / scale
-      };
+      // Convert the same mouse position to world coordinates after zoom using helper to3D math
+      const worldPosAfterZoom = (() => {
+        const scale = 100 * newZoom;
+        const xWorld = viewCenter.x + (mouseX - 400) / scale;
+        const zWorld = viewCenter.y + (mouseY - 300) / scale;
+        return { x: xWorld, y: 0, z: zWorld };
+      })();
       
       // Calculate the difference and adjust view center to maintain cursor position
       const deltaX = worldPosBeforeZoom.x - worldPosAfterZoom.x;
@@ -1667,6 +2202,88 @@ const CAD2DViewport = ({
             className="pointer-events-none select-none"
           >
             {draftPreview.width}m × {draftPreview.depth}m
+          </text>
+        </g>
+      );
+    } else if (draftPreview.type === 'ramp') {
+      const x = Math.min(start2D.x, end2D.x);
+      const y = Math.min(start2D.y, end2D.y);
+      const width = Math.abs(end2D.x - start2D.x);
+      const height = Math.abs(end2D.y - start2D.y);
+      
+      // Calculate slope direction indicator
+      const deltaX = draftPreview.end.x - draftPreview.start.x;
+      const deltaZ = draftPreview.end.z - draftPreview.start.z;
+      
+      let arrowDirection = 'north';
+      if (Math.abs(deltaX) > Math.abs(deltaZ)) {
+        arrowDirection = deltaX > 0 ? 'east' : 'west';
+      } else {
+        arrowDirection = deltaZ > 0 ? 'north' : 'south';
+      }
+      
+      // Arrow coordinates for slope direction
+      const centerX = x + width/2;
+      const centerY = y + height/2;
+      let arrowX1 = centerX, arrowY1 = centerY;
+      let arrowX2 = centerX, arrowY2 = centerY;
+      
+      switch(arrowDirection) {
+        case 'north': arrowX2 = centerX; arrowY2 = centerY - 20; break;
+        case 'south': arrowX2 = centerX; arrowY2 = centerY + 20; break;
+        case 'east': arrowX2 = centerX + 20; arrowY2 = centerY; break;
+        case 'west': arrowX2 = centerX - 20; arrowY2 = centerY; break;
+      }
+      
+      return (
+        <g key="ramp-draft-preview">
+          {/* Preview rectangle */}
+          <rect
+            x={x}
+            y={y}
+            width={width}
+            height={height}
+            fill={previewColor}
+            fillOpacity="0.3"
+            stroke={previewColor}
+            strokeWidth="2"
+            strokeDasharray="5,5"
+          />
+          
+          {/* Slope direction arrow */}
+          <line
+            x1={arrowX1}
+            y1={arrowY1}
+            x2={arrowX2}
+            y2={arrowY2}
+            stroke={previewColor}
+            strokeWidth="3"
+            markerEnd="url(#arrow)"
+          />
+          
+          {/* Size label */}
+          <text
+            x={centerX}
+            y={centerY + 35}
+            fill={textColor}
+            fontSize="12"
+            fontWeight="bold"
+            textAnchor="middle"
+            className="pointer-events-none select-none"
+          >
+            {draftPreview.width}m × {draftPreview.depth}m ramp
+          </text>
+          
+          {/* Slope direction label */}
+          <text
+            x={centerX}
+            y={centerY - 25}
+            fill={textColor}
+            fontSize="10"
+            textAnchor="middle"
+            className="pointer-events-none select-none"
+          >
+            ↗ {arrowDirection.toUpperCase()}
           </text>
         </g>
       );
@@ -1817,12 +2434,163 @@ const CAD2DViewport = ({
     }
   }, [to2D, zoom]);
 
+  // Render door cursor preview using architectural symbol
+  const renderDoorCursorPreview = useCallback((position, doorParams) => {
+    if (!position || !doorParams) return null;
+    if (!isFinite(position.x) || !isFinite(position.y)) return null;
+    const px_per_mm = Math.max(0.01, zoom * 0.1);
+    const params = {
+      width_mm: (doorParams.width || 0.9) * 1000,
+      wall_thickness_mm: (doorParams.thickness || 0.1) * 1000,
+      hinge: 'left',
+      swing: 'in',
+      angle_deg: 90,
+      px_per_mm,
+      stroke_px: 2
+    };
+    const svg = Door2DRenderer.makeDoor2DSVG(params);
+    const wrapped = Door2DRenderer.wrapWithTransform(svg, position.x, position.y, 0);
+    return (<g pointerEvents="none" dangerouslySetInnerHTML={{ __html: wrapped }} />);
+  }, [zoom]);
+
+  // Render door aligned to wall using architectural symbol
+  const renderDoorWallAlignedPreview = useCallback((wallEdge, doorParams) => {
+    if (!wallEdge || !wallEdge.wallCenter || !doorParams) return null;
+    const doorPlacementPoint = wallEdge.closestPoint;
+    const doorPosition = to2D({ x: doorPlacementPoint.x, y: 0, z: doorPlacementPoint.y });
+    const wallStart = to2D({ x: wallEdge.wallCenter.start.x, y: 0, z: wallEdge.wallCenter.start.y });
+    const wallEnd = to2D({ x: wallEdge.wallCenter.end.x, y: 0, z: wallEdge.wallCenter.end.y });
+    const wallAngleDeg = Math.atan2(wallEnd.y - wallStart.y, wallEnd.x - wallStart.x) * 180 / Math.PI;
+    const px_per_mm = Math.max(0.01, zoom * 0.1);
+    const params = {
+      width_mm: (doorParams.width || 0.9) * 1000,
+      wall_thickness_mm: (wallEdge.wallWidth || doorParams.thickness || 0.1) * 1000,
+      hinge: 'left',
+      swing: 'in',
+      angle_deg: 90,
+      px_per_mm,
+      stroke_px: 2
+    };
+    const svg = Door2DRenderer.makeDoor2DSVG(params);
+    const wrapped = Door2DRenderer.wrapWithTransform(svg, doorPosition.x, doorPosition.y, wallAngleDeg);
+    return (<g pointerEvents="none" dangerouslySetInnerHTML={{ __html: wrapped }} />);
+  }, [to2D, zoom]);
+
+  // Render door with swing direction options
+  const renderDoorSwingPreview = useCallback((placementData, swingDirection, doorParams) => {
+    if (!placementData || !placementData.position || !doorParams) return null;
+    
+    const position = to2D(placementData.position);
+    if (!position || typeof position.x === 'undefined' || typeof position.y === 'undefined') {
+      console.warn('🚪 renderDoorSwingPreview: Invalid 2D position from to2D');
+      return null;
+    }
+    const px_per_mm = Math.max(0.01, zoom * 0.1);
+    
+    const door2DParams = {
+      width_mm: (doorParams.width || 0.9) * 1000,
+      wall_thickness_mm: (placementData.wallWidth || doorParams.thickness || 0.1) * 1000,
+      hinge: swingDirection === 'left' ? 'left' : 'right',
+      swing: 'in',
+      angle_deg: 90, // Full open to show swing direction clearly
+      px_per_mm: px_per_mm,
+      stroke_px: 2
+    };
+    
+    try {
+      const doorSVG = Door2DRenderer.makeDoor2DSVG(door2DParams);
+      const rotation = placementData.rotation || 0;
+      const wrappedSVG = Door2DRenderer.wrapWithTransform(doorSVG, position.x, position.y, rotation);
+      
+      return (
+        <g 
+          stroke="#f59e0b" 
+          strokeWidth="3"
+          opacity="0.9"
+          pointerEvents="none"
+          dangerouslySetInnerHTML={{ 
+            __html: wrappedSVG.replace(/^<g[^>]*>/, '').replace(/<\/g>$/, '')
+          }}
+        />
+      );
+    } catch (error) {
+      // Fallback swing preview
+      const doorWidth = (doorParams.width || 0.9) * zoom * 100;
+      const wallThickness = (placementData.wallWidth || doorParams.thickness || 0.1) * zoom * 100;
+      
+      return (
+        <g stroke="#f59e0b" strokeWidth="3" opacity="0.9" pointerEvents="none">
+          <rect
+            x={position.x - doorWidth/2}
+            y={position.y - wallThickness/2}
+            width={doorWidth}
+            height={wallThickness}
+            fill="none"
+          />
+          {/* Swing direction indicator */}
+          <path
+            d={`M ${position.x - doorWidth/2} ${position.y} 
+                A ${doorWidth} ${doorWidth} 0 0 ${swingDirection === 'right' ? 1 : 0} 
+                ${position.x + doorWidth/2} ${position.y}`}
+            fill="none"
+            strokeDasharray="6,3"
+          />
+        </g>
+      );
+    }
+  }, [to2D, zoom]);
+
   // Render professional door placement preview
   const renderDoorPlacementPreview = useCallback(() => {
-    // TEMPORARILY DISABLED to isolate error
-    console.log('🚪 Door preview DISABLED for error isolation');
-    // Function body cleaned
-  }, [selectedTool, doorPlacementStep, hoveredWallEdge, doorPlacementData, doorSwingDirection, to2D, zoom, nearbyEdges]);
+    if (selectedTool !== 'door') return null;
+    
+    // Get door parameters from the tool or use defaults
+    const currentDoorParams = doorParams || {
+      width: 0.9,
+      height: 2.1, 
+      thickness: 0.1,
+      selectedModel: null
+    };
+    
+    // Stage 1: Cursor preview when no wall is hovered
+    if (doorPlacementStep === 0 && !hoveredWallEdge) {
+      // Ensure cursorPosition is valid before rendering
+      if (!cursorPosition || typeof cursorPosition.x === 'undefined' || typeof cursorPosition.y === 'undefined') {
+        return null;
+      }
+      
+      // Don't show preview at the initial (0, 0) position - wait for real mouse movement
+      if (cursorPosition.x === 0 && cursorPosition.y === 0) {
+        return null;
+      }
+      
+      return (
+        <g className="door-cursor-preview">
+          {renderDoorCursorPreview(cursorPosition, currentDoorParams)}
+        </g>
+      );
+    }
+    
+    // Stage 2: Wall alignment preview - Show whenever hovering over wall
+    if (hoveredWallEdge) {
+      return (
+        <g className="door-wall-preview">
+          {renderDoorWallAlignedPreview(hoveredWallEdge, currentDoorParams)}
+        </g>
+      );
+    }
+    
+    // Stage 3: Position fixed, showing swing direction options
+    if (doorPlacementStep === 1 && doorPlacementData) {
+      return (
+        <g className="door-swing-preview">
+          {renderDoorSwingPreview(doorPlacementData, doorSwingDirection, currentDoorParams)}
+        </g>
+      );
+    }
+    
+    return null;
+  }, [selectedTool, doorPlacementStep, hoveredWallEdge, doorPlacementData, doorSwingDirection, doorParams, cursorPosition, renderDoorCursorPreview, renderDoorWallAlignedPreview, renderDoorSwingPreview]);
   // Render material pattern for walls - PROFESSIONAL CAD PATTERNS
   const renderMaterialPattern = useCallback((material, size) => {
     switch (material) {
@@ -2812,6 +3580,10 @@ const CAD2DViewport = ({
       // We need to handle each multi-polygon and each ring within it
       
       if (Array.isArray(polygonGeometry)) {
+        // Normalize: if geometry is a single ring [[x,y]...], wrap to [[ring]]
+        if (polygonGeometry.length > 0 && Array.isArray(polygonGeometry[0]) && typeof polygonGeometry[0][0] === 'number') {
+          polygonGeometry = [ [ polygonGeometry ] ];
+        }
         console.log('🔍 Processing Martinez polygon array...');
         
         polygonGeometry.forEach((multiPolygon, mpIndex) => {
@@ -2821,15 +3593,16 @@ const CAD2DViewport = ({
             multiPolygon.forEach((ring, ringIndex) => {
               console.log(`  📍 Ring ${ringIndex}:`, ring);
               console.log(`  📍 Ring length:`, ring?.length);
-              console.log(`  📍 First few points:`, ring?.slice(0, 3));
+              const previewPoints = Array.isArray(ring) && typeof ring[0]?.[0] === 'number' ? ring.slice(0,3) : [];
+              console.log(`  📍 First few points:`, previewPoints);
               
-              if (!ring || ring.length === 0) {
+              if (!Array.isArray(ring) || ring.length === 0) {
                 console.log('    ⚠️ Empty ring, skipping');
                 return;
               }
               
               // Ensure we have valid coordinate pairs
-              if (ring.length < 3) {
+              if (ring.length < 3 || typeof ring[0]?.[0] !== 'number') {
                 console.log('    ⚠️ Ring has less than 3 points, skipping');
                 return;
               }
@@ -2960,14 +3733,14 @@ const CAD2DViewport = ({
       
       // Material-specific colors and patterns - PROFESSIONAL CAD STYLE
       const materialConfig = {
-        concrete: { fill: '#e5e5e5', strokeColor: '#666666' }, // Light grey as requested
-        brick: { fill: '#d4a574', strokeColor: '#b8956a' }, // Warm brick color
-        wood: { fill: '#f4e4bc', strokeColor: '#d4c49c' }, // Natural wood tone
-        steel: { fill: '#c0c8d0', strokeColor: '#888888' }, // Steel blue-grey
-        stone: { fill: '#b8b8b8', strokeColor: '#8a8a8a' }, // Natural stone
-        aluminum: { fill: '#d6dde6', strokeColor: '#999999' }, // Light metallic
-        glass: { fill: '#f0f8ff', strokeColor: '#b0c4de' }, // Very light blue
-        drywall: { fill: '#fafafa', strokeColor: '#e0e0e0' } // Off-white
+        concrete: { fill: '#4a5568', strokeColor: '#2d3748' }, // Dark grey to hide corner intersections
+        brick: { fill: '#975a16', strokeColor: '#7c2d12' }, // Darker brick color
+        wood: { fill: '#92400e', strokeColor: '#78350f' }, // Darker wood tone
+        steel: { fill: '#475569', strokeColor: '#334155' }, // Darker steel blue-grey
+        stone: { fill: '#57534e', strokeColor: '#44403c' }, // Darker stone
+        aluminum: { fill: '#64748b', strokeColor: '#475569' }, // Darker metallic
+        glass: { fill: '#60a5fa', strokeColor: '#3b82f6' }, // Darker blue
+        drywall: { fill: '#6b7280', strokeColor: '#4b5563' } // Darker off-white
       };
       
       const config = materialConfig[material] || materialConfig.concrete;
@@ -3278,14 +4051,14 @@ const CAD2DViewport = ({
     
     // Material-specific colors and patterns - PROFESSIONAL CAD STYLE
     const materialConfig = {
-      concrete: { fill: '#e5e5e5', strokeColor: '#666666' }, // Light grey as requested
-      brick: { fill: '#d4a574', strokeColor: '#b8956a' }, // Warm brick color
-      wood: { fill: '#f4e4bc', strokeColor: '#d4c49c' }, // Natural wood tone
-      steel: { fill: '#c0c8d0', strokeColor: '#888888' }, // Steel blue-grey
-      stone: { fill: '#b8b8b8', strokeColor: '#8a8a8a' }, // Natural stone
-      aluminum: { fill: '#d6dde6', strokeColor: '#999999' }, // Light metallic
-      glass: { fill: '#f0f8ff', strokeColor: '#b0c4de' }, // Very light blue
-      drywall: { fill: '#fafafa', strokeColor: '#e0e0e0' } // Off-white
+      concrete: { fill: '#4a5568', strokeColor: '#2d3748' }, // Dark grey to hide corner intersections
+      brick: { fill: '#975a16', strokeColor: '#7c2d12' }, // Darker brick color
+      wood: { fill: '#92400e', strokeColor: '#78350f' }, // Darker wood tone
+      steel: { fill: '#475569', strokeColor: '#334155' }, // Darker steel blue-grey
+      stone: { fill: '#57534e', strokeColor: '#44403c' }, // Darker stone
+      aluminum: { fill: '#64748b', strokeColor: '#475569' }, // Darker metallic
+      glass: { fill: '#60a5fa', strokeColor: '#3b82f6' }, // Darker blue
+      drywall: { fill: '#6b7280', strokeColor: '#4b5563' } // Darker off-white
     };
     
     const config = materialConfig[material] || materialConfig.concrete;
@@ -3492,7 +4265,7 @@ const CAD2DViewport = ({
         case 'tiles':
           return (
             <pattern id={patternId} patternUnits="userSpaceOnUse" width="16" height="16">
-              <rect width="16" height="16" fill="#f3f4f6" opacity="0.4"/>
+              <rect width="16" height="16" fill="#4a5568" opacity="0.4"/>
               <rect x="0" y="0" width="16" height="16" fill="none" stroke="#d1d5db" strokeWidth="0.5" opacity="0.6"/>
               <rect x="8" y="8" width="8" height="8" fill="#e5e7eb" opacity="0.3"/>
             </pattern>
@@ -3606,130 +4379,188 @@ const CAD2DViewport = ({
     );
   }, [viewportTheme, onObjectClick]);
 
-  // Render architectural door in 2D with proper blueprint styling
+  // Render architectural door in 2D with proper blueprint styling using Door2DRenderer
   const renderDoor2D = useCallback((object, pos2d, props, isSelected) => {
+    console.log(`🚪 RENDER_DOOR2D CALLED: Object ${object?.id}, pos2d:`, pos2d, 'props:', props, 'isSelected:', isSelected);
+    
+    // Add null checks for required parameters
+    if (!object || !pos2d || !props || typeof pos2d.x === 'undefined' || typeof pos2d.y === 'undefined') {
+      console.warn('Door2D render: Missing required parameters', { object: !!object, pos2d, props: !!props });
+      return null;
+    }
+    
+    const strokeColor = isSelected 
+      ? (viewportTheme === 'light' ? '#8b5cf6' : '#a855f7')
+      : (viewportTheme === 'light' ? '#1f2937' : '#d1d5db');
+    
+    try {
+      // Calculate viewport scale (px per mm) 
+      // Adjust scale factor based on zoom level
+      const px_per_mm = Math.max(0.01, zoom * 0.1);
+      
+      // Prepare door parameters for Door2DRenderer
+      const door2DParams = {
+        width_mm: (props.width || 0.9) * 1000, // Convert meters to mm
+        wall_thickness_mm: (props.thickness || 0.1) * 1000, // Convert meters to mm
+        hinge: props.openingDirection === 'left' ? 'left' : 'right',
+        swing: 'in', // Default to inward swing
+        angle_deg: 90, // Standard 90-degree opening
+        px_per_mm: px_per_mm,
+        stroke_px: isSelected ? 2 : 1
+      };
+      
+      // Generate door SVG using Door2DRenderer
+      const doorSVG = Door2DRenderer.makeDoor2DSVG(door2DParams);
+      
+      // Apply world positioning transform
+      const rotation = props.rotation ? (props.rotation * 180 / Math.PI) : 0;
+      const wrappedSVG = Door2DRenderer.wrapWithTransform(
+        doorSVG, 
+        pos2d.x, 
+        pos2d.y, 
+        rotation
+      );
+      
+      return (
+        <g 
+          key={object.id}
+          id={`door-${object.id}`}
+          stroke={strokeColor}
+          className="door-2d"
+          {...createUnifiedElementHandlers(object)}
+          dangerouslySetInnerHTML={{ 
+            __html: wrappedSVG.replace('<g transform=', '<g transform=').replace(/^<g[^>]*>/, '').replace(/<\/g>$/, '')
+          }}
+        />
+      );
+    } catch (error) {
+      console.warn('Door2DRenderer failed, using fallback door representation:', error);
+      
+      // Fallback: Simple door representation  
+      const safeZoom = zoom || 1;
+      const doorWidth = (props.width || 0.9) * safeZoom * 100; // Convert to pixels
+      const wallThickness = (props.thickness || 0.1) * safeZoom * 100;
+      const rotation = (props.rotation && typeof props.rotation === 'number') ? (props.rotation * 180 / Math.PI) : 0;
+      const safeX = pos2d.x || 0;
+      const safeY = pos2d.y || 0;
+    
+    return (
+        <g 
+          key={object.id || 'unknown-door'} 
+          transform={rotation !== 0 ? `rotate(${rotation} ${safeX} ${safeY})` : ''}
+          {...(createUnifiedElementHandlers ? createUnifiedElementHandlers(object) : {})}
+        >
+          {/* Simple door opening */}
+        <rect
+            x={safeX - doorWidth/2}
+            y={safeY - wallThickness/2}
+          width={doorWidth}
+          height={wallThickness}
+          fill="white"
+            stroke={strokeColor}
+            strokeWidth={isSelected ? 2 : 1}
+          />
+          {/* Door leaf line */}
+        <line
+            x1={safeX - doorWidth/2}
+            y1={safeY}
+            x2={safeX + doorWidth/2}
+            y2={safeY}
+            stroke={strokeColor}
+            strokeWidth={isSelected ? 3 : 2}
+          strokeLinecap="round"
+        />
+          {/* Simple swing arc */}
+        <path
+            d={`M ${safeX - doorWidth/2} ${safeY} 
+                A ${doorWidth} ${doorWidth} 0 0 1 
+                ${safeX + doorWidth/2} ${safeY}`}
+          fill="none"
+          stroke={strokeColor}
+          strokeWidth="1"
+            strokeDasharray="2,2"
+            opacity="0.5"
+          />
+      </g>
+    );
+    }
+  }, [viewportTheme, zoom, createUnifiedElementHandlers]);
+
+  // Render architectural stair in 2D with step indicators
+  const renderStair2D = useCallback((object, pos2d, props, isSelected) => {
     const strokeColor = isSelected 
       ? (viewportTheme === 'light' ? '#8b5cf6' : '#a855f7')
       : (viewportTheme === 'light' ? '#1f2937' : '#d1d5db');
     const strokeWidth = isSelected ? 2 : 1;
+    const fillColor = props.color;
+    
+    // Calculate step lines
+    const numberOfSteps = props.numberOfSteps || 16;
+    const stepLines = [];
+    const stepSpacing = props.height / numberOfSteps;
+    
+    // Create step indicator lines
+    for (let i = 1; i < numberOfSteps; i++) {
+      const stepY = pos2d.y - props.height/2 + (i * stepSpacing);
+      stepLines.push(
+        <line
+          key={`step-${i}`}
+          x1={pos2d.x - props.width/2}
+          y1={stepY}
+          x2={pos2d.x + props.width/2}
+          y2={stepY}
+          stroke={strokeColor}
+          strokeWidth={0.5}
+          opacity={0.6}
+        />
+      );
+    }
     
     // Calculate rotation
     const rotation = props.rotation ? (props.rotation * 180 / Math.PI) : 0;
-    
-    // Door dimensions - architectural sizing
-    const doorWidth = props.width;
-    const wallThickness = Math.max(8, props.height); // Wall thickness around door
-    const leafWidth = doorWidth * 0.9; // Door leaf size
-    const frameWidth = 6; // Door frame width in pixels
-    
-    // Calculate door opening direction (default: right)
-    const isRightOpening = props.openingDirection !== 'left';
-    const swingDirection = isRightOpening ? 1 : -1;
-    
-    // Calculate hinge position (at the door jamb)
-    const hingeX = pos2d.x - (doorWidth / 2) * swingDirection;
-    const hingeY = pos2d.y;
-    
-    // Door leaf position (45-degree open for architectural clarity)
-    const openAngle = 45 * (Math.PI / 180); // 45 degrees in radians
-    const leafEndX = hingeX + leafWidth * Math.cos(openAngle) * swingDirection;
-    const leafEndY = hingeY + leafWidth * Math.sin(openAngle) * swingDirection;
-    
-    // Transform for the entire door group
-    const groupTransform = rotation !== 0 ? 
+    const transform = rotation !== 0 ? 
       `rotate(${rotation} ${pos2d.x} ${pos2d.y})` : '';
     
     return (
-      <g key={object.id} transform={groupTransform}>
-        {/* Door Opening in Wall (gap) */}
+      <g
+        key={`stair-${object.id}`}
+        onClick={() => onObjectClick(object.id, object)}
+        className="cursor-pointer"
+        transform={transform}
+      >
+        {/* Main stair outline */}
         <rect
-          x={pos2d.x - doorWidth/2}
-          y={pos2d.y - wallThickness/2}
-          width={doorWidth}
-          height={wallThickness}
-          fill="white"
-          stroke="none"
-          {...createUnifiedElementHandlers(object)}
-        />
-        
-        {/* Door Frame/Jambs - Left */}
-        <rect
-          x={pos2d.x - doorWidth/2 - frameWidth/2}
-          y={pos2d.y - wallThickness/2}
-          width={frameWidth}
-          height={wallThickness}
-          fill="#6b7280"
-          stroke="none"
-        />
-        
-        {/* Door Frame/Jambs - Right */}
-        <rect
-          x={pos2d.x + doorWidth/2 - frameWidth/2}
-          y={pos2d.y - wallThickness/2}
-          width={frameWidth}
-          height={wallThickness}
-          fill="#6b7280"
-          stroke="none"
-        />
-        
-        {/* Door Leaf (shown in 45-degree open position) */}
-        <line
-          x1={hingeX}
-          y1={hingeY}
-          x2={leafEndX}
-          y2={leafEndY}
-          stroke={props.color}
-          strokeWidth="3"
-          strokeLinecap="round"
-          {...createUnifiedElementHandlers(object)}
-        />
-        
-        {/* Door Swing Arc (architectural standard - 90 degrees) */}
-        <path
-          d={`M ${hingeX} ${hingeY} 
-              A ${leafWidth} ${leafWidth} 0 0 ${isRightOpening ? 1 : 0} 
-              ${hingeX + leafWidth * swingDirection} ${hingeY}`}
-          fill="none"
-          stroke="#9ca3af"
-          strokeWidth="0.5"
-          strokeDasharray="2,2"
-          opacity="0.7"
-        />
-        
-        {/* Hinge Point (architectural symbol) */}
-        <circle
-          cx={hingeX}
-          cy={hingeY}
-          r="1.5"
-          fill="none"
+          x={pos2d.x - props.width/2}
+          y={pos2d.y - props.height/2}
+          width={props.width}
+          height={props.height}
+          fill={fillColor}
           stroke={strokeColor}
-          strokeWidth="1"
+          strokeWidth={strokeWidth}
+          opacity={0.7}
         />
         
-        {/* Door Swing Direction Arrow */}
-        <path
-          d={`M ${hingeX + leafWidth * 0.7 * swingDirection} ${hingeY - 3 * swingDirection}
-              L ${hingeX + leafWidth * 0.8 * swingDirection} ${hingeY}
-              L ${hingeX + leafWidth * 0.7 * swingDirection} ${hingeY + 3 * swingDirection}`}
-          fill="none"
-          stroke="#6b7280"
-          strokeWidth="1"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+        {/* Step indicator lines */}
+        {stepLines}
+        
+        {/* Direction arrow (pointing up the stair flow) */}
+        <polygon
+          points={`${pos2d.x},${pos2d.y - props.height/4} ${pos2d.x - 4},${pos2d.y} ${pos2d.x + 4},${pos2d.y}`}
+          fill={strokeColor}
+          opacity={0.5}
         />
         
-        {/* Door Number/Label (optional architectural detail) */}
+        {/* Stair label */}
         {isSelected && (
           <text
             x={pos2d.x}
-            y={pos2d.y - wallThickness/2 - 8}
-            fill={strokeColor}
-            fontSize="10"
-            fontWeight="bold"
+            y={pos2d.y + props.height/2 + 15}
             textAnchor="middle"
+            fontSize="10"
+            fill={strokeColor}
             className="pointer-events-none select-none"
           >
-            {(doorWidth).toFixed(1)}m
+            {numberOfSteps} Steps
           </text>
         )}
       </g>
@@ -3738,15 +4569,38 @@ const CAD2DViewport = ({
 
   // Render object as 2D shape
   const renderObject2D = useCallback((object) => {
+    // SIMPLE DEBUG: Log every object being processed
+    console.log(`🎨 RENDER_OBJECT2D: Processing ${object.id} (${object.type})`);
+    
     console.log(`🎨 2D Viewport: Rendering object ${object.id} (${object.type}):`, {
       position: object.position,
       params: object.params,
       hasPosition: !!object.position,
       objectKeys: Object.keys(object)
     });
+    
+    // DOOR DEBUG: Extra logging for door objects
+    if (object.type === 'door') {
+      console.log(`🚪 DOOR RENDER DEBUG: Door object ${object.id}:`, {
+        type: object.type,
+        params: object.params,
+        position: object.position,
+        mesh3D_position: object.mesh3D?.position,
+        allProperties: Object.keys(object)
+      });
+    }
 
     // Use adjusted position for walls with joinery, otherwise use original position
+    // For door objects, use mesh3D.position if position is not available
     let renderPosition = object.position;
+    if (!renderPosition && object.mesh3D?.position) {
+      renderPosition = {
+        x: object.mesh3D.position.x,
+        y: object.mesh3D.position.y,
+        z: object.mesh3D.position.z
+      };
+      console.warn(`🚪 Using mesh3D.position for door ${object.id}:`, renderPosition);
+    }
     
     if (object.type === 'wall' && object.params?.adjustForJoinery) {
       const startPoint = object.params?.adjustedStartPoint || object.params?.startPoint;
@@ -3786,7 +4640,7 @@ const CAD2DViewport = ({
           return {
             width: wallLength * scale,
             height: constrainedThickness, // Zoom-stable thickness
-            color: '#f3f4f6', // Softer sterilized light gray
+            color: '#4a5568', // Darker sterilized gray to hide intersections
             shape: 'rect',
             rotation: object.rotation || 0
           };
@@ -3798,13 +4652,59 @@ const CAD2DViewport = ({
             shape: 'rect'
           };
         case 'door':
-          return {
+          const doorProps = {
             width: (object.width || 0.9) * scale,
             height: (object.thickness || 0.05) * scale,
             color: '#8b5a3c', // Wood brown color for doors
             shape: 'door',
             rotation: object.rotation || 0,
             openingDirection: object.params?.openingDirection || 'right'
+          };
+          console.log(`🚪 DOOR PROPS DEBUG: Object ${object.id} props:`, doorProps);
+          return doorProps;
+        case 'opening':
+          return {
+            width: (object.width || 1.0) * scale,
+            height: (object.height || 0.1) * scale, // Thin representation for opening
+            color: '#ef4444', // Red color to indicate opening
+            shape: 'opening',
+            rotation: object.rotation || 0,
+            wallId: object.wallId
+          };
+        case 'furniture':
+        case 'fixture':
+          return {
+            width: (object.width || 1) * scale,
+            height: (object.depth || 1) * scale,
+            color: object.materialColor || '#8B4513', // Brown for furniture
+            shape: 'furniture',
+            rotation: object.rotation || 0
+          };
+        case 'stair':
+          // Stair top-view: shows footprint with step indicators
+          // Use model-specific dimensions when available
+          const stairWidth = (object.dimensions?.width || object.stepWidth || 1.2) * scale;
+          const stairRun = (object.dimensions?.totalRun || object.totalRun || 4.0) * scale;
+          const numberOfSteps = object.dimensions?.numberOfSteps || object.numberOfSteps || 16;
+          
+          console.log('🏗️ 2D STAIR RENDER: Object data:', {
+            objectId: object.id,
+            dimensions: object.dimensions,
+            stepWidth: object.stepWidth,
+            totalRun: object.totalRun,
+            numberOfSteps: numberOfSteps,
+            calculatedWidth: stairWidth,
+            calculatedRun: stairRun
+          });
+          
+          return {
+            width: stairWidth,
+            height: stairRun,
+            color: object.material === 'wood' ? '#8B4513' : '#888888',
+            shape: 'stair',
+            rotation: object.rotation || 0,
+            numberOfSteps: numberOfSteps,
+            stairType: object.type || 'straight'
           };
         default:
           return {
@@ -3822,9 +4722,39 @@ const CAD2DViewport = ({
       : (viewportTheme === 'light' ? '#1f2937' : '#374151'); // Darker stroke for sterilized look
     const strokeWidth = isSelected ? 3 : 1.5; // Slightly thicker for definition
     
+    // DOOR DEBUG: Log shape check
+    if (object.type === 'door') {
+      console.log(`🚪 DOOR SHAPE CHECK: Object ${object.id}, props.shape:`, props.shape, 'object.type:', object.type);
+    }
+    
     if (props.shape === 'door') {
+      console.log(`🚪 DOOR SHAPE MATCH: Calling renderDoor2D for object ${object.id}`);
       // Render professional door with frame, leaf, and swing arc
       return renderDoor2D(object, pos2d, props, isSelected);
+    }
+    
+    if (props.shape === 'opening') {
+      // Render opening as a dashed red rectangle to show gap in wall
+      return (
+        <rect
+          key={`opening-${object.id}`}
+          x={pos2d.x - props.width / 2}
+          y={pos2d.y - props.height / 2}
+          width={props.width}
+          height={props.height}
+          fill="none"
+          stroke={props.color}
+          strokeWidth="2"
+          strokeDasharray="5,3"
+          transform={`rotate(${props.rotation} ${pos2d.x} ${pos2d.y})`}
+          className={`opening ${isSelected ? 'selected' : ''}`}
+        />
+      );
+    }
+    
+    if (props.shape === 'stair') {
+      // Render stair top-view with step indicators
+      return renderStair2D(object, pos2d, props, isSelected);
     }
     
     if (object.type === 'slab') {
@@ -3909,6 +4839,12 @@ const CAD2DViewport = ({
       const start2D = to2D({ x: edge.startPoint.x, y: 0, z: edge.startPoint.y });
       const end2D = to2D({ x: edge.endPoint.x, y: 0, z: edge.endPoint.y });
       
+      // Validate to2D results
+      if (!start2D || !end2D || typeof start2D.y !== 'number' || typeof end2D.y !== 'number') {
+        console.warn('🚪 Invalid to2D result for edge:', { start2D, end2D });
+        return; // Skip this edge
+      }
+      
       const highlightColor = isClosest ? '#10b981' : '#3b82f6';
       const highlightWidth = isClosest ? 4 : 2;
       const opacity = isClosest ? 0.8 : 0.4;
@@ -3950,6 +4886,11 @@ const CAD2DViewport = ({
     
     // Get placement position
     const edge = hoveredWallEdge.edge;
+    if (!edge || typeof edge.getPlacementPoint !== 'function') {
+      console.warn('Invalid edge object in renderWallPlacementPreview:', edge);
+      return null;
+    }
+    
     const placementPoint = edge.getPlacementPoint(hoveredWallEdge.projectionRatio);
     const pos2D = to2D({ x: placementPoint.x, y: 0, z: placementPoint.y });
     
@@ -3957,8 +4898,8 @@ const CAD2DViewport = ({
     const objWidth = dims.width * 100 * zoom;
     const objHeight = 8; // Fixed height in screen space for visibility
     
-    // Calculate rotation based on wall direction
-    const wallAngle = Math.atan2(edge.direction.y, edge.direction.x) * 180 / Math.PI;
+    // Calculate rotation based on wall direction - use edge.angle instead of edge.direction
+    const wallAngle = (edge.angle || 0) * 180 / Math.PI;
     
     return (
       <g className="placement-preview">
@@ -4177,7 +5118,7 @@ const renderMesh2DGeometry = useCallback((object, mesh, pos2d, rotation, index) 
   }
 
   // Get color from material - Sterilized professional look
-  let fillColor = '#f3f4f6'; // Softer light gray for walls
+  let fillColor = '#4a5568'; // Darker gray to hide corner intersections
   let strokeColor = '#1f2937'; // Dark charcoal/black for sharp outlines
   let fillOpacity = 0.9; // Opaque but softer appearance
   let strokeWidth = 1.5; // Slightly thicker outline for definition
@@ -4238,14 +5179,14 @@ const renderMesh2DGeometry = useCallback((object, mesh, pos2d, rotation, index) 
       
       // If we still have black or very dark color, use sterilized default
       if (fillColor === 'rgb(0, 0, 0)' || fillColor === '#000000' || fillColor === '#000') {
-        fillColor = '#f3f4f6'; // Softer sterilized light gray fallback
+        fillColor = '#4a5568'; // Darker sterilized gray fallback
         console.log(`⚠️ Detected black color, using sterilized fallback: ${fillColor}`);
       }
       
       // Override: Always use sterilized black outline for walls regardless of material
       if (object.type === 'wall' || object.type === 'Wall') {
         strokeColor = '#1f2937'; // Sterilized dark charcoal/black outline
-        fillColor = '#f3f4f6';   // Softer sterilized light gray fill
+        fillColor = '#4a5568';   // Darker sterilized gray fill to hide intersections
         console.log(`🎯 Applied sterilized wall styling for ${object.id}`);
       } else {
         // Use material-based stroke for non-walls
@@ -4381,6 +5322,131 @@ const renderCADEngineMesh2D = useCallback((object) => {
   return null;
 }, [to2D, renderMesh2DGeometry]);
 
+  // Door/Window apertures invalidation (declare BEFORE hooks that depend on it)
+  const [apertureTick, setApertureTick] = useState(0);
+  useEffect(() => {
+    const onApertures = () => setApertureTick(t => (t + 1) % 1e9);
+    document.addEventListener('wall:aperturesChanged', onApertures);
+    return () => document.removeEventListener('wall:aperturesChanged', onApertures);
+  }, []);
+
+  // 🏗️ ARCHITECT3D: Render architect3d walls and corners (disabled - skylight tool removed)
+  const renderArchitect3DWalls = useCallback(() => {
+    // This function was previously used for skylight tool which has been removed
+    // Keeping function for backward compatibility but returning empty array
+    return [];
+  }, []);
+
+  // 🏗️ ARCHITECT3D: Render wall preview
+  const [architect3DPreviewData, setArchitect3DPreviewData] = useState(null);
+  const [previewTick, setPreviewTick] = useState(0);
+  const lastArchitect3DWorldPosRef = useRef(null);
+  
+  // Listen to architect3d preview events
+  useEffect(() => {
+    if (!architect3DService) return;
+    
+    const handlePreview = (data) => setArchitect3DPreviewData(data);
+    // Expose service globally so the 3D viewport can subscribe (temporary bridge)
+    if (typeof window !== 'undefined') {
+      window.__architect3DService = architect3DService;
+    }
+    const triggerRerender = () => setArchitect3DPreviewData(prev => ({ ...(prev || {}), _v: (prev?._v || 0) + 1 }));
+    architect3DService.addEventListener('wallPreview', handlePreview);
+    architect3DService.addEventListener('wallDrawingStarted', triggerRerender);
+    architect3DService.addEventListener('wallDrawingCompleted', triggerRerender);
+    architect3DService.addEventListener('wallAdded', triggerRerender);
+    
+    return () => {
+      architect3DService.removeEventListener('wallPreview', handlePreview);
+      architect3DService.removeEventListener('wallDrawingStarted', triggerRerender);
+      architect3DService.removeEventListener('wallDrawingCompleted', triggerRerender);
+      architect3DService.removeEventListener('wallAdded', triggerRerender);
+    };
+  }, [architect3DService]);
+
+  // Small timer to animate preview even without mouse movement
+  useEffect(() => {
+    if (!architect3DPreviewData) return;
+    const id = setInterval(() => setPreviewTick(t => (t + 1) % 1e9), 120);
+    return () => clearInterval(id);
+  }, [architect3DPreviewData]);
+
+  const renderArchitect3DPreview = useCallback(() => {
+    // If no event-driven preview, synthesize from the last known mouse position
+    const data = (architect3DPreviewData && architect3DPreviewData.isValid)
+      ? architect3DPreviewData
+      : (architect3DService && architect3DService.currentDrawingWall && lastArchitect3DWorldPosRef.current
+          ? { start: architect3DService.currentDrawingWall.startPoint, end: lastArchitect3DWorldPosRef.current, isValid: true }
+          : null);
+    if (!architect3DService || !data || !data.start || !data.end) return null;
+    
+    // Validate start and end points have required properties
+    if (typeof data.start.x !== 'number' || typeof data.start.y !== 'number' ||
+        typeof data.end.x !== 'number' || typeof data.end.y !== 'number') {
+      console.warn('🏗️ Architect3D preview: Invalid start/end coordinates', data);
+      return null;
+    }
+    
+    const startPos2d = to2D({ x: data.start.x, y: 0, z: data.start.y });
+    const endPos2d = to2D({ x: data.end.x, y: 0, z: data.end.y });
+    
+    // Validate to2D results
+    if (!startPos2d || !endPos2d || 
+        typeof startPos2d.x !== 'number' || typeof startPos2d.y !== 'number' ||
+        typeof endPos2d.x !== 'number' || typeof endPos2d.y !== 'number') {
+      console.warn('🏗️ Architect3D preview: Invalid 2D position from to2D conversion');
+      return null;
+    }
+    const dx = endPos2d.x - startPos2d.x;
+    const dy = endPos2d.y - startPos2d.y;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    const thicknessPx = (Math.max(data.thickness || 0.2, 0.1)) * 100 * zoom;
+    const cx = (startPos2d.x + endPos2d.x) / 2;
+    const cy = (startPos2d.y + endPos2d.y) / 2;
+    const snapColor = data.snapped ? (theme === 'dark' ? '#22c55e' : '#16a34a') : (theme === 'dark' ? '#fbbf24' : '#f59e0b');
+    const guides = Array.isArray(data.guides) ? data.guides : [];
+
+    // Dev: minimal runtime log
+    if (typeof window !== 'undefined' && (window.A3D_DEBUG || A3D_DEBUG)) {
+      console.log('A3D_PREVIEW', { start: data.start, end: data.end, snapped: !!data.snapped, guides: guides.length });
+    }
+    
+    return (
+      <g className="architect3d-wall-preview">
+        {guides.map((g, i) => {
+          if (!g) return null;
+          
+          if (g.vertical && typeof g.x === 'number' && data.start && typeof data.start.y === 'number') {
+            const x = to2D({ x: g.x, y: 0, z: data.start.y }).x;
+            return <line key={`gv-${i}`} x1={x} y1={-10000} x2={x} y2={10000} stroke="#60a5fa" strokeDasharray="4,4" opacity="0.35" />;
+          }
+          if (g.horizontal && typeof g.y === 'number' && data.start && typeof data.start.x === 'number') {
+            const y = to2D({ x: data.start.x, y: 0, z: g.y }).y;
+            return <line key={`gh-${i}`} x1={-10000} y1={y} x2={10000} y2={y} stroke="#60a5fa" strokeDasharray="4,4" opacity="0.35" />;
+          }
+          return null;
+        })}
+      <line
+        x1={startPos2d.x}
+        y1={startPos2d.y}
+        x2={endPos2d.x}
+        y2={endPos2d.y}
+          stroke={snapColor}
+          strokeWidth="2"
+          strokeDasharray="10,8"
+          style={{ strokeDashoffset: (Date.now()/60)%18 }}
+          opacity="0.9"
+        />
+        <g transform={`translate(${cx}, ${cy}) rotate(${angle})`}>
+          <rect x={-len/2} y={-thicknessPx/2} width={len} height={thicknessPx} fill="#4a5568" opacity="0.5" />
+          <rect x={-len/2} y={-thicknessPx/2} width={Math.max(6, (len*((Date.now()/500)%1)))} height={thicknessPx} fill={snapColor} opacity="0.2" />
+        </g>
+      </g>
+    );
+  }, [architect3DService, to2D, theme, architect3DPreviewData, zoom, previewTick]);
+
   return (
     <div 
       className={`cad-2d-viewport relative w-full h-full ${className}`}
@@ -4399,19 +5465,30 @@ const renderCADEngineMesh2D = useCallback((object) => {
       >
         {/* Grid lines */}
         <defs>
+          {(() => {
+            const scale = 100 * zoom; // px per meter (shared with to2D/to3D)
+            const gridSizePx = 1 * scale; // 1m grid
+            // Offset so grid feels "stationary" relative to world origin as we pan/zoom
+            const offsetX = ((400 - (viewCenter.x * scale)) % gridSizePx + gridSizePx) % gridSizePx;
+            const offsetY = ((300 - (viewCenter.y * scale)) % gridSizePx + gridSizePx) % gridSizePx;
+            return (
           <pattern
             id="grid"
-            width={40 * zoom}
-            height={40 * zoom}
+                x={-offsetX}
+                y={-offsetY}
+                width={gridSizePx}
+                height={gridSizePx}
             patternUnits="userSpaceOnUse"
           >
             <path
-              d={`M ${40 * zoom} 0 L 0 0 0 ${40 * zoom}`}
+                  d={`M ${gridSizePx} 0 L 0 0 0 ${gridSizePx}`}
               fill="none"
               stroke={viewportTheme === 'light' ? '#e5e7eb' : '#374151'}
               strokeWidth="1"
             />
           </pattern>
+            );
+          })()}
         </defs>
         <rect width="100%" height="100%" fill="url(#grid)" />
         
@@ -4419,17 +5496,31 @@ const renderCADEngineMesh2D = useCallback((object) => {
         {/* CAD Objects */}
         {(() => {
           try {
-          console.log(`🗂️ 2D Viewport: About to render ${objects.length} objects:`, objects.map(o => ({id: o.id, type: o.type})));
+          // Only log when there are actually objects to render  
+          if (objects.length > 0) {
+            console.warn(`🗂️ 2D Viewport: Rendering ${objects.length} objects`);
+            console.warn(`🗂️ OBJECTS TYPES:`, objects.map(obj => ({ id: obj.id, type: obj.type })));
+          }
+          
+          // Make objects available globally for debugging
+          window.debugObjects = objects;
           
             // Separate objects by type for proper rendering order
             const slabs = objects.filter(obj => obj && obj.type === 'slab');
             const walls = objects.filter(obj => obj && obj.type === 'wall' && obj.params);
             const nonWalls = objects.filter(obj => obj && obj.type !== 'wall' && obj.type !== 'slab');
             
-            console.log(`🏗️ SLAB DEBUG: All objects:`, objects.map(o => ({id: o.id, type: o.type, hasParams: !!o.params})));
-            console.log(`🏗️ SLAB DEBUG: Slabs found:`, slabs.map(s => ({id: s.id, type: s.type, hasParams: !!s.params, position: s.position})));
-            
-            console.log(`🏗️ Found ${slabs.length} slabs, ${walls.length} valid walls, ${nonWalls.length} other objects`);
+            // DEBUG: Check if doors are in the objects array
+            const doors = objects.filter(obj => obj && obj.type === 'door');
+            if (doors.length > 0) {
+              console.warn(`🚪 OBJECTS DEBUG: Found ${doors.length} doors in objects array:`, doors.map(d => ({ id: d.id, type: d.type, hasPosition: !!d.position, position: d.position })));
+              console.warn(`🚪 OBJECTS DEBUG: NonWalls count: ${nonWalls.length}, includes doors:`, nonWalls.filter(obj => obj.type === 'door').length);
+              console.warn(`🚪 OBJECTS DEBUG: Door objects full data:`, doors);
+            }
+            // Only log slab details if there are slabs
+            if (slabs.length > 0) {
+              console.log(`🏗️ Found ${slabs.length} slabs, ${walls.length} walls, ${nonWalls.length} other objects`);
+            }
             
             // Validate wall objects before processing
             const validWalls = walls.filter(wall => {
@@ -4451,12 +5542,13 @@ const renderCADEngineMesh2D = useCallback((object) => {
               return true;
             });
             
-            console.log(`🧱 ${validWalls.length} walls passed validation`);
+            // Only log if there are walls
+            if (validWalls.length > 0) {
+              console.log(`🧱 ${validWalls.length} walls rendered`);
+            }
           
             // Create professional wall joinery with miter joints
-            console.log('🧱 About to call createProfessionalWallPaths with', validWalls.length, 'walls');
             const wallJoineryGroups = createProfessionalWallPaths(validWalls);
-            console.log('🧱 createProfessionalWallPaths returned', wallJoineryGroups.length, 'groups');
           
             const renderedWalls = renderProfessionalWallJoinery(wallJoineryGroups) || [];
             const renderedSlabs = slabs.map(object => {
@@ -4502,16 +5594,32 @@ const renderCADEngineMesh2D = useCallback((object) => {
         {/* Wall edge highlights for door/window placement */}
         {renderWallEdgeHighlights()}
         
-        {/* Wall placement preview for doors/windows */}
-        {renderWallPlacementPreview()}
+        {/* Wall placement preview for doors/windows - DISABLED, using door-specific preview instead */}
+        {/* {renderWallPlacementPreview()} */}
         
         {/* Connection indicators are now handled in the continuous preview */}
         
         {/* Draft preview */}
         {renderDraftPreview()}
         
+        {/* 🏗️ ARCHITECT3D: Render architect3d walls and corners */}
+        {renderArchitect3DWalls()}
+        
+        {/* 🏗️ ARCHITECT3D: Render wall preview */}
+        {renderArchitect3DPreview()}
+        
         {/* Professional door placement preview */}
         {renderDoorPlacementPreview()}
+        
+        {/* 2D CAD Block Ghost Preview */}
+        {pendingCADBlock && cadBlockGhostContent && (
+          <g
+            pointerEvents="none"
+            opacity="0.6"
+            transform={`translate(${cadBlockCursorPos.x.toFixed(2)}, ${cadBlockCursorPos.y.toFixed(2)})`}
+            dangerouslySetInnerHTML={{ __html: cadBlockGhostContent }}
+          />
+        )}
       </svg>
       
       {/* Viewport overlay info */}

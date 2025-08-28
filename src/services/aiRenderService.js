@@ -3,7 +3,7 @@
  * Handles communication with the backend for AI image rendering via ChatGPT
  */
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080';
 
 class AIRenderService {
   constructor() {

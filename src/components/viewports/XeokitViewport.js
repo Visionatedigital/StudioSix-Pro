@@ -596,18 +596,18 @@ const XeokitViewport = ({
         };
         
         const positionMatch = (
-          Math.abs(aabbCenter.x - cadObject.position.x) < 0.1 && 
-          Math.abs(aabbCenter.z - cadObject.position.z) < 0.1
+          Math.abs(aabbCenter.x - (cadObject.position?.x || 0)) < 0.1 && 
+          Math.abs(aabbCenter.z - (cadObject.position?.z || 0)) < 0.1
         );
         
         if (positionMatch) {
           console.log(`✅ [${cadObject.id}] Final coordinate verification PASSED`);
-          console.log(`   📍 Expected: [${cadObject.position.x.toFixed(3)}, ${cadObject.position.z.toFixed(3)}]`);
-          console.log(`   📍 Actual: [${aabbCenter.x.toFixed(3)}, ${aabbCenter.z.toFixed(3)}]`);
+          console.log(`   📍 Expected: [${(cadObject.position?.x || 0).toFixed(3)}, ${(cadObject.position?.z || 0).toFixed(3)}]`);
+          console.log(`   📍 Actual: [${(aabbCenter.x || 0).toFixed(3)}, ${(aabbCenter.z || 0).toFixed(3)}]`);
         } else {
           console.warn(`⚠️ [${cadObject.id}] Final coordinate verification FAILED`);
-          console.warn(`   📍 Expected: [${cadObject.position.x.toFixed(3)}, ${cadObject.position.z.toFixed(3)}]`);
-          console.warn(`   📍 Actual: [${aabbCenter.x.toFixed(3)}, ${aabbCenter.z.toFixed(3)}]`);
+          console.warn(`   📍 Expected: [${(cadObject.position?.x || 0).toFixed(3)}, ${(cadObject.position?.z || 0).toFixed(3)}]`);
+          console.warn(`   📍 Actual: [${(aabbCenter.x || 0).toFixed(3)}, ${(aabbCenter.z || 0).toFixed(3)}]`);
         }
       } else {
         console.warn(`⚠️ [${cadObject.id}] No AABB available after finalization`);

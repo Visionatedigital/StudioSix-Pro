@@ -1,0 +1,161 @@
+{
+  "generatedAt": "2025-08-22T15:39:59.234Z",
+  "bucketName": "models_fbx",
+  "baseUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx",
+  "categories": [
+    {
+      "name": "floor lamps",
+      "displayName": "Floor lamps",
+      "icon": "🕯️",
+      "modelCount": 15,
+      "models": [
+        {
+          "name": "CGT_Floor_Lamp_001",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_001.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_001.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_002",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_002.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_002.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_003",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_003.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_003.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_004",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_004.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_004.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_005",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_005.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_005.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_006",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_006.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_006.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_007",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_007.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_007.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_008",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_008.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_008.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_009",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_009.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_009.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_010",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_010.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_010.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_011",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_011.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_011.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_012",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_012.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_012.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_013",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_013.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_013.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_014",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_014.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_014.fbx"
+        },
+        {
+          "name": "CGT_Floor_Lamp_015",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/thumbnails/CGT_Floor_Lamp_015.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/floor%20lamps/models/CGT_Floor_Lamp_015.fbx"
+        }
+      ]
+    },
+    {
+      "name": "Lounge Chairs",
+      "displayName": "Lounge Chairs",
+      "icon": "🛋️",
+      "modelCount": 8,
+      "models": [
+        {
+          "name": "CGT_Lounge_Chair_001",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_001.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_001.fbx"
+        },
+        {
+          "name": "CGT_Lounge_Chair_002",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_002.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_002.fbx"
+        },
+        {
+          "name": "CGT_Lounge_Chair_003",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_003.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_003.fbx"
+        },
+        {
+          "name": "CGT_Lounge_Chair_004",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_004.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_004.fbx"
+        },
+        {
+          "name": "CGT_Lounge_Chair_005",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_005.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_005.fbx"
+        },
+        {
+          "name": "CGT_Lounge_Chair_006",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_006.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_006.fbx"
+        },
+        {
+          "name": "CGT_Lounge_Chair_007",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_007.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_007.fbx"
+        },
+        {
+          "name": "CGT_Lounge_Chair_008",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/thumbnails/CGT_Lounge_Chair_008.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Lounge%20Chairs/models/CGT_Lounge_Chair_008.fbx"
+        }
+      ]
+    },
+    {
+      "name": "Side Tables",
+      "displayName": "Side Tables",
+      "icon": "🪑",
+      "modelCount": 3,
+      "models": [
+        {
+          "name": "Side-Table_01-330pl",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Side%20Tables/thumbnails/Side-Table_01-330pl.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Side%20Tables/models/Side-Table_01-330pl.fbx"
+        },
+        {
+          "name": "Side-Table_02-1050pl",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Side%20Tables/thumbnails/Side-Table_02-1050pl.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Side%20Tables/models/Side-Table_02-1050pl.fbx"
+        },
+        {
+          "name": "Side-Table_03-1600pl",
+          "thumbnailUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Side%20Tables/thumbnails/Side-Table_03-1600pl.jpg",
+          "modelUrl": "https://zwrooqvwxdwvnuhpepta.supabase.co/storage/v1/object/public/models_fbx/Side%20Tables/models/Side-Table_03-1600pl.fbx"
+        }
+      ]
+    }
+  ]
+}

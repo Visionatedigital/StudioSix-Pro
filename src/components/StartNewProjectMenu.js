@@ -23,6 +23,7 @@ import {
 } from '@heroicons/react/24/outline';
 import recentProjectsManager from '../utils/RecentProjectsManager';
 import AnimatedPromptBox from './AnimatedPromptBox';
+import autoSaveService from '../services/AutoSaveService';
 
 const PROJECT_TEMPLATES = [
   {
@@ -82,6 +83,9 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
   // Recent projects state
   const [recentProjects, setRecentProjects] = useState([]);
   const [loadingProjects, setLoadingProjects] = useState(true);
+  const [recoveredProjects, setRecoveredProjects] = useState([]);
+  const [showRecoveryBanner, setShowRecoveryBanner] = useState(false);
+  const [openingProjectId, setOpeningProjectId] = useState(null);
   
   // File upload state
   const [isUploading, setIsUploading] = useState(false);
@@ -89,6 +93,10 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
   const [uploadStatus, setUploadStatus] = useState(null); // 'success', 'error', null
   const [uploadMessage, setUploadMessage] = useState('');
   const fileInputRef = useRef(null);
+
+  // Project initialization loading state
+  const [isInitializingProject, setIsInitializingProject] = useState(false);
+  const [initializationProgress, setInitializationProgress] = useState(0);
 
   // Profile dropdown state
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
@@ -132,24 +140,36 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
     return name.substring(0, 2).toUpperCase();
   };
 
-  // Load recent projects on component mount
+  // Load recent projects and check for recovery on component mount
   useEffect(() => {
-    const loadRecentProjects = async () => {
+    const loadProjectsAndCheckRecovery = async () => {
       try {
         setLoadingProjects(true);
+        
+        // Load recent projects
         const projects = await recentProjectsManager.getRecentProjectsForUI();
         setRecentProjects(projects);
         console.log('📋 Loaded recent projects:', projects.length);
+        
+        // Check for projects that need recovery (if user is available)
+        if (user?.id) {
+          const recovered = await autoSaveService.recoverUnsavedProjects(user.id);
+          if (recovered.length > 0) {
+            console.log('🔄 Found projects for recovery:', recovered.length);
+            setRecoveredProjects(recovered);
+            setShowRecoveryBanner(true);
+          }
+        }
       } catch (error) {
-        console.error('Failed to load recent projects:', error);
+        console.error('Failed to load projects:', error);
         setRecentProjects([]);
       } finally {
         setLoadingProjects(false);
       }
     };
 
-    loadRecentProjects();
-  }, []);
+    loadProjectsAndCheckRecovery();
+  }, [user]);
 
   const handleTemplateSelect = (template) => {
     if (selectedTemplate?.id === template.id) {
@@ -165,41 +185,142 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
     }
   };
 
-  const handleStartProject = () => {
-    if (selectedTemplate) {
-      onStartProject({
-        template: selectedTemplate,
-        projectData: projectData
-      });
+  const handleStartProject = async () => {
+    if (selectedTemplate && !isInitializingProject) {
+      console.log('🚀 Starting project initialization...');
+      setIsInitializingProject(true);
+      setInitializationProgress(0);
+
+      try {
+        // Simulate app initialization steps with progress
+        const initSteps = [
+          { message: 'Setting up project structure...', duration: 500 },
+          { message: 'Loading CAD engine...', duration: 800 },
+          { message: 'Initializing 3D viewport...', duration: 600 },
+          { message: 'Loading material library...', duration: 400 },
+          { message: 'Preparing design tools...', duration: 300 },
+          { message: 'Finalizing workspace...', duration: 200 }
+        ];
+
+        for (let i = 0; i < initSteps.length; i++) {
+          const step = initSteps[i];
+          console.log(`🔧 ${step.message}`);
+          
+          // Update progress
+          setInitializationProgress(((i + 1) / initSteps.length) * 100);
+          
+          // Wait for the step duration
+          await new Promise(resolve => setTimeout(resolve, step.duration));
+        }
+
+        // Small final delay to ensure everything is ready
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        console.log('✅ Project initialization complete - launching app');
+        
+        // Now start the project
+        onStartProject({
+          template: selectedTemplate,
+          projectData: projectData
+        });
+      } catch (error) {
+        console.error('❌ Project initialization failed:', error);
+        // Still try to start the project even if initialization monitoring fails
+        onStartProject({
+          template: selectedTemplate,
+          projectData: projectData
+        });
+      } finally {
+        // Reset loading state after a short delay (will be unmounted anyway)
+        setTimeout(() => {
+          setIsInitializingProject(false);
+          setInitializationProgress(0);
+        }, 500);
+      }
     }
   };
 
-  const handlePromptSubmit = (prompt) => {
+  const handlePromptSubmit = async (prompt) => {
+    if (isInitializingProject) return; // Prevent double-clicks
+    
     console.log('🎯 AI Prompt submitted:', prompt);
-    
-    // Create a custom project with the AI prompt
-    const aiProjectData = {
-      name: prompt.replace(/^(create|build|design|make)\s*/i, '').trim() || 'AI Generated Project',
-      description: `Generated from prompt: "${prompt}"`,
-      location: '',
-      client: '',
-      aiPrompt: prompt
-    };
-    
-    // Start project with AI Custom template
-    onStartProject({
-      template: {
-        id: 'ai-custom-project',
-        title: 'AI Custom Project',
-        description: 'Project generated from natural language prompt',
-        icon: SparklesIcon,
-        color: 'bg-studiosix-500',
-        features: ['AI-guided design', 'Natural language processing', 'Custom requirements'],
-        complexity: 'AI Assisted',
-        estimatedTime: 'Variable'
-      },
-      projectData: aiProjectData
-    });
+    setIsInitializingProject(true);
+    setInitializationProgress(0);
+
+    try {
+      // AI project initialization steps
+      const initSteps = [
+        { message: 'Processing AI prompt...', duration: 600 },
+        { message: 'Setting up AI workspace...', duration: 700 },
+        { message: 'Loading intelligent tools...', duration: 500 },
+        { message: 'Initializing design engine...', duration: 800 },
+        { message: 'Preparing AI assistant...', duration: 400 },
+        { message: 'Launching AI-powered CAD...', duration: 300 }
+      ];
+
+      for (let i = 0; i < initSteps.length; i++) {
+        const step = initSteps[i];
+        console.log(`🤖 ${step.message}`);
+        
+        setInitializationProgress(((i + 1) / initSteps.length) * 100);
+        await new Promise(resolve => setTimeout(resolve, step.duration));
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 200));
+
+      // Create a custom project with the AI prompt
+      const aiProjectData = {
+        name: prompt.replace(/^(create|build|design|make)\s*/i, '').trim() || 'AI Generated Project',
+        description: `Generated from prompt: "${prompt}"`,
+        location: '',
+        client: '',
+        aiPrompt: prompt
+      };
+      
+      console.log('🚀 Starting AI-powered project...');
+      
+      // Start project with AI Custom template
+      onStartProject({
+        template: {
+          id: 'ai-custom-project',
+          title: 'AI Custom Project',
+          description: 'Project generated from natural language prompt',
+          icon: SparklesIcon,
+          color: 'bg-studiosix-500',
+          features: ['AI-guided design', 'Natural language processing', 'Custom requirements'],
+          complexity: 'AI Assisted',
+          estimatedTime: 'Variable'
+        },
+        projectData: aiProjectData
+      });
+    } catch (error) {
+      console.error('❌ AI project initialization failed:', error);
+      // Fallback to immediate start
+      onStartProject({
+        template: {
+          id: 'ai-custom-project',
+          title: 'AI Custom Project',
+          description: 'Project generated from natural language prompt',
+          icon: SparklesIcon,
+          color: 'bg-studiosix-500',
+          features: ['AI-guided design', 'Natural language processing', 'Custom requirements'],
+          complexity: 'AI Assisted',
+          estimatedTime: 'Variable'
+        },
+        projectData: {
+          name: prompt.replace(/^(create|build|design|make)\s*/i, '').trim() || 'AI Generated Project',
+          description: `Generated from prompt: "${prompt}"`,
+          location: '',
+          client: '',
+          aiPrompt: prompt
+        }
+      });
+    } finally {
+      setTimeout(() => {
+        setIsInitializingProject(false);
+        setInitializationProgress(0);
+      }, 500);
+    }
   };
 
   // Supported file types for BIM import
@@ -216,6 +337,9 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
     // Other 3D formats
     '.3ds': '3D Studio',
     '.obj': 'Wavefront OBJ',
+    '.fbx': 'Autodesk FBX',
+    '.gltf': 'glTF',
+    '.glb': 'glTF Binary',
     '.dae': 'Collada',
     '.step': 'STEP',
     '.stp': 'STEP',
@@ -294,14 +418,43 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
   }, [supportedTypes, onStartProject]);
 
   const handleOpenRecent = async (project) => {
+    if (isInitializingProject || openingProjectId) return; // Prevent multiple opens
+    
     try {
+      console.log('📂 Opening recent project:', project.name);
+      setOpeningProjectId(project.id);
+      setIsInitializingProject(true);
+      setInitializationProgress(0);
+      
+      // Project loading steps with progress
+      const loadingSteps = [
+        { message: 'Loading project data...', duration: 400 },
+        { message: 'Restoring workspace...', duration: 600 },
+        { message: 'Loading saved objects...', duration: 500 },
+        { message: 'Initializing viewports...', duration: 700 },
+        { message: 'Restoring tool settings...', duration: 300 },
+        { message: 'Finalizing project...', duration: 200 }
+      ];
+
+      for (let i = 0; i < loadingSteps.length; i++) {
+        const step = loadingSteps[i];
+        console.log(`📁 ${step.message}`);
+        
+        setInitializationProgress(((i + 1) / loadingSteps.length) * 100);
+        await new Promise(resolve => setTimeout(resolve, step.duration));
+      }
+
       // Get full project data from RecentProjectsManager
       const fullProject = await recentProjectsManager.getProject(project.id);
+      
+      // Small final delay
+      await new Promise(resolve => setTimeout(resolve, 200));
       
       if (fullProject) {
         // Mark project as opened (updates lastOpened timestamp)
         await recentProjectsManager.markProjectOpened(project.id);
         
+        console.log('✅ Project loaded successfully - launching app');
         // Pass full project data to parent
         onOpenExisting(fullProject);
         
@@ -313,12 +466,58 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
       }
     } catch (error) {
       console.error('Failed to open recent project:', error);
+      // Still try to open with whatever data we have
       onOpenExisting(project);
+    } finally {
+      // Reset loading states after a brief delay
+      setTimeout(() => {
+        setOpeningProjectId(null);
+        setIsInitializingProject(false);
+        setInitializationProgress(0);
+      }, 300);
     }
   };
 
   return (
     <div className="h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-studiosix-950 relative overflow-hidden">
+      {/* Project Initialization Loading Overlay */}
+      {isInitializingProject && (
+        <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center">
+          <div className="text-center">
+            {/* Loading animation */}
+            <div className="relative mb-8">
+              <div className="w-20 h-20 border-4 border-studiosix-500/20 border-t-studiosix-500 rounded-full animate-spin mx-auto"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <RocketLaunchIcon className="w-8 h-8 text-studiosix-400 animate-pulse" />
+              </div>
+            </div>
+            
+            {/* Progress text */}
+            <h2 className="text-2xl font-bold text-white mb-2">Initializing Project</h2>
+            <p className="text-gray-400 mb-6">Setting up your workspace...</p>
+            
+            {/* Progress bar */}
+            <div className="w-80 mx-auto">
+              <div className="bg-gray-700/50 rounded-full h-2 mb-2">
+                <div 
+                  className="bg-studiosix-500 h-2 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${initializationProgress}%` }}
+                ></div>
+              </div>
+              <p className="text-sm text-gray-500">{Math.round(initializationProgress)}% Complete</p>
+            </div>
+            
+            {/* Tip text */}
+            <div className="mt-8 p-4 bg-studiosix-600/10 rounded-lg border border-studiosix-500/20 max-w-md mx-auto">
+              <LightBulbIcon className="w-5 h-5 text-studiosix-400 inline mr-2" />
+              <span className="text-sm text-gray-300">
+                We're preparing all the tools and features you'll need for your project
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Background elements */}
       <div className="absolute inset-0">
         <div className="absolute top-20 right-20 w-96 h-96 bg-studiosix-500/5 rounded-full blur-3xl"></div>
@@ -394,6 +593,56 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
             </div>
           </div>
         </div>
+
+        {/* Recovery Banner */}
+        {showRecoveryBanner && recoveredProjects.length > 0 && (
+          <div className="absolute top-16 left-0 right-0 z-20">
+            <div className="mx-6 my-2">
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 backdrop-blur-sm">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start space-x-3">
+                    <ExclamationTriangleIcon className="w-5 h-5 text-yellow-500 mt-0.5" />
+                    <div>
+                      <h3 className="text-sm font-semibold text-yellow-200">Unsaved Work Found</h3>
+                      <p className="text-xs text-yellow-200/80 mt-1">
+                        We found {recoveredProjects.length} project{recoveredProjects.length > 1 ? 's' : ''} with unsaved changes from your last session.
+                      </p>
+                      <div className="flex items-center space-x-3 mt-3">
+                        <button
+                          onClick={() => {
+                            // Recover the first project or show selection
+                            if (recoveredProjects.length === 1) {
+                              onOpenExisting(recoveredProjects[0]);
+                            } else {
+                              // Show recovery dialog for multiple projects
+                              console.log('🔄 Show recovery dialog for multiple projects');
+                            }
+                            setShowRecoveryBanner(false);
+                          }}
+                          className="text-xs px-3 py-1.5 bg-yellow-500 text-black rounded-md hover:bg-yellow-400 transition-colors font-medium"
+                        >
+                          {recoveredProjects.length === 1 ? 'Recover Project' : 'View Recoverable Projects'}
+                        </button>
+                        <button
+                          onClick={() => setShowRecoveryBanner(false)}
+                          className="text-xs px-3 py-1.5 border border-yellow-500/30 text-yellow-200 rounded-md hover:bg-yellow-500/10 transition-colors"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowRecoveryBanner(false)}
+                    className="text-yellow-500/60 hover:text-yellow-500 transition-colors"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Main content */}
         <div className="flex-1 pt-24 px-6 pb-6">
@@ -527,13 +776,26 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
                       // Recent projects list (show only first 2)
                       <>
                         <div className="space-y-3 flex-1 overflow-y-auto">
-                          {recentProjects.slice(0, 2).map((project) => (
+                          {recentProjects.slice(0, 2).map((project) => {
+                            const isOpening = openingProjectId === project.id;
+                            return (
                             <div
                               key={project.id}
-                              onClick={() => handleOpenRecent(project)}
-                              className="p-4 bg-slate-800/30 rounded-lg cursor-pointer hover:bg-slate-700/40 transition-all duration-200 group relative"
+                              onClick={() => !isOpening && handleOpenRecent(project)}
+                              className={`p-4 bg-slate-800/30 rounded-lg transition-all duration-200 group relative ${
+                                isOpening 
+                                  ? 'cursor-wait opacity-75' 
+                                  : 'cursor-pointer hover:bg-slate-700/40'
+                              }`}
                             >
-                              {project.isNew && (
+                              {/* Loading indicator */}
+                              {isOpening && (
+                                <div className="absolute top-2 right-2">
+                                  <div className="animate-spin w-4 h-4 border-2 border-studiosix-500 border-t-transparent rounded-full"></div>
+                                </div>
+                              )}
+                              
+                              {!isOpening && project.isNew && (
                                 <div className="absolute top-2 right-2">
                                   <StarIcon className="w-4 h-4 text-studiosix-400" />
                                 </div>
@@ -541,8 +803,13 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
                               
                               <div className="flex items-start justify-between mb-2">
                                 <div className="flex-1 pr-6">
-                                  <h4 className="text-white font-medium group-hover:text-studiosix-300 transition-colors">
+                                  <h4 className={`font-medium transition-colors ${
+                                    isOpening 
+                                      ? 'text-gray-300' 
+                                      : 'text-white group-hover:text-studiosix-300'
+                                  }`}>
                                     {project.name}
+                                    {isOpening && <span className="ml-2 text-xs text-studiosix-400">Opening...</span>}
                                   </h4>
                                   <p className="text-sm text-gray-400">{project.type}</p>
                                   {project.description && (
@@ -571,7 +838,8 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
                                 <span className="text-xs text-gray-500">{project.progress}% complete</span>
                               </div>
                             </div>
-                          ))}
+                            );
+                          })}
                         </div>
                         
                         {recentProjects.length > 2 && (

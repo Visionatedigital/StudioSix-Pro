@@ -78,3 +78,20 @@ temp/
 
 # Docker
 .dockerignore
+
+logs
+dev-debug.log
+# Dependency directories
+# Editor directories and files
+.idea
+.vscode
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+# OS specific
+
+# Task files
+tasks.json
+tasks/ 

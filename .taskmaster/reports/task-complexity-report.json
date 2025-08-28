@@ -1,0 +1,93 @@
+{
+	"meta": {
+		"generatedAt": "2025-08-21T11:53:45.145Z",
+		"tasksAnalyzed": 10,
+		"totalTasks": 10,
+		"analysisCount": 10,
+		"thresholdScore": 5,
+		"projectName": "Taskmaster",
+		"usedResearch": true
+	},
+	"complexityAnalysis": [
+		{
+			"taskId": 1,
+			"taskTitle": "Activate Stair Tool and Input Modes in React App",
+			"complexityScore": 6,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "Expand into ~7 subtasks covering: 1) Tool state machine design (idle/awaitingStart/drawing/preview/committed) with TypeScript types and Redux/Context integration; 2) Pointer event routing on the canvas (pointerdown/move/up) with capture semantics and prevention of default gestures; 3) World/screen coordinate conversion and optional grid snapping; 4) Draft object lifecycle (create/update/cancel/confirm) and keyboard handling (ESC/ENTER); 5) Rubber-band preview rendering and cursor hints; 6) Integration points: onToolActivate('stair') and handoff to creation of Stair entity; 7) Testing: unit tests for state transitions, RTL pointer simulations for click-drag and two-click, and snapshot of preview behavior. Include acceptance criteria, error handling (e.g., invalid coordinates), and performance budget (no dropped frames during drag).",
+			"reasoning": "Moderate complexity due to input mode handling, a small finite-state machine, coordinate conversion, cancel/confirm UX, and robust event/testing strategy."
+		},
+		{
+			"taskId": 2,
+			"taskTitle": "Parametric Stair Model and Computation Engine",
+			"complexityScore": 7,
+			"recommendedSubtasks": 8,
+			"expansionPrompt": "Expand into ~8 subtasks covering: 1) Define StairParams and derived metadata interfaces (TypeScript) with unit conventions (meters internally); 2) Defaults provider and normalization; 3) Core computeStair algorithm implementing Blondel rule (2R+T≈0.63m) with clamping and invariants; 4) Change-intent handling (_change flags) to drive dependent updates; 5) Landing-aware parameter normalization (k clamping, default landing depth); 6) Validation and warning system (ranges, NaN guards) with messages for UI; 7) Pure functions API and immutability guarantees; 8) Testing: unit and property-based tests for random L/R, invariants (N>=1, T,R in range), and snapshot of metadata. Include performance targets and documentation of assumptions.",
+			"reasoning": "Algorithmic rules with domain constraints, unit handling, and robust validation push complexity beyond simple modeling; needs determinism and thorough tests."
+		},
+		{
+			"taskId": 3,
+			"taskTitle": "Shared Geometry Builder (2D/3D-agnostic)",
+			"complexityScore": 8,
+			"recommendedSubtasks": 9,
+			"expansionPrompt": "Expand into ~9 subtasks covering: 1) Define builder inputs/outputs (plan/elevation/3D) with TypeScript types; 2) Local coordinate frame computation (x along run, y width, z up) and world transform helpers; 3) Flight/step iteration logic for risers and treads; 4) Plan geometry (outline polygons, riser segments, arrow) with landing split; 5) Elevation profile generation with continuous polyline; 6) 3D instancing data (positions/scales/orientations) including landing prism and split-flight offsets; 7) Precision and numerical stability (epsilon/clamping), deterministic output; 8) Performance considerations (no allocations in hot loops, reuse buffers); 9) Tests: counts, dimensions, landing edge cases, and golden snapshots. Provide API docs and examples.",
+			"reasoning": "Requires precise geometric reasoning, clean separation for reuse across 2D/3D, landing splits, and performance-conscious pure functions."
+		},
+		{
+			"taskId": 4,
+			"taskTitle": "2D Representation (Plan + Elevation) Rendering",
+			"complexityScore": 6,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "Expand into ~7 subtasks covering: 1) Canvas render pipeline integration and layers; 2) Plan rendering from builders (outline, risers, arrows) with world transform; 3) Elevation rendering with local-to-elevation transform; 4) Styling from theme (lineweights/colors) and DPI scaling; 5) Hit regions for selection and wiring to selection manager; 6) Live updates/subscriptions and efficient invalidation/diff; 7) Testing: visual regression snapshots, count assertions, and performance checks (<16ms for N≤25). Include acceptance criteria for visual fidelity and selection hit accuracy.",
+			"reasoning": "Standard canvas rendering task with transforms, styling, hit-testing, and efficient updates; moderate complexity with visual regressions and performance."
+		},
+		{
+			"taskId": 5,
+			"taskTitle": "3D Representation with Three.js (Low-poly Meshes)",
+			"complexityScore": 7,
+			"recommendedSubtasks": 8,
+			"expansionPrompt": "Expand into ~8 subtasks covering: 1) Three.js scene integration and resource management plan; 2) Base geometries and materials (standard/PBR) with texture pipeline and fallbacks; 3) InstancedMesh setup for treads/risers and landing mesh; 4) Matrix composition from builder transforms (scale/rotation/position) and world alignment; 5) Updates on param changes (setMatrixAt, instanceMatrix.needsUpdate) and disposal on delete; 6) Optional shadows/LOD and N clamping with user warnings; 7) Performance instrumentation (FPS, memory) and safeguards; 8) Tests: counts, transform correctness, material switching, and memory leak checks. Document usage and constraints.",
+			"reasoning": "3D instancing, materials, and lifecycle/disposal add non-trivial complexity with performance and memory considerations."
+		},
+		{
+			"taskId": 6,
+			"taskTitle": "Selection Model and Object Lifecycle Management",
+			"complexityScore": 6,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "Expand into ~7 subtasks covering: 1) Entity/scene store schema with UUID assignment; 2) Registration and lookup of stair entities and render nodes; 3) 2D hit-testing for plan outline and 3D Raycaster mapping from instances to stair ID; 4) Selection state and exclusivity rules; 5) Visual highlighting in 2D and 3D; 6) CRUD actions (create/update/delete/duplicate) with undo/redo hooks; 7) Tests: reducers, cross-view selection, deletion cleanup, highlight toggling. Define APIs, events, and edge cases (empty selection, deleted selection).",
+			"reasoning": "Cross-cutting concerns across store/2D/3D with robust hit-testing and lifecycle handling; moderate complexity."
+		},
+		{
+			"taskId": 7,
+			"taskTitle": "Properties Panel Integration with Live Parametric Editing",
+			"complexityScore": 6,
+			"recommendedSubtasks": 7,
+			"expansionPrompt": "Expand into ~7 subtasks covering: 1) Panel UI fields and components with unit converters (mm↔m); 2) Binding to selected stair and optimistic updates; 3) computeStair integration with _change semantics and throttled updates (rAF/debounce); 4) Derived/read-only fields (tread_count) and total dimensions; 5) Validation and non-blocking warnings (ranges, Blondel) with UX; 6) Landing-specific fields enable/disable logic; 7) Tests: RTL field edits, derived updates, debounce behavior, and error states. Include accessibility checks and keyboard interaction.",
+			"reasoning": "Reactive form bindings with unit conversions, derived values, and debounced computation; standard but requires careful UX validation."
+		},
+		{
+			"taskId": 8,
+			"taskTitle": "Drag Handles for Graphical Adjustment on Canvas",
+			"complexityScore": 8,
+			"recommendedSubtasks": 9,
+			"expansionPrompt": "Expand into ~9 subtasks covering: 1) Handle design (start/end/width/landing) and rendering; 2) Pointer interaction model (hover, drag, capture) and keyboard nudging; 3) Local-frame drag math (project along run, lateral width changes) and constraints; 4) Snapping to grid/angles and discrete landing index snapping; 5) Live preview updates with throttling; 6) Conflict resolution with selection and other tools; 7) Accessibility and hit area tuning; 8) Edge case handling (very short runs, min width); 9) Tests: Cypress interaction flows, edge cases, and performance during drag. Document handle API and visuals.",
+			"reasoning": "High interaction complexity with precise geometry updates, snapping, constraints, and A11y, plus real-time rendering requirements."
+		},
+		{
+			"taskId": 9,
+			"taskTitle": "Landing Generation and Split-Flight Support",
+			"complexityScore": 6,
+			"recommendedSubtasks": 6,
+			"expansionPrompt": "Expand into ~6 subtasks covering: 1) Parameter normalization and clamping for landingAfterRisers and landing depth; 2) Compute continuity (elevation/run offsets) and integration with builders; 3) Plan/elevation markers for landing and arrow continuity; 4) 3D landing prism and second-flight offset; 5) UI/editing rules in panel and handles; 6) Tests: continuity assertions, bounds behavior, and visual checks. Provide clear rules for auto-disable/clamp and user warnings.",
+			"reasoning": "Requires coherent split of geometry and parameters with continuity constraints and clear UI behavior; moderate complexity."
+		},
+		{
+			"taskId": 10,
+			"taskTitle": "IFC and DXF Export with Stair Metadata",
+			"complexityScore": 9,
+			"recommendedSubtasks": 10,
+			"expansionPrompt": "Expand into ~10 subtasks covering: 1) Export architecture and entrypoints (batch/single) with versioning; 2) IFC spatial structure hookup and unit setup (meters); 3) Mapping to IfcStair/IfcStairFlight and IfcSlab(LANDING) with IfcRelAggregates; 4) Property sets (Pset_StairCommon) and custom properties/material mapping; 5) Geometry strategy: swept solids vs triangulated meshes from 3D builders with tolerances; 6) DXF layer schema and entity writing (polylines/lines) from plan/elevation builders; 7) Coordinate systems and transforms; 8) Large N/performance and memory management; 9) Validation steps (IfcOpenShell/IFC.js, CAD import) and golden tests; 10) Error handling, feature flags, and documentation. Include compliance notes (IFC4/IFC2x3) and acceptance criteria.",
+			"reasoning": "High complexity due to external standards, schema mappings, geometry conversion strategies, units, and cross-tool validation and performance concerns."
+		}
+	]
+}

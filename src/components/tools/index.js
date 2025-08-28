@@ -1,5 +1,6 @@
 export { default as WallTool } from './WallTool';
 export { default as SlabTool } from './SlabTool';
+export { default as RampTool } from './RampTool';
 export { default as DoorTool } from './DoorTool';
 export { default as WindowTool } from './WindowTool';
 export { default as ColumnTool } from './ColumnTool';

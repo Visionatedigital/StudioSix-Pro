@@ -2,21 +2,16 @@ import React, { useState } from 'react';
 import {
   DocumentArrowDownIcon,
   XMarkIcon,
-  FolderIcon,
   DocumentIcon
 } from '@heroicons/react/24/outline';
 
 const SaveDialog = ({ isOpen, onClose, onSave }) => {
   const [fileName, setFileName] = useState('');
-  const [fileFormat, setFileFormat] = useState('FCStd');
-  const [savePath, setSavePath] = useState('');
+  const [fileFormat, setFileFormat] = useState('six.bim');
+  const [savePath, setSavePath] = useState('Cloud');
 
   const supportedFormats = [
-    { value: 'FCStd', label: 'FreeCAD Document (.FCStd)', description: 'Native FreeCAD format with full feature support' },
-    { value: 'stl', label: 'STL Mesh (.stl)', description: 'Triangulated mesh for 3D printing' },
-    { value: 'step', label: 'STEP (.step)', description: 'Standard CAD exchange format' },
-    { value: 'obj', label: 'Wavefront OBJ (.obj)', description: '3D mesh format' },
-    { value: 'iges', label: 'IGES (.iges)', description: 'Legacy CAD exchange format' }
+    { value: 'six.bim', label: 'StudioSix BIM Project (.six.bim)', description: 'Native StudioSix format with full BIM project data, geometry, and metadata' }
   ];
 
   const handleSave = () => {
@@ -28,20 +23,18 @@ const SaveDialog = ({ isOpen, onClose, onSave }) => {
     const saveData = {
       fileName: fileName.trim(),
       format: fileFormat,
-      path: savePath || 'Downloads'
+      path: savePath || 'Cloud'
     };
 
+    console.log('💾 SaveDialog: Saving with data:', saveData);
     onSave(saveData);
+    onClose(); // Close dialog after save
   };
 
-  const handleBrowsePath = () => {
-    // In a real implementation, this would open the system file picker
-    // For now, we'll use a simple prompt
-    const path = prompt('Enter save path:', savePath || 'Downloads');
-    if (path !== null) {
-      setSavePath(path);
-    }
-  };
+  const saveLocationOptions = [
+    { value: 'Cloud', label: 'Cloud (StudioSix Account)', description: 'Save to your StudioSix cloud storage' },
+    { value: 'Downloads', label: 'Downloads (Local Computer)', description: 'Download file to your computer' }
+  ];
 
   if (!isOpen) return null;
 
@@ -74,7 +67,7 @@ const SaveDialog = ({ isOpen, onClose, onSave }) => {
               value={fileName}
               onChange={(e) => setFileName(e.target.value)}
               placeholder="Enter file name..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white text-gray-900 placeholder-gray-500"
               autoFocus
             />
           </div>
@@ -84,22 +77,22 @@ const SaveDialog = ({ isOpen, onClose, onSave }) => {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Save Location
             </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={savePath}
-                onChange={(e) => setSavePath(e.target.value)}
-                placeholder="Downloads"
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-              />
-              <button
-                onClick={handleBrowsePath}
-                className="px-3 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
-                title="Browse for folder"
-              >
-                <FolderIcon className="w-5 h-5 text-gray-600" />
-              </button>
-            </div>
+            <select
+              value={savePath}
+              onChange={(e) => setSavePath(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white text-gray-900"
+            >
+              {saveLocationOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {saveLocationOptions.find(opt => opt.value === savePath) && (
+              <p className="text-xs text-gray-500 mt-1">
+                {saveLocationOptions.find(opt => opt.value === savePath).description}
+              </p>
+            )}
           </div>
 
           {/* File Format */}
@@ -110,7 +103,7 @@ const SaveDialog = ({ isOpen, onClose, onSave }) => {
             <select
               value={fileFormat}
               onChange={(e) => setFileFormat(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none bg-white text-gray-900"
             >
               {supportedFormats.map((format) => (
                 <option key={format.value} value={format.value}>
@@ -130,7 +123,7 @@ const SaveDialog = ({ isOpen, onClose, onSave }) => {
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <DocumentIcon className="w-4 h-4" />
               <span>
-                {fileName || 'untitled'}.{fileFormat.toLowerCase()} 
+                {fileName || 'untitled'}.{fileFormat} 
                 {savePath && ` in ${savePath}`}
               </span>
             </div>

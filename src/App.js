@@ -15,6 +15,10 @@ import ThankYouPage from './components/ThankYouPage';
 import { isAuthConfigured } from './config/supabase';
 import recentProjectsManager from './utils/RecentProjectsManager';
 import TestRouting from './components/TestRouting';
+import useAutoSave from './hooks/useAutoSave';
+import AutoSaveStatus from './components/AutoSaveStatus';
+import PricingPage from './components/PricingPage';
+import PaymentSuccess from './components/PaymentSuccess';
 
 // IFC.js Test Runner - Temporarily disabled for Task 2 due to WASM issues
 // import './utils/IFCTestRunner';
@@ -24,7 +28,6 @@ import {
   RectangleStackIcon,
   HomeIcon,
   CubeIcon,
-  BeakerIcon,
   ScaleIcon as RulerIcon,
   ChatBubbleLeftRightIcon,
   SparklesIcon,
@@ -47,6 +50,7 @@ import {
   TagIcon,
   CameraIcon,
   LightBulbIcon,
+  Cog6ToothIcon,
   SunIcon,
   MoonIcon,
   ChevronLeftIcon,
@@ -59,7 +63,7 @@ import { PropertyPanel } from './components/property-panel';
 import OBJModelPanel from './components/property-panel/OBJModelPanel';
 import SlabPropertyPanel from './components/property-panel/SlabPropertyPanel';
 import ToolPanelManager from './components/tools/ToolPanelManager';
-import { WallIcon, SlabIcon, DoorIcon, WindowIcon, RoofIcon, StairIcon } from './components/icons';
+import { WallIcon, SlabIcon, RampIcon, ColumnIcon, DoorIcon, WindowIcon, OpeningIcon, RoofIcon, StairIcon } from './components/icons';
 import ResizableAIChat from './components/ResizableAIChat';
 import NativeAIChat from './components/NativeAIChat';
 import AIRenderOverlay from './components/AIRenderOverlay';
@@ -67,12 +71,17 @@ import ViewportCaptureFrame from './components/ViewportCaptureFrame';
 import LiveStreamStatus from './components/LiveStreamStatus';
 import SaveDialog from './components/SaveDialog';
 import CADBlocksPopup from './components/CADBlocksPopup';
+import CAD2DBlocksModal from './components/CAD2DBlocksModal';
 import Model3DLoader from './components/Model3DLoader';
+import AISettingsModal from './components/AISettingsModal';
 // Removed property mapper - using direct object properties
 import standaloneCADEngine from './services/StandaloneCADEngine';
+import { Architect3DWallService } from './services/Architect3DWallService';
 // Import viewport components for 2D drafting + 3D visualization
 import XeokitViewport from './components/viewports/XeokitViewport';
 import CAD2DViewport from './components/viewports/CAD2DViewport';
+import CAD3DViewport from './components/viewports/CAD3DViewport';
+import Architect3DViewport from './components/viewports/Architect3DViewport';
 import { useStandaloneCAD } from './hooks/useStandaloneCAD';
 import './index.css';
 
@@ -96,7 +105,7 @@ const BIM_TOOLS_GROUPS = {
     tools: [
       { id: 'wall', name: 'Wall', icon: WallIcon, description: 'Create walls', category: 'building', size: 'large' },
       { id: 'slab', name: 'Slab', icon: SlabIcon, description: 'Create floor slabs', category: 'building', size: 'large' },
-      { id: 'column', name: 'Column', icon: BeakerIcon, description: 'Create columns', category: 'structural', size: 'medium' },
+      { id: 'column', name: 'Column', icon: ColumnIcon, description: 'Create columns', category: 'structural', size: 'medium' },
       { id: 'beam', name: 'Beam', icon: RulerIcon, description: 'Add beams', category: 'structural', size: 'medium' },
     ]
   },
@@ -106,7 +115,7 @@ const BIM_TOOLS_GROUPS = {
     tools: [
       { id: 'door', name: 'Door', icon: DoorIcon, description: 'Add doors', category: 'openings', size: 'large' },
       { id: 'window', name: 'Window', icon: WindowIcon, description: 'Add windows', category: 'openings', size: 'large' },
-      { id: 'skylight', name: 'Skylight', icon: SunIcon, description: 'Add skylights', category: 'openings', size: 'medium' },
+      { id: 'opening', name: 'Opening', icon: OpeningIcon, description: 'Create openings in walls', category: 'openings', size: 'medium' },
     ]
   },
   building: {
@@ -115,7 +124,7 @@ const BIM_TOOLS_GROUPS = {
     tools: [
       { id: 'roof', name: 'Roof', icon: RoofIcon, description: 'Add roofs', category: 'building', size: 'large' },
       { id: 'stair', name: 'Stair', icon: StairIcon, description: 'Create stairs', category: 'circulation', size: 'large' },
-      { id: 'ramp', name: 'Ramp', icon: TruckIcon, description: 'Create ramps', category: 'circulation', size: 'medium' },
+      { id: 'ramp', name: 'Ramp', icon: RampIcon, description: 'Create sloped ramps', category: 'circulation', size: 'medium' },
     ]
   },
   cadblocks: {
@@ -133,7 +142,7 @@ const BIM_TOOLS_GROUPS = {
     tools: [
       { id: 'ai-chat', name: 'AI Chat', icon: ChatBubbleLeftRightIcon, description: 'Open AI Assistant', category: 'ai', size: 'large' },
       { id: 'ai-render', name: 'AI Render', icon: CameraIcon, description: 'AI rendering tool', category: 'ai', size: 'large' },
-      { id: 'voice-command', name: 'Voice', icon: SparklesIcon, description: 'Voice commands', category: 'ai', size: 'medium' },
+      { id: 'ai-settings', name: 'AI Settings', icon: Cog6ToothIcon, description: 'Configure AI features', category: 'ai', size: 'medium' },
     ]
   }
 };
@@ -250,7 +259,7 @@ const ChatMessage = ({ message, isUser, timestamp }) => (
 );
 
 // Ribbon-style Toolbar Component
-const RibbonToolbar = ({ selectedTool, onToolSelect, currentProject, onBackToProjects, onToggleChat, onFileAction, onEditAction, onHelpAction, onProfileAction, isRenderingInBackground, isRenderingActive, renderProgress, renderCompleted, isConnected, lastActivatedTool }) => {
+const RibbonToolbar = ({ selectedTool, onToolSelect, currentProject, onBackToProjects, onToggleChat, onFileAction, onEditAction, onHelpAction, onProfileAction, isRenderingInBackground, isRenderingActive, renderProgress, renderCompleted, isConnected, lastActivatedTool, autoSaveStatus }) => {
   const [activeGroup, setActiveGroup] = useState('navigate');
 
   const renderToolButton = (tool, groupIsActive = false) => {
@@ -437,7 +446,7 @@ const RibbonToolbar = ({ selectedTool, onToolSelect, currentProject, onBackToPro
               <div className="h-6 w-px bg-gray-600"></div>
               <div>
                 <p className="text-sm font-medium text-white">
-                  {currentProject.projectData?.name || currentProject.template?.title || currentProject.name || 'Untitled Project'}
+                  {currentProject.name || currentProject.projectData?.name || currentProject.template?.title || 'Untitled Project'}
                 </p>
                 <p className="text-xs text-gray-400">
                   {currentProject.template?.title || currentProject.type || 'Project'}
@@ -479,11 +488,12 @@ const RibbonToolbar = ({ selectedTool, onToolSelect, currentProject, onBackToPro
             <button
               onClick={() => onFileAction('import_ifc')}
               className="top-toolbar-btn flex items-center space-x-1 px-3 py-1.5 text-gray-300 hover:text-white hover:bg-gray-800/50 rounded-md transition-all duration-200"
-              title="Import 3D files (IFC, glTF, OBJ) - Works in both 2D and 3D modes"
+              title="Import 3D Models (FBX, glTF, OBJ for furniture) and BIM files (IFC) - Works in both 2D and 3D modes"
             >
               <BuildingOfficeIcon className="w-4 h-4" />
               <span className="text-xs font-medium">Import 3D</span>
             </button>
+
 
             <button
               onClick={() => onEditAction('undo')}
@@ -522,12 +532,30 @@ const RibbonToolbar = ({ selectedTool, onToolSelect, currentProject, onBackToPro
             <span className="text-sm text-gray-400">Ready</span>
           </div>
 
+          {/* AutoSave Status */}
+          {currentProject && (
+            <AutoSaveStatus
+              autoSaveStatus={autoSaveStatus}
+              className="shrink-0"
+            />
+          )}
+
           {/* Live Stream Status */}
           <LiveStreamStatus 
             isConnected={isConnected}
             selectedTool={selectedTool}
             lastActivatedTool={lastActivatedTool}
           />
+
+          {/* Pricing */}
+          <button
+            onClick={() => window.location.href = '/pricing'}
+            className="top-toolbar-btn flex items-center space-x-1 px-3 py-1.5 text-gray-300 hover:text-white hover:bg-gray-800/50 rounded-md transition-all duration-200"
+            title="View pricing plans"
+          >
+            <SparklesIcon className="w-4 h-4" />
+            <span className="text-xs">Pricing</span>
+          </button>
 
           {/* User Profile */}
           <button
@@ -582,7 +610,7 @@ const Toolbar = ({ selectedTool, onToolSelect, currentProject, onBackToProjects 
             <div className="h-6 w-px bg-gray-600"></div>
             <div>
               <p className="text-sm font-medium text-white">
-                {currentProject.projectData?.name || currentProject.template?.title || currentProject.name || 'Untitled Project'}
+                {currentProject.name || currentProject.projectData?.name || currentProject.template?.title || 'Untitled Project'}
               </p>
               <p className="text-xs text-gray-400">
                 {currentProject.template?.title || currentProject.type || 'Project'}
@@ -693,6 +721,7 @@ const BIM_COMMAND_MAP = {
   // Building Elements
   'wall': { command: 'wall', type: 'wall' },
   'slab': { command: 'slab', type: 'slab' },
+  'ramp': { command: 'ramp', type: 'ramp' },
   'roof': { command: 'roof', type: 'roof' },
   'column': { command: 'column', type: 'column' },
   'beam': { command: 'beam', type: 'beam' },
@@ -707,7 +736,7 @@ const BIM_COMMAND_MAP = {
   // Openings
   'door': { command: 'door', type: 'door' },
   'window': { command: 'window', type: 'window' },
-  'skylight': { command: 'skylight', type: 'skylight' },
+  'opening': { command: 'opening', type: 'opening' },
   
   // Analysis & Tools
   'space': { command: 'space', type: 'space' },
@@ -721,7 +750,7 @@ const BIM_COMMAND_MAP = {
   // AI Tools
   'ai-chat': { command: null, type: null }, // AI Assistant Chat
   'ai-render': { command: null, type: null }, // AI Rendering Tool
-  'voice-command': { command: null, type: null }, // Voice Commands
+  'ai-settings': { command: null, type: null }, // AI Settings
 };
 
 // Project Tree Component with Collapsible Sidebar
@@ -980,7 +1009,7 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
 
   // Tools that support click-and-drag drafting
   const isDraftingTool = useCallback((tool) => {
-    return ['wall', 'beam', 'slab'].includes(tool);
+    return ['wall', 'beam', 'slab', 'ramp'].includes(tool);
   }, []);
 
   // Convert 3D position to 2D plan view (X-Z plane, Y is height)
@@ -1284,6 +1313,30 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
                 }
               );
             }
+          } else if (selectedTool === 'ramp') {
+            const width = Math.abs(worldPos.x - draftStartPoint.x);
+            const depth = Math.abs(worldPos.z - draftStartPoint.z);
+            
+            if (width > 0.1 && depth > 0.1) { // Minimum ramp dimensions
+              const centerX = (draftStartPoint.x + worldPos.x) / 2;
+              const centerZ = (draftStartPoint.z + worldPos.z) / 2;
+              
+              createObject?.('ramp',
+                { x: centerX, y: 0, z: centerZ },
+                {
+                  width: width,
+                  depth: depth,
+                  thickness: 0.2,
+                  height: 1.0, // Default rise
+                  slopeDirection: 'north', // Default direction
+                  grade: (1.0 / depth) * 100, // Calculate grade from height and depth
+                  material: 'concrete',
+                  shape: 'rectangular',
+                  isRamp: true,
+                  type: 'ramp'
+                }
+              );
+            }
           } else if (selectedTool === 'beam') {
             const length = Math.sqrt(
               Math.pow(worldPos.x - draftStartPoint.x, 2) + 
@@ -1413,13 +1466,21 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
       }
     };
     
-    console.log('🔍 Axis snapping debug utilities available:');
+    console.log('🔍 Debug utilities available:');
+    console.log('');
+    console.log('📐 Axis Snapping:');
     console.log('  window.debugAxisSnapping.enableDetailed() - Enable detailed coordinate debugging');
     console.log('  window.debugAxisSnapping.disableDetailed() - Disable detailed coordinate debugging');  
     console.log('  window.debugAxisSnapping.testCoordinateRoundTrip(x, z) - Test coordinate precision');
-    console.log('  window.debugAxisSnapping.disableJoinery() - Disable wall joinery system to test pure axis snapping');
+    console.log('  window.debugAxisSnapping.disableJoinery() - Disable wall joinery system');
     console.log('  window.debugAxisSnapping.enableJoinery() - Re-enable wall joinery system');
-    console.log('  window.debugAxisSnapping.showCoordinateFlow() - Show coordinate processing flow diagram');
+    console.log('  window.debugAxisSnapping.showCoordinateFlow() - Show coordinate processing flow');
+    console.log('');
+    console.log('🧱 Wall Joinery:');
+    console.log('  window.debugWalls.fixCorners() - Force fix wall corners');
+    console.log('  window.debugWalls.debugPositions() - Show wall positions and distances');
+    console.log('  window.debugWalls.analyzeIntersections() - Analyze wall intersections');
+    console.log('  window.debugWalls.forceRefresh() - Reset and reapply all wall joinery');
     console.log('');
     console.log('📝 NOTE: Primary axis snapping is handled by CAD2DViewport.js "ENHANCED SHIFT LOCK"');
     console.log('   App.js provides fallback snapping and coordinate synchronization');
@@ -1436,6 +1497,88 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
       console.log('🔧 Wall joinery system ENABLED - walls will connect at corners');
     };
     
+    // Add comprehensive wall joinery debugging
+    window.debugWalls = {
+      fixCorners: () => {
+        console.log('🔧 MANUAL FIX: Forcing wall corner joinery...');
+        
+        if (!window.standaloneCADEngine) {
+          console.error('❌ CAD Engine not found. Make sure the app is loaded.');
+          return false;
+        }
+        
+        const result = window.standaloneCADEngine.applyWallJoinery({
+          tolerance: 1.0,           // Very generous 1m tolerance
+          cornerStyle: 'overlap',   // Use overlap joints for best results
+          tightCorners: false,
+          autoExtend: true
+        });
+        
+        if (result) {
+          console.log('✅ Wall corner fix applied successfully!');
+        } else {
+          console.log('❌ Wall corner fix failed. Check if walls are close enough.');
+        }
+        
+        return result;
+      },
+      
+      debugPositions: () => {
+        console.log('🔍 DEBUGGING: Wall positions and distances...');
+        
+        if (!window.standaloneCADEngine) {
+          console.error('❌ CAD Engine not found.');
+          return;
+        }
+        
+        const walls = Array.from(window.standaloneCADEngine.objects.values()).filter(obj => obj.type === 'wall');
+        console.log(`📊 Found ${walls.length} walls:`);
+        
+        walls.forEach((wall, index) => {
+          console.log(`Wall ${index + 1} (${wall.id}):`);
+          console.log(`  Start: [${wall.params?.startPoint?.x?.toFixed(2)}, ${wall.params?.startPoint?.z?.toFixed(2)}]`);
+          console.log(`  End: [${wall.params?.endPoint?.x?.toFixed(2)}, ${wall.params?.endPoint?.z?.toFixed(2)}]`);
+          console.log(`  Length: ${(wall.params?.length || 0).toFixed(2)}m`);
+          console.log(`  Has Joinery: ${wall.params?.adjustForJoinery || false}`);
+        });
+        
+        return walls;
+      },
+      
+      analyzeIntersections: () => {
+        console.log('🔍 ANALYZING: Wall intersections...');
+        
+        if (!window.standaloneCADEngine) {
+          console.error('❌ CAD Engine not found.');
+          return [];
+        }
+        
+        const intersections = window.standaloneCADEngine.analyzeWallIntersections(1.0);
+        console.log(`🔗 Found ${intersections.length} intersections:`);
+        
+        intersections.forEach((intersection, index) => {
+          console.log(`Intersection ${index + 1}:`);
+          console.log(`  Walls: ${intersection.wall1} ↔ ${intersection.wall2}`);
+          console.log(`  Angle: ${(intersection.angle * 180 / Math.PI).toFixed(1)}°`);
+          console.log(`  Type: ${intersection.jointType}`);
+          console.log(`  Position: [${intersection.position?.x?.toFixed(2)}, ${intersection.position?.z?.toFixed(2)}]`);
+        });
+        
+        return intersections;
+      },
+      
+      forceRefresh: () => {
+        console.log('🔄 FORCE REFRESH: Resetting and reapplying wall joinery...');
+        
+        if (!window.standaloneCADEngine) {
+          console.error('❌ CAD Engine not found.');
+          return false;
+        }
+        
+        return window.standaloneCADEngine.forceWallJoineryRefresh();
+      }
+    };
+    
     // Add coordinate source debugging
     window.debugAxisSnapping.showCoordinateFlow = () => {
       console.log('🔍 COORDINATE FLOW ANALYSIS:');
@@ -1450,6 +1593,22 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
       console.log('  Joinery: "🚨 AXIS DRIFT WARNING" or "✅ AXIS PRESERVED"');
     };
   }, [zoom, viewCenter]);
+
+  // Global error handler for toFixed errors
+  useEffect(() => {
+    const originalToFixed = Number.prototype.toFixed;
+    Number.prototype.toFixed = function(digits = 0) {
+      if (this === null || this === undefined || isNaN(this)) {
+        console.warn('toFixed called on invalid value:', this, 'returning "0" instead');
+        return '0'.padEnd(digits > 0 ? digits + 2 : 1, '0');
+      }
+      return originalToFixed.call(this, digits);
+    };
+
+    return () => {
+      Number.prototype.toFixed = originalToFixed;
+    };
+  }, []);
 
   // Handle mouse move for drafting preview
   const handleSvgMouseMove = useCallback((event) => {
@@ -1891,11 +2050,14 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
             shape: 'stair'
           };
         case 'Ramp':
+        case 'ramp':
           return {
             width: (object.width || 1.5) * scale,
-            height: (object.length || 6.0) * scale,
+            height: (object.depth || object.length || 6.0) * scale,
             color: object.color || '#b8c5d1',
-            shape: 'ramp'
+            shape: 'ramp',
+            slopeDirection: object.slopeDirection || 'north',
+            grade: object.grade || 8.33
           };
         case 'Space':
           return {
@@ -2076,8 +2238,76 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
         </g>
       );
     } else if (props.shape === 'ramp') {
+      // Calculate slope direction arrows
+      const arrowOpacity = 0.4;
+      const arrowStroke = props.grade > 15 ? '#ef4444' : props.grade > 8.33 ? '#f59e0b' : '#10b981';
+      const renderSlopeArrows = () => {
+        const arrows = [];
+        const arrowSize = Math.min(props.width, props.height) / 6;
+        const spacing = Math.max(arrowSize * 2, 20);
+        
+        // Calculate arrow direction based on slopeDirection
+        let deltaX = 0, deltaY = 0;
+        switch (props.slopeDirection) {
+          case 'north': deltaX = 0; deltaY = -arrowSize; break;  // Up
+          case 'south': deltaX = 0; deltaY = arrowSize; break;   // Down
+          case 'east': deltaX = arrowSize; deltaY = 0; break;    // Right
+          case 'west': deltaX = -arrowSize; deltaY = 0; break;   // Left
+          default: deltaX = 0; deltaY = -arrowSize; break;       // Default north
+        }
+        
+        // Generate multiple arrows across the ramp surface
+        const numArrowsX = Math.max(1, Math.floor(props.width / spacing));
+        const numArrowsY = Math.max(1, Math.floor(props.height / spacing));
+        
+        for (let i = 0; i < numArrowsX; i++) {
+          for (let j = 0; j < numArrowsY; j++) {
+            const startX = pos2d.x - props.width/2 + (i + 0.5) * (props.width / numArrowsX);
+            const startY = pos2d.y - props.height/2 + (j + 0.5) * (props.height / numArrowsY);
+            const endX = startX + deltaX;
+            const endY = startY + deltaY;
+            
+            // Arrow line
+            arrows.push(
+              <line
+                key={`arrow-line-${i}-${j}`}
+                x1={startX}
+                y1={startY}
+                x2={endX}
+                y2={endY}
+                stroke={arrowStroke}
+                strokeWidth={1.5}
+                opacity={arrowOpacity}
+                markerEnd="url(#ramp-arrowhead)"
+              />
+            );
+          }
+        }
+        
+        return arrows;
+      };
+
       return (
         <g key={object.id}>
+          {/* Arrow marker definition */}
+          <defs>
+            <marker
+              id="ramp-arrowhead"
+              markerWidth="10"
+              markerHeight="7"
+              refX="9"
+              refY="3.5"
+              orient="auto"
+            >
+              <polygon
+                points="0 0, 10 3.5, 0 7"
+                fill={arrowStroke}
+                opacity={arrowOpacity}
+              />
+            </marker>
+          </defs>
+          
+          {/* Ramp base rectangle */}
           <rect
             x={pos2d.x - props.width/2}
             y={pos2d.y - props.height/2}
@@ -2088,13 +2318,50 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
             strokeWidth={strokeWidth}
             opacity={0.8}
           />
-          {/* Ramp direction arrow */}
-          <polygon
-            points={`${pos2d.x - props.width/4},${pos2d.y + props.height/4} ${pos2d.x + props.width/4},${pos2d.y} ${pos2d.x - props.width/4},${pos2d.y - props.height/4}`}
-            fill="none"
-            stroke={strokeColor}
-            strokeWidth={2}
-          />
+          
+          {/* Slope direction arrows */}
+          {renderSlopeArrows()}
+          
+          {/* Grade indicator text */}
+          <text
+            x={pos2d.x}
+            y={pos2d.y + props.height/2 + 15}
+            textAnchor="middle"
+            fontSize={10}
+            fill={arrowStroke}
+            opacity={0.8}
+            fontWeight="bold"
+          >
+            {props.grade?.toFixed(1)}%
+          </text>
+          
+          {/* High/Low indicators */}
+          {props.slopeDirection === 'north' && (
+            <>
+              <text x={pos2d.x} y={pos2d.y - props.height/2 - 5} textAnchor="middle" fontSize={8} fill={arrowStroke} opacity={0.6}>HIGH</text>
+              <text x={pos2d.x} y={pos2d.y + props.height/2 + 10} textAnchor="middle" fontSize={8} fill={arrowStroke} opacity={0.6}>LOW</text>
+            </>
+          )}
+          {props.slopeDirection === 'south' && (
+            <>
+              <text x={pos2d.x} y={pos2d.y + props.height/2 + 10} textAnchor="middle" fontSize={8} fill={arrowStroke} opacity={0.6}>HIGH</text>
+              <text x={pos2d.x} y={pos2d.y - props.height/2 - 5} textAnchor="middle" fontSize={8} fill={arrowStroke} opacity={0.6}>LOW</text>
+            </>
+          )}
+          {props.slopeDirection === 'east' && (
+            <>
+              <text x={pos2d.x + props.width/2 + 5} y={pos2d.y + 3} fontSize={8} fill={arrowStroke} opacity={0.6}>HIGH</text>
+              <text x={pos2d.x - props.width/2 - 25} y={pos2d.y + 3} fontSize={8} fill={arrowStroke} opacity={0.6}>LOW</text>
+            </>
+          )}
+          {props.slopeDirection === 'west' && (
+            <>
+              <text x={pos2d.x - props.width/2 - 25} y={pos2d.y + 3} fontSize={8} fill={arrowStroke} opacity={0.6}>HIGH</text>
+              <text x={pos2d.x + props.width/2 + 5} y={pos2d.y + 3} fontSize={8} fill={arrowStroke} opacity={0.6}>LOW</text>
+            </>
+          )}
+          
+          {/* Selection outline */}
           {isSelected && (
             <rect
               x={pos2d.x - props.width/2 - 2}
@@ -2453,35 +2720,35 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
                   <span className="font-mono">{selectedObject.id}</span>
                 </div>
                 
-                {selectedObject.length && (
+                {selectedObject.length && typeof selectedObject.length === 'number' && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Length:</span>
                     <span>{selectedObject.length.toFixed(2)}m</span>
                   </div>
                 )}
                 
-                {selectedObject.width && (
+                {selectedObject.width && typeof selectedObject.width === 'number' && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Width:</span>
                     <span>{selectedObject.width.toFixed(2)}m</span>
                   </div>
                 )}
                 
-                {selectedObject.depth && (
+                {selectedObject.depth && typeof selectedObject.depth === 'number' && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Depth:</span>
                     <span>{selectedObject.depth.toFixed(2)}m</span>
                   </div>
                 )}
                 
-                {selectedObject.thickness && (
+                {selectedObject.thickness && typeof selectedObject.thickness === 'number' && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Thickness:</span>
                     <span>{selectedObject.thickness.toFixed(2)}m</span>
                   </div>
                 )}
                 
-                {selectedObject.height && (
+                {selectedObject.height && typeof selectedObject.height === 'number' && (
                   <div className="flex justify-between">
                     <span className="text-gray-500">Height:</span>
                     <span>{selectedObject.height.toFixed(2)}m</span>
@@ -2491,7 +2758,7 @@ const Viewport2D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
                 <div className="flex justify-between">
                   <span className="text-gray-500">Position:</span>
                   <span className="font-mono text-xs">
-                    ({selectedObject.position.x.toFixed(1)}, {selectedObject.position.z.toFixed(1)})
+                    ({typeof selectedObject.position?.x === 'number' ? selectedObject.position.x.toFixed(1) : '0'}, {typeof selectedObject.position?.z === 'number' ? selectedObject.position.z.toFixed(1) : '0'})
                   </span>
                 </div>
               </div>
@@ -3029,7 +3296,7 @@ const Viewport3D = ({ selectedTool, onObjectSelect, cadObjects = [], createObjec
         'INPUT - Object Rotation': object.rotation,
         'OUTPUT - Mesh Position': meshPosition,
         'OUTPUT - Mesh Rotation': meshRotation,
-        'ROTATION Y DEGREES': object.rotation?.y ? `${(object.rotation.y * 180 / Math.PI).toFixed(1)}°` : '0°'
+        'ROTATION Y DEGREES': (object.rotation?.y && typeof object.rotation.y === 'number') ? `${(object.rotation.y * 180 / Math.PI).toFixed(1)}°` : '0°'
       });
     } else if (object.type === 'Column') {
       // Columns should be vertical, centered at their height
@@ -3576,7 +3843,7 @@ const AIAssistant = ({
     const files = Array.from(e.target.files);
     const newFiles = files.map(file => {
       const fileExt = file.name.toLowerCase().split('.').pop();
-      const isCADFile = ['skp', 'ifc', 'step', 'stp', 'obj', 'dae', 'ply', 'stl'].includes(fileExt);
+      const isCADFile = ['skp', 'ifc', 'step', 'stp', 'obj', 'fbx', 'gltf', 'glb', 'dae', 'ply', 'stl'].includes(fileExt);
       
       return {
         id: Date.now() + Math.random(),
@@ -3787,6 +4054,10 @@ const AIAssistant = ({
                           <CubeIcon className="w-3 h-3 text-blue-400" />
                         ) : file.extension === 'ifc' ? (
                           <BuildingOfficeIcon className="w-3 h-3 text-blue-400" />
+                        ) : file.extension === 'fbx' ? (
+                          <CubeIcon className="w-3 h-3 text-green-400" />
+                        ) : (file.extension === 'gltf' || file.extension === 'glb') ? (
+                          <CubeIcon className="w-3 h-3 text-purple-400" />
                         ) : (
                           <Square3Stack3DIcon className="w-3 h-3 text-blue-400" />
                         )
@@ -3831,7 +4102,7 @@ const AIAssistant = ({
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept="image/*,.pdf,.doc,.docx,.txt,.skp,.ifc,.step,.stp,.obj,.dae,.ply,.stl"
+                accept="image/*,.pdf,.doc,.docx,.txt,.skp,.ifc,.step,.stp,.obj,.fbx,.gltf,.glb,.dae,.ply,.stl"
                 onChange={handleFileUpload}
                 className="hidden"
               />
@@ -3870,6 +4141,21 @@ const AuthenticatedApp = () => {
   const [skipAuth, setSkipAuth] = useState(false);
   const [showEmailConfirmation, setShowEmailConfirmation] = useState(false);
   const [pendingEmail, setPendingEmail] = useState('');
+
+  // Force auth flow via URL param (?auth=1)
+  const forceAuth = (() => {
+    try {
+      return new URLSearchParams(window.location.search).has('auth');
+    } catch {
+      return false;
+    }
+  })();
+
+  useEffect(() => {
+    if (forceAuth) {
+      setShowAuthFlow(true);
+    }
+  }, [forceAuth]);
   
   // Debug authentication state changes
   console.log('🔄 AuthenticatedApp render:', {
@@ -3896,8 +4182,8 @@ const AuthenticatedApp = () => {
     );
   }
 
-  // Show loading while checking auth (only if auth is configured)
-  if (isAuthConfigured && loading) {
+  // Show loading while checking auth (only if auth is configured and auth isn't forced)
+  if (isAuthConfigured && loading && !forceAuth) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-studiosix-900 flex items-center justify-center">
         <div className="text-center">
@@ -4005,6 +4291,8 @@ const AppWithAuth = () => {
   const isAuthCallback = currentPath === '/auth/callback';
   const isLandingPage = currentPath === '/' && !window.location.search; // Only show landing on clean root path
   const isThankYouPage = currentPath === '/thank-you';
+  const isPricingPage = currentPath === '/pricing';
+  const isPaymentSuccess = currentPath === '/payment/success' || currentPath === '/payment/callback';
   const isAppRoute = currentPath === '/app';
   
   // Check if we're in IFC test mode (add ?test=ifc to URL)
@@ -4019,6 +4307,16 @@ const AppWithAuth = () => {
   // Show thank you page
   if (isThankYouPage) {
     return <ThankYouPage />;
+  }
+  
+  // Show pricing page
+  if (isPricingPage) {
+    return <PricingPage onClose={() => window.history.back()} />;
+  }
+  
+  // Show payment success page
+  if (isPaymentSuccess) {
+    return <PaymentSuccess />;
   }
   
 
@@ -4067,13 +4365,22 @@ const AppWithAuth = () => {
           <AuthCallback 
             onAuthSuccess={(user) => {
               console.log('✅ Auth callback success:', user.email);
-              // Redirect to main app
-              window.location.href = '/';
+              
+              // Check if there's a return URL stored (e.g., for pending upgrades)
+              const returnUrl = localStorage.getItem('auth_return_url');
+              if (returnUrl) {
+                console.log('🔄 Redirecting to stored return URL:', returnUrl);
+                localStorage.removeItem('auth_return_url');
+                window.location.href = returnUrl;
+              } else {
+                // Default redirect to main app
+                window.location.href = '/app';
+              }
             }}
             onAuthError={(error) => {
               console.error('❌ Auth callback error:', error);
-              // Redirect to login
-              window.location.href = '/';
+              // Redirect to login screen inside app
+              window.location.href = '/app?auth=1';
             }}
           />
         </AuthProvider>
@@ -4103,11 +4410,35 @@ function MainApp({ user, onRequestAuth }) {
     }
   }, [user]);
 
-
-
   // Application state management
   const [appState, setAppState] = useState('splash'); // 'splash', 'project-menu', 'main-app'
   const [currentProject, setCurrentProject] = useState(null);
+  const [initialAIPrompt, setInitialAIPrompt] = useState(null); // Store initial AI prompt from project creation
+
+  // Debug appState and currentProject updates
+  useEffect(() => {
+    console.log('🔄 DEBUG: App state changed to:', appState, 'at', new Date().toISOString());
+  }, [appState]);
+
+  useEffect(() => {
+    if (currentProject) {
+      console.log('🔄 DEBUG: Current project updated:', {
+        name: currentProject.name,
+        displayName: currentProject.name || currentProject.projectData?.name || currentProject.template?.title || 'Untitled Project',
+        id: currentProject.id
+      });
+    } else {
+      console.log('🔄 DEBUG: Current project cleared at', new Date().toISOString());
+    }
+  }, [currentProject]);
+  
+  // AutoSave integration
+  const {
+    autoSaveStatus,
+    forceSave,
+    configureAutoSave,
+    markChanges
+  } = useAutoSave(currentProject, user, null); // sceneManager will be added later
   
   // Main app states - with debugging wrapper for selectedTool
   const [selectedTool, setSelectedToolState] = useState('pointer');
@@ -4136,6 +4467,23 @@ function MainApp({ user, onRequestAuth }) {
       stack: new Error().stack.split('\n').slice(1, 6).join('\n') // Show more stack frames
     });
     
+    // Special debugging for ramp tool
+    if (newTool === 'ramp') {
+      console.log('🛤️ RAMP TOOL STATE DEBUG: Ramp tool being set as selected');
+      console.log('🛤️ RAMP TOOL STATE DEBUG: Current state before change:', {
+        currentSelectedTool: selectedTool,
+        viewportMode: viewportMode,
+        timestamp: new Date().toISOString()
+      });
+    }
+    
+    // Special debugging when switching away from ramp
+    if (selectedTool === 'ramp' && newTool !== 'ramp') {
+      console.log('🛤️ RAMP TOOL STATE DEBUG: Ramp tool being deselected, switching to:', newTool);
+      console.log('🛤️ RAMP TOOL STATE DEBUG: Reason for deselection detected from stack:', 
+        new Error().stack.split('\n').slice(1, 3).join('\n'));
+    }
+    
     // Special warning for wall tool resets
     if (selectedTool === 'wall' && newTool !== 'wall') {
       console.warn('⚠️ WALL TOOL RESET DETECTED! Wall tool being changed to:', newTool);
@@ -4144,6 +4492,84 @@ function MainApp({ user, onRequestAuth }) {
     
     setSelectedToolState(newTool);
   }, []); // Remove dependency to avoid infinite updates
+
+  // Initialize Architect3D Wall Service
+  const [architect3DService] = useState(() => {
+    const service = new Architect3DWallService();
+    
+    // Set up enhanced event listeners for the service
+    service.addEventListener('wallAdded', (data) => {
+      console.log('🏗️ Architect3D Wall Added:', data);
+      
+      // Trigger viewport re-render and CAD engine updates
+      if (window.standaloneCADEngine) {
+        // Force viewport refresh to show new corner/joinery logic
+        window.standaloneCADEngine.emit('objects_changed', {
+          source: 'architect3d_wall_added',
+          reason: 'enhanced_wall_with_corners',
+          data: data,
+          timestamp: Date.now()
+        });
+        
+        console.log('🔄 Emitted objects_changed event for Architect3D wall addition');
+      }
+    });
+    
+    service.addEventListener('wallUpdated', (data) => {
+      console.log('🔧 Architect3D Wall Updated:', data);
+      
+      // Trigger viewport re-render for updated wall
+      if (window.standaloneCADEngine) {
+        window.standaloneCADEngine.emit('objects_changed', {
+          source: 'architect3d_wall_updated',
+          reason: 'enhanced_wall_properties_changed',
+          data: data,
+          timestamp: Date.now()
+        });
+        
+        console.log('🔄 Emitted objects_changed event for Architect3D wall update');
+      }
+    });
+    
+    service.addEventListener('cornerAdded', (data) => {
+      console.log('📍 Architect3D Corner Added:', data);
+      
+      // Update viewport to show new corner
+      if (window.standaloneCADEngine) {
+        window.standaloneCADEngine.emit('objects_changed', {
+          source: 'architect3d_corner_added',
+          reason: 'intelligent_corner_detection',
+          data: data,
+          timestamp: Date.now()
+        });
+      }
+    });
+    
+    service.addEventListener('roomCreated', (data) => {
+      console.log('🏠 Architect3D Room Created:', data);
+      
+      // Update viewport to show detected room
+      if (window.standaloneCADEngine) {
+        window.standaloneCADEngine.emit('objects_changed', {
+          source: 'architect3d_room_created',
+          reason: 'automatic_room_detection',
+          data: data,
+          timestamp: Date.now()
+        });
+        
+        console.log('🔄 Emitted objects_changed event for Architect3D room creation');
+      }
+    });
+    
+    // Set up synchronization between Architect3D and CAD Engine to fix endpoint mismatch
+    if (window.standaloneCADEngine) {
+      window.standaloneCADEngine.setArchitect3DService(service);
+      console.log('🔗 SYNC SETUP: Connected Architect3D and CAD Engine for endpoint synchronization');
+    }
+    
+    return service;
+  });
+
   const [viewMode, setViewMode] = useState('xeokit'); // 'xeokit' (primary), '3d' (legacy), or '2d' (legacy)
   
   // Viewport mode - toggle between '2d' for drafting and '3d' for visualization
@@ -4272,6 +4698,10 @@ function MainApp({ user, onRequestAuth }) {
   const [cadBlocksToolType, setCadBlocksToolType] = useState('furniture');
   const [cadBlocksPopupPosition, setCadBlocksPopupPosition] = useState({ x: 450, y: 300 });
   
+  // 2D CAD Blocks modal state
+  const [show2DCADBlocksModal, setShow2DCADBlocksModal] = useState(false);
+  const [cad2DBlocksModalPosition, setCad2DBlocksModalPosition] = useState({ x: 400, y: 200 });
+  
   // Slab property panel state
   const [showSlabPropertyPanel, setShowSlabPropertyPanel] = useState(false);
   const [selectedSlabData, setSelectedSlabData] = useState(null);
@@ -4281,6 +4711,9 @@ function MainApp({ user, onRequestAuth }) {
   const [showCaptureFrame, setShowCaptureFrame] = useState(false);
   const [capturedImage, setCapturedImage] = useState(null);
   const [isRenderingInBackground, setIsRenderingInBackground] = useState(false);
+  
+  // AI Settings Modal state
+  const [showAISettingsModal, setShowAISettingsModal] = useState(false);
   const [isRenderingActive, setIsRenderingActive] = useState(false);
   const [renderProgress, setRenderProgress] = useState(0);
   const [renderCompleted, setRenderCompleted] = useState(false);
@@ -4464,9 +4897,31 @@ function MainApp({ user, onRequestAuth }) {
       
       setSelectedObjects([objectData]);
       
-      // Use object properties directly (no mapping needed)
-      const mappedProperties = objectData?.params || {};
-      setSelectedObjectProperties(mappedProperties);
+      // Don't set properties for furniture/fixture objects since we don't show property panel
+      if (objectData.type === 'furniture' || objectData.type === 'fixture') {
+        console.log(`🪑 ${objectData.type} selected - skipping property panel setup`);
+        setSelectedObjectProperties({});
+      } else {
+        // Use object properties directly (no mapping needed) for other objects
+        const mappedProperties = objectData?.params || {};
+        
+        // Debug: Log the properties being set
+        console.log('🔍 PROPERTY PANEL DEBUG: Setting properties for object:', {
+          objectId: objectData?.id,
+          objectType: objectData?.type,
+          hasParams: !!objectData?.params,
+          paramsKeys: objectData?.params ? Object.keys(objectData.params) : [],
+          mappedProperties: mappedProperties
+        });
+        
+        // Ensure mappedProperties is valid before setting
+        if (mappedProperties && typeof mappedProperties === 'object') {
+          setSelectedObjectProperties(mappedProperties);
+        } else {
+          console.warn('🔍 PROPERTY PANEL DEBUG: Invalid mappedProperties, using empty object');
+          setSelectedObjectProperties({});
+        }
+      }
       
       // Handle slab-specific property panel
       if (objectData.type === 'slab') {
@@ -4492,6 +4947,8 @@ function MainApp({ user, onRequestAuth }) {
         'Wall': 'wall',        // Legacy compatibility
         'slab': 'slab',        // Add slab mapping
         'Slab': 'slab', 
+        'ramp': 'ramp',        // Add ramp mapping
+        'Ramp': 'ramp',
         'Column': 'column',
         'Beam': 'beam',
         'Door': 'door',
@@ -4531,9 +4988,15 @@ function MainApp({ user, onRequestAuth }) {
           }
         }
       } else {
-        // If no tool mapping found, show property panel as fallback
-        console.log(`📋 No tool mapping for ${objectData.type}, showing property panel`);
-        setShowPropertyPanel(true);
+        // If no tool mapping found, don't show property panel for furniture/fixtures
+        if (objectData.type === 'furniture' || objectData.type === 'fixture') {
+          console.log(`🪑 ${objectData.type} selected - no property panel needed`);
+          setShowPropertyPanel(false);
+        } else {
+          // Show property panel for other unmapped object types
+          console.log(`📋 No tool mapping for ${objectData.type}, showing property panel`);
+          setShowPropertyPanel(true);
+        }
       }
       
       // Send selection to standalone CAD engine
@@ -4546,9 +5009,9 @@ function MainApp({ user, onRequestAuth }) {
       setSelectedSlabData(null);
       
       // WALL TOOL FIX: Don't reset active drawing tools
-      const drawingTools = ['wall', 'slab', 'door', 'window', 'roof', 'stair', 'column', 'beam'];
+      const drawingTools = ['wall', 'slab', 'ramp', 'stair', 'door', 'window', 'roof', 'column', 'beam'];
       if (drawingTools.includes(selectedTool)) {
-        console.log('🔧 WALL TOOL FIX: Preserving active drawing tool:', selectedTool);
+        console.log('🔧 DRAWING TOOL FIX: Preserving active drawing tool:', selectedTool);
       } else {
         // Deselect tool when no object is selected (only for non-drawing tools)
         console.log('🔧 Deselecting tool - no object selected');
@@ -4618,10 +5081,17 @@ function MainApp({ user, onRequestAuth }) {
   // Update property panel when the selected object is updated externally
   useEffect(() => {
     if (selectedObjects.length > 0 && showPropertyPanel) {
-      // Find the updated object in the current objects list
-      const updatedObject = cadObjects.find(obj => obj.id === selectedObjects[0].id);
+      const selectedObject = selectedObjects[0];
       
-      if (updatedObject && JSON.stringify(updatedObject) !== JSON.stringify(selectedObjects[0])) {
+      // Skip property panel updates for furniture/fixture objects
+      if (selectedObject?.type === 'furniture' || selectedObject?.type === 'fixture') {
+        return;
+      }
+      
+      // Find the updated object in the current objects list
+      const updatedObject = cadObjects.find(obj => obj.id === selectedObject.id);
+      
+      if (updatedObject && JSON.stringify(updatedObject) !== JSON.stringify(selectedObject)) {
         console.log('🔄 Updating PropertyPanel with external changes:', updatedObject);
         
         // Update the selected object state
@@ -4821,11 +5291,35 @@ function MainApp({ user, onRequestAuth }) {
 
   // Standalone Tool Selection Handler
   const handleToolSelect = useCallback((toolId, isSelectionTriggered = false) => {
-    console.log('🛠️ WALL TOOL DEBUG: Tool selected:', toolId, isSelectionTriggered ? '(via object selection)' : '(via toolbar)');
-    console.log('🛠️ WALL TOOL DEBUG: Previous tool was:', selectedTool);
+    console.log('🛠️ TOOL SELECTION DEBUG: Tool selected:', toolId, isSelectionTriggered ? '(via object selection)' : '(via toolbar)');
+    console.log('🛠️ TOOL SELECTION DEBUG: Previous tool was:', selectedTool);
     
     // Update selected tool state
     setSelectedTool(toolId);
+    
+    // Enhanced debugging for ramp tool specifically
+    if (toolId === 'ramp') {
+      console.log('🛤️ RAMP TOOL DEBUG: Ramp tool activated!');
+      console.log('🛤️ RAMP TOOL DEBUG: Current viewport mode:', viewportMode);
+      console.log('🛤️ RAMP TOOL DEBUG: Standalone CAD Engine available:', !!window.standaloneCADEngine);
+      console.log('🛤️ RAMP TOOL DEBUG: handleCreateRamp function available:', typeof handleCreateRamp);
+      
+      // Check if tool panel should appear
+      setTimeout(() => {
+        const toolPanel = document.querySelector('.ramp-tool-panel');
+        console.log('🛤️ RAMP TOOL DEBUG: Ramp tool panel found in DOM:', !!toolPanel);
+        if (toolPanel) {
+          console.log('🛤️ RAMP TOOL DEBUG: Tool panel visibility:', window.getComputedStyle(toolPanel).display);
+        }
+        
+        // Also check for any tool panel that might contain ramp
+        const allToolPanels = document.querySelectorAll('[class*="tool-panel"]');
+        console.log('🛤️ RAMP TOOL DEBUG: All tool panels found:', allToolPanels.length);
+        allToolPanels.forEach((panel, index) => {
+          console.log(`🛤️ RAMP TOOL DEBUG: Tool panel ${index}:`, panel.className, window.getComputedStyle(panel).display);
+        });
+      }, 100);
+    }
     
     // Enhanced debugging for wall tool specifically
     if (toolId === 'wall') {
@@ -4882,6 +5376,13 @@ function MainApp({ user, onRequestAuth }) {
       return;
     }
     
+    if (toolId === 'ai-settings') {
+      // Handle AI settings tool selection - open settings modal
+      console.log('AI Settings tool activated - opening settings modal');
+      setShowAISettingsModal(true);
+      return;
+    }
+    
     // Handle CAD Blocks tools
     if (toolId === 'furniture' || toolId === 'fixtures') {
       console.log(`📦 CAD Blocks tool activated: ${toolId}`);
@@ -4890,10 +5391,40 @@ function MainApp({ user, onRequestAuth }) {
       return;
     }
     
+    // Handle 2D CAD Blocks tag tool
+    if (toolId === 'tag') {
+      console.log('🎨 2D CAD Blocks tool activated - opening CAD library modal');
+      
+      // Auto-switch to 2D viewport for SVG placement
+      if (viewportMode !== '2d') {
+        console.log('🔧 AUTO-SWITCH: Switching to 2D viewport for CAD block placement');
+        setViewportMode('2d');
+      }
+      
+      setShow2DCADBlocksModal(true);
+      return;
+    }
+    
+    // Handle Opening Tool
+    if (toolId === 'opening') {
+      console.log('🕳️ OPENING: Opening tool activated');
+      console.log('🕳️ OPENING: Ready to create wall openings - click on walls to add openings');
+      
+      // Auto-switch to 2D viewport for opening placement
+      if (viewportMode !== '2d') {
+        console.log('🔧 AUTO-SWITCH: Switching to 2D viewport for opening placement');
+        setViewportMode('2d');
+      }
+      
+      console.log('🏗️ OPENING: Click on walls in the 2D viewport to create openings');
+      
+      return;
+    }
+    
     // STANDALONE MODE: Use our own CAD engine
     standaloneCADEngine.clearPreview();
     
-    if (['wall', 'slab', 'beam', 'column'].includes(toolId)) {
+    if (['wall', 'slab', 'ramp', 'beam', 'column'].includes(toolId)) {
       console.log(`🏗️ STANDALONE: Ready to draw ${toolId} - use viewport to create objects`);
       console.log(`📍 Tool "${toolId}" is now active - click and drag in viewport to create`);
       
@@ -4906,6 +5437,7 @@ function MainApp({ user, onRequestAuth }) {
       console.log(`🖱️ Navigation tool activated: ${toolId}`);
     }
   }, [isRenderingActive, renderCompleted, viewportMode, wallToolParams]);
+
 
   // ENHANCED: CAD Blocks import handler with Supabase model support
   const handleImportBlock = useCallback(async (blockItem, toolType) => {
@@ -4927,7 +5459,7 @@ function MainApp({ user, onRequestAuth }) {
         // Basic CAD properties
         subtype: blockItem.id || `${toolType}-${Date.now()}`,
         name: blockItem.name,
-        position: { x: 0, y: 0, z: 0 }, // Default position - user can move it
+        position: { x: 0, y: 0, z: 0 }, // Default center position - user can move it with smooth controls
         
         // Use preview dimensions if available, otherwise defaults
         width: blockItem.preview?.width || 1.0,
@@ -4976,28 +5508,9 @@ function MainApp({ user, onRequestAuth }) {
         polygonCount: blockItem.polygon_count
       });
       
-      // Optional: If the model has a download URL, we could trigger a download
-      // This would be useful for offline caching or local processing
-      if (blockItem.model_url && window.confirm) {
-        const shouldDownload = await new Promise(resolve => {
-          const download = window.confirm(
-            `Would you like to download the model file (${blockItem.format?.join(', ')}) for offline use?`
-          );
-          resolve(download);
-        });
-        
-        if (shouldDownload) {
-          console.log('📥 Initiating model download...');
-          // Create download link
-          const link = document.createElement('a');
-          link.href = blockItem.model_url;
-          link.download = `${blockItem.name.replace(/[^a-zA-Z0-9]/g, '_')}.${blockItem.format?.[0] || 'obj'}`;
-          link.target = '_blank';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        }
-      }
+      // Model is now placed in both 2D and 3D viewports
+      // Users can move, rotate, and scale the object using the existing viewport controls
+      console.log('🎯 Model placed in viewport, ready for manipulation');
       
       return createdObject;
       
@@ -5007,6 +5520,40 @@ function MainApp({ user, onRequestAuth }) {
       if (window.alert) {
         window.alert(`Failed to import model: ${error.message || 'Unknown error'}`);
       }
+      throw error;
+    }
+  }, []);
+
+  // 2D CAD Blocks import handler for SVG placement
+  const handleImport2DCADBlock = useCallback(async (blockData) => {
+    console.log('🎨 Importing 2D CAD block:', blockData.name);
+    console.log('🔗 2D Block data:', {
+      id: blockData.id,
+      name: blockData.name,
+      category: blockData.category,
+      subcategory: blockData.subcategory,
+      path: blockData.path
+    });
+    
+    try {
+      // Set the block as "pending placement" in the 2D viewport
+      // This will trigger cursor-following ghost mode
+      setSelectedTool('select'); // Auto-return to select tool
+      
+      // Pass the block data to the 2D viewport for placement
+      // This will be handled by the CAD2DViewport component
+      if (window.cad2DViewportRef?.current) {
+        window.cad2DViewportRef.current.startSVGPlacement(blockData);
+      } else {
+        // Fallback: store in window object for viewport to pick up
+        window.pendingCAD2DBlock = blockData;
+      }
+      
+      console.log('✅ 2D CAD block prepared for placement');
+      console.log('🖱️ Block will follow cursor in ghost mode until clicked to place');
+      
+    } catch (error) {
+      console.error('❌ Failed to prepare 2D CAD block for placement:', error);
       throw error;
     }
   }, []);
@@ -5054,7 +5601,7 @@ function MainApp({ user, onRequestAuth }) {
     try {
       console.log('🧱 HANDLE CREATE WALL DEBUG: Function called with parameters:', wallParams);
       console.log('🧱 HANDLE CREATE WALL DEBUG: Current wallToolParams:', wallToolParams);
-      console.log('🧱 HANDLE CREATE WALL DEBUG: createObject function available:', typeof createObject);
+      console.log('🏗️ Using enhanced Architect3DWallService for sophisticated corner/joinery logic');
       
       // Determine creation mode: position-based (from viewport click) or tool panel
       const isPositionBased = wallParams.position && !wallParams.startPoint && !wallParams.endPoint;
@@ -5075,10 +5622,15 @@ function MainApp({ user, onRequestAuth }) {
             x: (snapPoint || wallParams.position).x + wallToolParams.length,
             y: (snapPoint || wallParams.position).y,
             z: (snapPoint || wallParams.position).z
-          }
+          },
+          // Enhanced architect3d features from wall tool
+          wallType: wallParams.wallType || 'straight',
+          enableAutoMerge: wallParams.enableAutoMerge !== false,
+          cornerTolerance: wallParams.cornerTolerance || 20,
+          snapToAxis: wallParams.snapToAxis !== false
         };
         
-        console.log('📍 Position-based wall creation with tool params:', createParams);
+        console.log('📍 Position-based wall creation with enhanced architect3d params:', createParams);
       } else {
         // Tool panel creation or parametric creation
         createParams = {
@@ -5089,38 +5641,73 @@ function MainApp({ user, onRequestAuth }) {
         console.log('🔧 Tool panel wall creation:', createParams);
       }
       
-      // FIXED: Create the wall using the standalone CAD engine directly (not WebSocket)
-      console.log('🧱 FIXED: Using standaloneCADEngine.createObject for consistent wall creation');
-      console.log('🧱 HANDLE CREATE WALL DEBUG: About to call standaloneCADEngine.createObject with:', {
-        type: 'wall',
-        params: createParams,
-        startPoint: createParams.startPoint,
-        endPoint: createParams.endPoint
-      });
+      // Use the enhanced Architect3DWallService for sophisticated corner/joinery logic
+      console.log('🏗️ Creating wall with Architect3DWallService for advanced corner detection');
       
-      // Use the same method as CAD2DViewport for consistency
+      const wallResult = architect3DService.createWall(createParams);
+      console.log('🏗️ Architect3D wall created:', wallResult);
+      
+      // Also create in the CAD engine for rendering
       const wallId = standaloneCADEngine.createObject('wall', createParams);
+      console.log('🧱 CAD engine wall created:', wallId);
       
-      console.log('🧱 HANDLE CREATE WALL DEBUG: standaloneCADEngine.createObject returned:', wallId);
-      console.log('🧱 WALL POSITION DEBUG: Wall created with params:', {
-        startPoint: createParams.startPoint,
-        endPoint: createParams.endPoint,
-        length: createParams.length
-      });
+      // Connect the architect3d wall with the CAD engine object
+      if (wallResult && wallId) {
+        console.log('🔗 Connecting Architect3D wall to CAD engine object');
+        // Store architect3d metadata on the CAD object
+        const cadObject = standaloneCADEngine.getObject(wallId);
+        if (cadObject) {
+          cadObject.architect3dData = wallResult;
+          cadObject.hasEnhancedCornerLogic = true;
+        }
+      }
       
-      console.log('✅ Wall created successfully:', wallId);
+      console.log('✅ Enhanced wall created successfully:', wallId);
       return wallId;
       
     } catch (error) {
-      console.error('❌ Failed to create wall:', error);
-      throw error;
+      console.error('❌ Failed to create enhanced wall:', error);
+      // Fallback to regular wall creation if enhanced creation fails
+      try {
+        console.log('🔄 Falling back to standard wall creation');
+        // Determine fallback params based on original input
+        const isPositionBased = wallParams.position && !wallParams.startPoint && !wallParams.endPoint;
+        let fallbackParams;
+        
+        if (isPositionBased) {
+          const snapPoint = findNearbyWallEndpoint(wallParams.position);
+          fallbackParams = {
+            ...wallToolParams,
+            type: 'wall',
+            startPoint: snapPoint || wallParams.position,
+            endPoint: {
+              x: (snapPoint || wallParams.position).x + wallToolParams.length,
+              y: (snapPoint || wallParams.position).y,
+              z: (snapPoint || wallParams.position).z
+            }
+          };
+        } else {
+          fallbackParams = {
+            ...wallParams,
+            type: 'wall'
+          };
+        }
+        
+        const wallId = standaloneCADEngine.createObject('wall', fallbackParams);
+        console.log('✅ Fallback wall created:', wallId);
+        return wallId;
+      } catch (fallbackError) {
+        console.error('❌ Fallback wall creation also failed:', fallbackError);
+        throw error; // Throw original error
+      }
     }
-  }, [wallToolParams]); // FIXED: No longer depends on WebSocket createObject
+  }, [wallToolParams, architect3DService, findNearbyWallEndpoint]);
 
   const handleUpdateWall = useCallback(async (wallParams) => {
     try {
-      console.log('🔧 WALL UPDATE: Starting wall property update');
+      console.log('🔧 WALL UPDATE: Starting enhanced wall property update');
       console.log('🔧 Update parameters received:', wallParams);
+      console.log('🏗️ Using Architect3DWallService for sophisticated wall updates');
       
       if (!wallParams.id) {
         throw new Error('Wall ID is required for update');
@@ -5143,6 +5730,13 @@ function MainApp({ user, onRequestAuth }) {
         materialColor: wallParams.materialColor,
         density: wallParams.density,
         
+        // Enhanced architect3d features
+        wallType: wallParams.wallType || selectedWall.architect3dData?.wallType || 'straight',
+        joineryMode: wallParams.joineryMode || 'auto',
+        snapToAxis: wallParams.snapToAxis !== false,
+        cornerTolerance: wallParams.cornerTolerance || 20,
+        enableAutoMerge: wallParams.enableAutoMerge !== false,
+        
         // Preserve existing geometric properties for wall positioning
         startPoint: selectedWall.params?.startPoint || selectedWall.startPoint,
         endPoint: selectedWall.params?.endPoint || selectedWall.endPoint,
@@ -5151,19 +5745,36 @@ function MainApp({ user, onRequestAuth }) {
         
         // Add timestamp for tracking updates
         lastUpdated: Date.now(),
-        updatedBy: 'wall_property_panel',
+        updatedBy: 'enhanced_wall_property_panel',
         
         // Ensure type is preserved
         type: 'wall'
       };
       
-      console.log('🔧 Comprehensive update parameters:', updateParams);
+      console.log('🔧 Comprehensive enhanced update parameters:', updateParams);
       
-      // Update using standalone CAD engine
+      // Try to update with Architect3DWallService first if the wall has architect3d data
+      if (selectedWall.architect3dData && selectedWall.hasEnhancedCornerLogic) {
+        try {
+          console.log('🏗️ Updating wall via Architect3DWallService');
+          const architect3dResult = architect3DService.updateWall(selectedWall.architect3dData.id, updateParams);
+          console.log('🏗️ Architect3D wall updated:', architect3dResult);
+          
+          // Update the CAD object with new architect3d data
+          const cadObject = standaloneCADEngine.getObject(wallParams.id);
+          if (cadObject) {
+            cadObject.architect3dData = architect3dResult;
+          }
+        } catch (architect3dError) {
+          console.warn('⚠️ Architect3D update failed, continuing with standard update:', architect3dError);
+        }
+      }
+      
+      // Update using standalone CAD engine (always do this for rendering)
       const result = standaloneCADEngine.updateObject(wallParams.id, updateParams);
       
       if (result) {
-      console.log('✅ Wall updated successfully via standaloneCADEngine');
+      console.log('✅ Enhanced wall updated successfully via standaloneCADEngine');
         
         // Update the selected objects array to reflect changes
         setSelectedObjects(prevSelected => 
@@ -5176,22 +5787,22 @@ function MainApp({ user, onRequestAuth }) {
         
         // Force viewport refresh by emitting a manual update event
         setTimeout(() => {
-          console.log('🔄 MANUAL REFRESH: Triggering viewport refresh after wall update');
+          console.log('🔄 MANUAL REFRESH: Triggering viewport refresh after enhanced wall update');
           
           // Force emit an objects_changed event to trigger viewport refresh
           standaloneCADEngine.emit('objects_changed', {
             source: 'manual_refresh',
-            reason: 'wall_property_update',
+            reason: 'enhanced_wall_property_update',
             objectId: wallParams.id,
             timestamp: Date.now()
           });
           
-          console.log('🔄 MANUAL REFRESH: objects_changed event emitted');
+          console.log('🔄 MANUAL REFRESH: objects_changed event emitted for enhanced wall');
         }, 100);
         
       return result;
       } else {
-        throw new Error('Update operation failed in CAD engine');
+        throw new Error('Enhanced update operation failed in CAD engine');
       }
       
     } catch (error) {
@@ -5250,6 +5861,114 @@ function MainApp({ user, onRequestAuth }) {
 
   const handleCancelSlabTool = useCallback(() => {
     // Deselect the slab tool
+    setSelectedTool(null);
+  }, []);
+
+  // Ramp Tool Handlers
+  const handleCreateRamp = useCallback(async (rampParams) => {
+    try {
+      console.log('🛤️ RAMP CREATION DEBUG: handleCreateRamp called with parameters:', rampParams);
+      console.log('🛤️ RAMP CREATION DEBUG: createSlab function available:', typeof createSlab);
+      console.log('🛤️ RAMP CREATION DEBUG: Current selectedTool:', selectedTool);
+      console.log('🛤️ RAMP CREATION DEBUG: Call stack:', new Error().stack.split('\n').slice(1, 4).join('\n'));
+      
+      // Use slab creation logic but mark as ramp type
+      console.log('🛤️ RAMP CREATION DEBUG: About to call createSlab...');
+      const success = await createSlab({
+        ...rampParams,
+        type: 'ramp',
+        isRamp: true
+      });
+      
+      console.log('🛤️ RAMP CREATION DEBUG: createSlab returned success:', success);
+      
+      if (success) {
+        console.log('✅ Ramp created successfully');
+        console.log('🛤️ RAMP CREATION DEBUG: About to deselect tool...');
+        setSelectedTool(null); // Deselect tool after creation
+      } else {
+        console.error('❌ RAMP CREATION DEBUG: createSlab returned false/falsy value');
+      }
+    } catch (error) {
+      console.error('❌ RAMP CREATION ERROR:', error);
+      console.error('❌ RAMP CREATION ERROR: Full error stack:', error.stack);
+    }
+  }, [createSlab, selectedTool]);
+
+  const handleUpdateRamp = useCallback(async (rampParams) => {
+    try {
+      console.log('🛤️ Updating ramp with parameters:', rampParams);
+      
+      if (selectedObjects.length > 0) {
+        const rampId = selectedObjects[0].id;
+        const success = await updateObjectProperty(rampId, rampParams);
+        
+        if (success) {
+          console.log('✅ Ramp updated successfully');
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to update ramp:', error);
+    }
+  }, [updateObjectProperty, selectedObjects]);
+
+  const handleCancelRampTool = useCallback(() => {
+    // Deselect the ramp tool
+    setSelectedTool(null);
+  }, []);
+
+  // Column Tool Handlers
+  const handleCreateColumn = useCallback(async (columnParams) => {
+    try {
+      console.log('🏢 Creating column with parameters:', columnParams);
+      
+      // Create the column using the standalone CAD engine
+      const objectId = createObject('column', {
+        width: columnParams.width,
+        depth: columnParams.depth,
+        height: columnParams.height,
+        radius: columnParams.radius,
+        shape: columnParams.shape,
+        material: columnParams.material,
+        inclinationAngle: columnParams.inclinationAngle,
+        inclinationAxis: columnParams.inclinationAxis,
+        rotation: columnParams.rotation,
+        position: columnParams.position || { x: 0, y: 0, z: 0 },
+        ifc: columnParams.ifc
+      });
+      
+      // Optionally show success message
+      console.log('✅ Column created successfully:', objectId);
+      
+    } catch (error) {
+      console.error('❌ Failed to create column:', error);
+      throw error;
+    }
+  }, [createObject]);
+
+  const handleUpdateColumn = useCallback(async (columnParams) => {
+    try {
+      console.log('🏢 Updating column with parameters:', columnParams);
+      
+      // Update the column using updateObjectProperty for each property
+      const updatePromises = Object.entries(columnParams).map(([key, value]) => {
+        if (key !== 'id') {
+          return updateObjectProperty(columnParams.id, key, value);
+        }
+      }).filter(Boolean);
+      
+      await Promise.all(updatePromises);
+      
+      console.log('✅ Column updated successfully');
+      
+    } catch (error) {
+      console.error('❌ Failed to update column:', error);
+      throw error;
+    }
+  }, [updateObjectProperty]);
+
+  const handleCancelColumnTool = useCallback(() => {
+    // Deselect the column tool
     setSelectedTool(null);
   }, []);
 
@@ -5372,35 +6091,55 @@ function MainApp({ user, onRequestAuth }) {
   // Roof Tool Handlers
   const handleCreateRoof = useCallback(async (roofParams) => {
     try {
-      console.log('Creating roof with parameters:', roofParams);
+      console.log('🏠 ROOF CREATION DEBUG: Creating roof with parameters:', roofParams);
+      console.log('🏠 ROOF CREATION DEBUG: StandaloneCADEngine available:', !!standaloneCADEngine);
+      console.log('🏠 ROOF CREATION DEBUG: ModelUrl from params:', roofParams.modelUrl);
+      console.log('🏠 ROOF CREATION DEBUG: Dimensions from params:', roofParams.dimensions);
       
-      // Create the roof using the WebSocket createObject method
-      await createObject('Arch_Roof', 
-        // Default position - user will place by clicking
-        { x: 0, y: 0, z: 0 }, 
-        {
-          workbench: 'Arch',
-          ...roofParams,
-          // Map parameters to FreeCAD format
-          Width: roofParams.width,
-          Length: roofParams.length,
-          Height: roofParams.height,
-          RoofType: roofParams.roofType,
-          Pitch: roofParams.pitch,
-          Overhang: roofParams.overhang,
-          Thickness: roofParams.thickness,
-          Material: roofParams.material
-        }
-      );
+      // Use standalone CAD engine for roof creation
+      // Pass through all roofParams, including modelUrl, dimensions, etc.
+      const objectId = standaloneCADEngine.createObject('roof', {
+        // Model loading properties (CRITICAL for 3D model loading)
+        modelUrl: roofParams.modelUrl,
+        model_url: roofParams.model_url,
+        format: roofParams.format,
+        isLocal: roofParams.isLocal,
+        localModel: roofParams.localModel,
+        selectedModel: roofParams.selectedModel,
+        
+        // Dimensions from model manifest
+        dimensions: roofParams.dimensions,
+        
+        // Basic roof properties with fallbacks
+        roofType: roofParams.type || roofParams.roofType || 'gable',
+        width: roofParams.dimensions?.width || roofParams.width || 12.0,
+        length: roofParams.dimensions?.length || roofParams.length || 16.0,
+        height: roofParams.dimensions?.height || roofParams.height || 4.0,
+        pitch: roofParams.dimensions?.pitch || roofParams.pitch || 30,
+        overhang: roofParams.dimensions?.overhang || roofParams.overhang || 0.6,
+        thickness: roofParams.thickness || 0.2,
+        material: roofParams.material || roofParams.properties?.material || 'asphalt_shingles',
+        position: roofParams.position || { x: 0, y: 0, z: 0 },
+        
+        // Additional properties from model
+        name: roofParams.name,
+        subtype: roofParams.subtype,
+        category: roofParams.category,
+        description: roofParams.description,
+        tags: roofParams.tags,
+        properties: roofParams.properties
+      });
       
-      // Optionally show success message
+      console.log('🏠 ROOF CREATION DEBUG: Roof created with ID:', objectId);
       console.log('✅ Roof created successfully');
+      
+      return objectId;
       
     } catch (error) {
       console.error('❌ Failed to create roof:', error);
       throw error;
     }
-  }, [createObject]);
+  }, [standaloneCADEngine]);
 
   const handleUpdateRoof = useCallback(async (roofParams) => {
     try {
@@ -5429,37 +6168,60 @@ function MainApp({ user, onRequestAuth }) {
   // Stair Tool Handlers
   const handleCreateStair = useCallback(async (stairParams) => {
     try {
-      console.log('Creating stair with parameters:', stairParams);
+      console.log('🏗️ STAIR CREATION DEBUG: Creating stair with parameters:', stairParams);
+      console.log('🏗️ STAIR CREATION DEBUG: StandaloneCADEngine available:', !!standaloneCADEngine);
+      console.log('🏗️ STAIR CREATION DEBUG: ModelUrl from params:', stairParams.modelUrl);
+      console.log('🏗️ STAIR CREATION DEBUG: Dimensions from params:', stairParams.dimensions);
       
-      // Create the stair using the WebSocket createObject method
-      await createObject('Arch_Stairs', 
-        // Default position - user will place by clicking
-        { x: 0, y: 0, z: 0 }, 
-        {
-          workbench: 'Arch',
-          ...stairParams,
-          // Map parameters to FreeCAD format
-          TotalRise: stairParams.totalRise,
-          TotalRun: stairParams.totalRun,
-          NumberOfSteps: stairParams.numberOfSteps,
-          StepWidth: stairParams.stepWidth,
-          TreadDepth: stairParams.treadDepth,
-          RiserHeight: stairParams.riserHeight,
-          StairType: stairParams.stairType,
-          HasHandrail: stairParams.hasHandrail,
-          HandrailHeight: stairParams.handrailHeight,
-          Material: stairParams.material
-        }
-      );
+      // Use standalone CAD engine for stair creation
+      // Pass through all stairParams, including modelUrl, dimensions, etc.
+      const objectId = standaloneCADEngine.createObject('stair', {
+        // Model loading properties (CRITICAL for 3D model loading)
+        modelUrl: stairParams.modelUrl,
+        model_url: stairParams.model_url,
+        format: stairParams.format,
+        isLocal: stairParams.isLocal,
+        localModel: stairParams.localModel,
+        selectedModel: stairParams.selectedModel,
+        
+        // Dimensions from model manifest
+        dimensions: stairParams.dimensions,
+        
+        // Basic stair properties with fallbacks
+        stairType: stairParams.stairType || 'straight',
+        totalRise: stairParams.dimensions?.totalRise || stairParams.totalRise || 3.0,
+        totalRun: stairParams.dimensions?.totalRun || stairParams.totalRun || 4.0,
+        numberOfSteps: stairParams.dimensions?.numberOfSteps || stairParams.numberOfSteps || 16,
+        stepWidth: stairParams.dimensions?.width || stairParams.stepWidth || 1.2,
+        treadDepth: stairParams.dimensions?.treadDepth || stairParams.treadDepth || 0.25,
+        riserHeight: stairParams.dimensions?.riserHeight || stairParams.riserHeight || 0.18,
+        material: stairParams.material || stairParams.properties?.material || 'concrete',
+        handrailHeight: stairParams.handrailHeight || 1.0,
+        hasHandrail: stairParams.hasHandrail !== undefined ? stairParams.hasHandrail : (stairParams.properties?.hasHandrail !== undefined ? stairParams.properties.hasHandrail : true),
+        landingDepth: stairParams.landingDepth || 0.8,
+        thickness: stairParams.thickness || 0.15,
+        position: stairParams.position || { x: 0, y: 0, z: 0 },
+        
+        // Additional properties from model
+        name: stairParams.name,
+        subtype: stairParams.subtype,
+        category: stairParams.category,
+        description: stairParams.description,
+        tags: stairParams.tags,
+        properties: stairParams.properties
+      });
       
-      // Optionally show success message
+      console.log('🏗️ STAIR CREATION DEBUG: Stair created with ID:', objectId);
       console.log('✅ Stair created successfully');
       
+      return objectId;
+      
     } catch (error) {
-      console.error('❌ Failed to create stair:', error);
+      console.error('❌ STAIR CREATION ERROR: Failed to create stair:', error);
+      console.error('❌ STAIR CREATION ERROR: Full error stack:', error.stack);
       throw error;
     }
-  }, [createObject]);
+  }, []);
 
   const handleUpdateStair = useCallback(async (stairParams) => {
     try {
@@ -5526,6 +6288,8 @@ function MainApp({ user, onRequestAuth }) {
     console.log('File action:', action);
     
     if (action === 'save') {
+      console.log('💾 Opening save dialog...');
+      
       // Use native Electron save dialog if available, fallback to web modal
       if (window.electronAPI && window.electronAPI.showProjectSaveDialog) {
         try {
@@ -5549,14 +6313,9 @@ function MainApp({ user, onRequestAuth }) {
             
             // Map extensions to our format names
             const formatMap = {
-              'FCStd': 'FCStd',
-              'fcstd': 'FCStd',
-              'stl': 'stl', 
-              'step': 'step',
-              'stp': 'step',
-              'obj': 'obj',
-              'iges': 'iges',
-              'igs': 'iges'
+              'six.bim': 'six.bim',
+              'sixbim': 'six.bim',
+              'bim': 'six.bim'
             };
             
             const saveData = {
@@ -5580,91 +6339,192 @@ function MainApp({ user, onRequestAuth }) {
       return;
     }
     
+    
     if (action === 'import_ifc') {
-      // Create file input for IFC upload
+      // Create file input for 3D model upload
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.ifc,.IFC,.glb,.gltf,.obj,.OBJ'; // Support IFC, glTF, and OBJ files
+      input.accept = '.ifc,.IFC,.glb,.gltf,.obj,.OBJ,.fbx,.FBX'; // Support all 3D file formats
       input.style.display = 'none';
       
       input.onchange = async (event) => {
         const file = event.target.files[0];
         if (file) {
           try {
-            console.log(`📁 Uploading ${file.name} in ${viewportMode} mode`);
+            const fileExt = file.name.split('.').pop().toLowerCase();
+            console.log(`📁 Uploading ${file.name} (${fileExt}) in ${viewportMode} mode`);
             
-            // Handle import differently based on current viewport mode
-            if (viewportMode === '2d') {
-              // Import via 2D viewport using our new IFC import functionality
-              console.log('📐 Importing via 2D viewport with IFC parsing...');
+            // Determine file type and handle accordingly
+            if (fileExt === 'fbx' || fileExt === 'gltf' || fileExt === 'glb' || fileExt === 'obj') {
+              // Handle 3D model files (furniture, fixtures) via our upload backend
+              console.log('🪑 Processing 3D model file via upload backend...');
               
-              // Use our handleIFCImport function to process the file
-              await handleIFCImport(file, null, null);
+              // Auto-switch to 3D mode for 3D model viewing
+              if (viewportMode === '2d') {
+                console.log('🔄 AUTO-SWITCH: Switching to 3D viewport for 3D model viewing');
+                setViewportMode('3d');
+              }
               
-            } else {
-              // Import directly via 3D viewport (existing functionality)
-              console.log('🏗️ Importing directly via 3D Xeokit viewer...');
-              
-              // Send a chat message to show the import started
               try {
-                await sendChatMessage(`🔄 **Importing file**: ${file.name}...\n\nProcessing building data and creating 3D objects...`, {
-                  action: 'ifc_import_started',
-                  fileName: file.name
+                await sendChatMessage(`🔄 **Importing 3D Model**: ${file.name}...\n\nUploading and processing ${fileExt.toUpperCase()} file...`, {
+                  action: 'model_import_started',
+                  fileName: file.name,
+                  fileType: fileExt
                 });
               } catch (chatError) {
                 console.warn('Failed to send import status message:', chatError);
               }
               
-              if (!xeokitViewerRef.current) {
-                throw new Error('Xeokit viewer not available. Please ensure the BIM viewer is loaded.');
+              // Upload via our backend endpoint
+              const formData = new FormData();
+              formData.append('file', file);
+              formData.append('fileType', `.${fileExt}`);
+              
+              const response = await fetch('http://localhost:8002/upload-bim-file', {
+                method: 'POST',
+                body: formData,
+              });
+              
+              if (!response.ok) {
+                throw new Error(`Upload failed: ${response.statusText}`);
               }
               
-              const importResult = await xeokitViewerRef.current.loadIFCFile(file);
+              const result = await response.json();
               
-              if (importResult.success) {
-                console.log('✅ Import successful:', importResult);
+              if (result.success && result.objects && result.objects.length > 0) {
+                console.log('✅ 3D Model upload successful:', result);
                 
-                // Send success message through chat
-                const geometryType = importResult.isReal ? 'real geometry parsed' : 'placeholder representation';
+                // DEBUG: Log the exact object structure we received
+                console.log('🔍 DEBUG: Backend returned objects:', JSON.stringify(result.objects, null, 2));
+                
+                // Add the imported objects to our CAD objects using createObject
+                for (const obj of result.objects) {
+                  console.log('🔍 DEBUG: Processing individual object:');
+                  console.log('🔍 DEBUG: Full object:', JSON.stringify(obj, null, 2));
+                  console.log('🔍 DEBUG: modelUrl check:', {
+                    'obj.modelUrl': obj.modelUrl,
+                    'obj.format': obj.format,
+                    'typeof modelUrl': typeof obj.modelUrl,
+                    'typeof format': typeof obj.format,
+                    'hasModelUrl': !!obj.modelUrl,
+                    'hasFormat': !!obj.format,
+                    'allKeys': Object.keys(obj)
+                  });
+                  const newObject = {
+                    id: obj.id || `imported_${Date.now()}`,
+                    type: obj.type || 'furniture',
+                    position: {
+                      x: typeof obj.position?.x === 'number' ? obj.position.x : 0,
+                      y: typeof obj.position?.y === 'number' ? obj.position.y : 0,
+                      z: typeof obj.position?.z === 'number' ? obj.position.z : 0
+                    },
+                    rotation: {
+                      x: typeof obj.rotation?.x === 'number' ? obj.rotation.x : 0,
+                      y: typeof obj.rotation?.y === 'number' ? obj.rotation.y : 0,
+                      z: typeof obj.rotation?.z === 'number' ? obj.rotation.z : 0
+                    },
+                    scale: {
+                      x: typeof obj.scale?.x === 'number' ? obj.scale.x : 1,
+                      y: typeof obj.scale?.y === 'number' ? obj.scale.y : 1,
+                      z: typeof obj.scale?.z === 'number' ? obj.scale.z : 1
+                    },
+                    params: {
+                      ...obj,
+                      modelUrl: obj.modelUrl,
+                      format: obj.format,
+                      name: obj.name,
+                      width: typeof obj.width === 'number' ? obj.width : 1,
+                      height: typeof obj.height === 'number' ? obj.height : 1,
+                      depth: typeof obj.depth === 'number' ? obj.depth : 1,
+                      position: {
+                        x: typeof obj.position?.x === 'number' ? obj.position.x : 0,
+                        y: typeof obj.position?.y === 'number' ? obj.position.y : 0,
+                        z: typeof obj.position?.z === 'number' ? obj.position.z : 0
+                      }
+                    }
+                  };
+                  
+                  // Use createObject from the standalone CAD hook
+                  console.log('🪑 Creating CAD object with type:', newObject.type, 'and params:', newObject.params);
+                  const createdObjectId = createObject(newObject.type, newObject.position, newObject.params);
+                  console.log('🪑 CAD object created with ID:', createdObjectId);
+                }
+                
+                // Send success message
                 await sendChatMessage(
-                  `✅ **Import Complete**: ${file.name}\n\n` +
-                  `**Model ID**: ${importResult.modelID}\n` +
-                  `**Geometry**: ${geometryType}\n` +
-                  `**File**: ${importResult.fileName}\n\n` +
-                  `The ${importResult.isReal ? 'actual building model' : 'placeholder building'} is now visible in your BIM viewer. You can navigate, zoom, and inspect ${importResult.isReal ? 'real building elements' : 'the basic structure'} in 3D.`, 
+                  `✅ **3D Model Import Complete**: ${file.name}\n\n` +
+                  `**Type**: ${fileExt.toUpperCase()} model\n` +
+                  `**Objects**: ${result.imported_count} item(s) added\n` +
+                  `**Category**: ${result.objects[0].type || 'furniture'}\n\n` +
+                  `Your 3D model is now visible in both 2D and 3D viewports. You can select, move, and modify it like any other object.`, 
                   {
-                    action: 'ifc_import_success',
+                    action: 'model_import_success',
                     fileName: file.name,
-                    modelID: importResult.modelID,
-                    isReal: importResult.isReal,
-                    xeokitModel: importResult.xeokitModel
+                    fileType: fileExt,
+                    objectCount: result.imported_count
                   }
                 );
                 
               } else {
-                console.error('❌ Import failed:', importResult.message);
-                
-                // Send error message through chat
-                await sendChatMessage(
-                  `❌ **Import Failed**: ${file.name}\n\n` +
-                  `Error: ${importResult.message}\n\n` +
-                  `Please check that your file is valid and try again.`, 
-                  {
-                    action: 'ifc_import_error',
-                    error: importResult.message
-                  }
-                );
+                throw new Error(result.message || 'Upload failed');
               }
+              
+            } else if (fileExt === 'ifc') {
+              // Handle IFC files with existing logic for BIM data
+              console.log('🏗️ Processing IFC file for BIM data...');
+              
+              if (viewportMode === '2d') {
+                // Use our handleIFCImport function for 2D mode
+                await handleIFCImport(file, null, null);
+              } else {
+                // Import directly via Xeokit viewer for 3D mode
+                try {
+                  await sendChatMessage(`🔄 **Importing BIM file**: ${file.name}...\n\nProcessing building data and creating 3D objects...`, {
+                    action: 'ifc_import_started',
+                    fileName: file.name
+                  });
+                } catch (chatError) {
+                  console.warn('Failed to send import status message:', chatError);
+                }
+                
+                if (!xeokitViewerRef.current) {
+                  throw new Error('Xeokit viewer not available. Please ensure the BIM viewer is loaded.');
+                }
+                
+                const importResult = await xeokitViewerRef.current.loadIFCFile(file);
+                
+                if (importResult.success) {
+                  console.log('✅ IFC Import successful:', importResult);
+                  
+                  const geometryType = importResult.isReal ? 'real geometry parsed' : 'placeholder representation';
+                  await sendChatMessage(
+                    `✅ **BIM Import Complete**: ${file.name}\n\n` +
+                    `**Model ID**: ${importResult.modelID}\n` +
+                    `**Geometry**: ${geometryType}\n\n` +
+                    `The ${importResult.isReal ? 'building model' : 'placeholder building'} is now visible in your BIM viewer.`, 
+                    {
+                      action: 'ifc_import_success',
+                      fileName: file.name,
+                      modelID: importResult.modelID,
+                      isReal: importResult.isReal
+                    }
+                  );
+                } else {
+                  throw new Error(importResult.message || 'IFC import failed');
+                }
+              }
+            } else {
+              throw new Error(`Unsupported file type: ${fileExt}. Supported formats: FBX, glTF, GLB, OBJ, IFC`);
             }
             
           } catch (error) {
-            console.error(`❌ Error importing file in ${viewportMode} mode:`, error);
+            console.error(`❌ Error importing file:`, error);
             
-            // Send error message through chat
             try {
               await sendChatMessage(`❌ **Import Error**: ${error.message}\n\nPlease check that your file is valid and try again.`, {
-                action: 'ifc_import_error',
-                error: error.message
+                action: 'import_error',
+                error: error.message,
+                fileName: file.name
               });
             } catch (chatError) {
               console.warn('Failed to send error message:', chatError);
@@ -5682,36 +6542,95 @@ function MainApp({ user, onRequestAuth }) {
     }
     
     // TODO: Implement other file operations (New, Open, Save, etc.)
-  }, [sendChatMessage]);
+  }, [sendChatMessage, forceSave, currentProject]);
+
+  // File download utility
+  const triggerFileDownload = useCallback(async (saveData) => {
+    try {
+      // Create project data object
+      const projectData = {
+        name: saveData.fileName,
+        format: saveData.format,
+        created: new Date().toISOString(),
+        version: '1.0',
+        metadata: {
+          tool: 'StudioSix Pro',
+          author: user?.email || 'Unknown',
+          saveLocation: saveData.path
+        },
+        // Include current project state
+        ...(currentProject || {})
+      };
+      
+      // Convert to JSON
+      const jsonData = JSON.stringify(projectData, null, 2);
+      
+      // Create blob and download link
+      const blob = new Blob([jsonData], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      
+      // Create temporary download link
+      const downloadLink = document.createElement('a');
+      downloadLink.href = url;
+      downloadLink.download = `${saveData.fileName}.${saveData.format}`;
+      downloadLink.style.display = 'none';
+      
+      // Trigger download
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
+      
+      // Clean up
+      URL.revokeObjectURL(url);
+      
+      console.log('✅ File download triggered successfully');
+    } catch (error) {
+      console.error('❌ Error triggering file download:', error);
+      throw error;
+    }
+  }, [currentProject, user]);
 
   // Handle save functionality
   const handleSave = useCallback(async (saveData) => {
     try {
       console.log('💾 Saving project:', saveData);
       
-      // Send save request via WebSocket
+      // Determine save type based on path
+      const isCloudSave = saveData.path === 'Cloud';
+      const isLocalDownload = saveData.path === 'Downloads';
+      
+      if (isCloudSave) {
+        // Cloud save - save to user's account/database
+        console.log('☁️ Performing cloud save...');
+        await sendChatMessage(`☁️ **Saving to cloud**: ${saveData.fileName}.${saveData.format.toLowerCase()}...\n\nSaving to your StudioSix account for access across devices.`, {
+          action: 'cloud_save_started',
+          fileName: saveData.fileName,
+          format: saveData.format
+        });
+      } else if (isLocalDownload) {
+        // Local download - trigger browser download
+        console.log('💻 Performing local download...');
+        await sendChatMessage(`💻 **Downloading locally**: ${saveData.fileName}.${saveData.format.toLowerCase()}...\n\nFile will be downloaded to your computer and also saved to cloud.`, {
+          action: 'local_download_started',
+          fileName: saveData.fileName,
+          format: saveData.format
+        });
+        
+        // Trigger file download (we'll implement this next)
+        await triggerFileDownload(saveData);
+      }
+      
+      // Send save request via WebSocket for processing
       const message = {
         type: 'save_project',
         fileName: saveData.fileName,
         format: saveData.format,
         path: saveData.path,
+        saveType: isCloudSave ? 'cloud' : 'local',
         timestamp: new Date().toISOString()
       };
       
-      // WEBSOCKET INTEGRATION DISABLED - Building independent CAD engine
-      // For now, we'll just log the message and simulate successful save
       console.log('📤 Save request prepared:', message);
-      
-      // Send a chat message to show the save started
-      try {
-        await sendChatMessage(`💾 **Saving project**: ${saveData.fileName}.${saveData.format.toLowerCase()}...\n\nSaving to: ${saveData.path}`, {
-          action: 'save_started',
-          fileName: saveData.fileName,
-          format: saveData.format
-        });
-      } catch (chatError) {
-        console.warn('Failed to send save status message:', chatError);
-      }
       
       setShowSaveDialog(false);
       
@@ -5719,22 +6638,47 @@ function MainApp({ user, onRequestAuth }) {
       try {
         // If we have a current project, update it and mark as saved
         if (currentProject && currentProject.id) {
+          // console.log('🔄 Updating project name from:', currentProject.name, 'to:', saveData.fileName);
+          
           const updatedProject = await recentProjectsManager.updateProject(currentProject.id, {
             name: saveData.fileName,
             lastSaved: new Date().toISOString(),
             progress: Math.min((currentProject.progress || 0) + 10, 100), // Increment progress
             filePath: `${saveData.path}/${saveData.fileName}.${saveData.format.toLowerCase()}`,
             format: saveData.format,
-            saved: true // Mark as saved
+            saved: true, // Mark as saved
+            // Clear any conflicting name data to ensure our name takes precedence
+            projectData: {
+              ...(currentProject.projectData || {}),
+              name: saveData.fileName
+            }
           });
           
           // Add to recent projects now that it's saved
           await recentProjectsManager.addToRecentProjects(updatedProject);
           
           console.log('✅ Project saved and added to recent projects:', updatedProject.name);
+          console.log('🔍 Updated project object:', updatedProject);
+          console.log('🔍 Project name sources:', {
+            name: updatedProject.name,
+            projectDataName: updatedProject.projectData?.name,
+            templateTitle: updatedProject.template?.title
+          });
           
           // Update current project state
           setCurrentProject(updatedProject);
+          
+          // Send success message based on save type
+          const successMessage = isCloudSave 
+            ? `✅ **Successfully saved to cloud!**\n\nProject "${updatedProject.name}" is now saved to your StudioSix account and can be accessed from any device.`
+            : `✅ **Successfully saved and downloaded!**\n\nProject "${updatedProject.name}" has been downloaded to your computer and saved to your cloud account.`;
+            
+          await sendChatMessage(successMessage, {
+            action: isCloudSave ? 'cloud_save_complete' : 'local_download_complete',
+            fileName: updatedProject.name,
+            format: saveData.format,
+            success: true
+          });
         } else {
           // Create a new project if we somehow don't have one
           const newProject = recentProjectsManager.createNewProject({
@@ -5751,6 +6695,19 @@ function MainApp({ user, onRequestAuth }) {
           
           console.log('✅ New project created and saved:', newProject.name);
           setCurrentProject(newProject);
+          
+          // Send success message for new project
+          const successMessage = isCloudSave 
+            ? `✅ **New project saved to cloud!**\n\nProject "${newProject.name}" has been created and saved to your StudioSix account.`
+            : `✅ **New project saved and downloaded!**\n\nProject "${newProject.name}" has been created, downloaded to your computer, and saved to your cloud account.`;
+            
+          await sendChatMessage(successMessage, {
+            action: isCloudSave ? 'cloud_save_complete' : 'local_download_complete',
+            fileName: newProject.name,
+            format: saveData.format,
+            success: true,
+            isNewProject: true
+          });
         }
       } catch (projectError) {
         console.error('Failed to update project manager:', projectError);
@@ -5836,17 +6793,14 @@ Would you like to sign out?
           const directory = filePath.substring(0, filePath.lastIndexOf('/'));
           
           const formatMap = {
-            's6proj': 'FCStd', // Map s6proj to FCStd for now
-            'FCStd': 'FCStd',
-            'stl': 'stl', 
-            'step': 'step',
-            'obj': 'obj',
-            'iges': 'iges'
+            'six.bim': 'six.bim',
+            'sixbim': 'six.bim',
+            'bim': 'six.bim'
           };
           
           const saveData = {
             fileName: fileName,
-            format: formatMap[extension] || 'FCStd',
+            format: formatMap[extension] || 'six.bim',
             path: directory
           };
           
@@ -5904,7 +6858,11 @@ Would you like to sign out?
   const handleStartProject = async (projectConfig) => {
     try {
       // Check authentication before starting project (only if auth is configured)
-      if (isAuthConfigured && !user) {
+      // Allow demo user (skip auth was selected) or authenticated user
+      const isDemoUser = user?.email === 'demo@example.com';
+      const hasValidUser = user && (isDemoUser || user.id);
+      
+      if (isAuthConfigured && !hasValidUser) {
         console.log('🔐 Authentication required to start project');
         onRequestAuth?.();
         return;
@@ -5930,6 +6888,13 @@ Would you like to sign out?
       
       // Clear any existing CAD objects for the new project
       standaloneCADEngine.clearAllObjects();
+      
+      // If this is an AI-powered project with an initial prompt, store it for processing
+      if (projectConfig?.projectData?.aiPrompt) {
+        // Store the initial AI prompt to be processed by NativeAIChat
+        setInitialAIPrompt(projectConfig.projectData.aiPrompt);
+        console.log('🤖 AI-powered project created with initial prompt:', projectConfig.projectData.aiPrompt);
+      }
       
       console.log('🆕 Started new project (unsaved):', newProject.name, 'with ID:', newProject.id);
       console.log('👤 Project created by:', user?.email || 'demo user');
@@ -5972,31 +6937,80 @@ Would you like to sign out?
 
   const handleOpenExisting = async (project) => {
     try {
+      // Prevent multiple simultaneous calls
+      if (window._projectLoadingInProgress) {
+        console.log('🔄 DEBUG: Project loading already in progress, ignoring duplicate call');
+        return;
+      }
+      
+      window._projectLoadingInProgress = true;
+      
+      // Check authentication before opening project (only if auth is configured)
+      // Allow demo user (skip auth was selected) or authenticated user
+      const isDemoUser = user?.email === 'demo@example.com';
+      const hasValidUser = user && (isDemoUser || user.id);
+      if (isAuthConfigured && !hasValidUser) {
+        console.log('🔐 Authentication required to open project');
+        window._projectLoadingInProgress = false;
+        onRequestAuth?.();
+        return;
+      }
+      
       if (project) {
         console.log('📂 Opening existing project:', project.name, 'ID:', project.id);
         
-        // Set the existing project as current
+        // Set the existing project as current - with additional persistence checks
+        console.log('🔄 DEBUG: Setting currentProject and appState to main-app');
+        
+        // Set state with immediate verification
         setCurrentProject(project);
         setAppState('main-app');
+        
+        // Add a flag to prevent any accidental reversion during this session
+        window._projectLoadingInProgress = false;
+        window._lastLoadedProject = {
+          id: project.id,
+          name: project.name,
+          timestamp: Date.now()
+        };
+        
+        // Add a timeout to check if the state actually changed
+        setTimeout(() => {
+          console.log('🔄 DEBUG: State check after 100ms - current state should be main-app');
+        }, 100);
+        
+        // Add another check after 1 second
+        setTimeout(() => {
+          console.log('🔄 DEBUG: State check after 1000ms - current state should still be main-app');
+        }, 1000);
         
         // Clear chat history and CAD objects
         clearChatHistory();
         standaloneCADEngine.clearAllObjects();
         
         // Update project access timestamp
-        if (project.id && await recentProjectsManager.getProject(project.id)) {
-          await recentProjectsManager.markProjectOpened(project.id);
+        try {
+          if (project.id && await recentProjectsManager.getProject(project.id)) {
+            await recentProjectsManager.markProjectOpened(project.id);
+            console.log('🔄 DEBUG: Successfully updated project timestamp');
+          } else {
+            console.log('🔄 DEBUG: Project not found in manager or no ID, skipping timestamp update');
+          }
+        } catch (timestampError) {
+          console.warn('⚠️ DEBUG: Failed to update project timestamp, but continuing:', timestampError);
         }
         
-        // Send welcome back message
-        setTimeout(() => {
-          sendChatMessage(`Welcome back to ${project.name || 'your project'}! Let's continue building where we left off.`, {
-            projectName: project.name,
-            projectId: project.id,
-            isReturning: true,
-            projectType: project.type
-          }).catch(console.error);
-        }, 1000);
+        // Send welcome back message - TEMPORARILY DISABLED FOR DEBUGGING
+        // setTimeout(() => {
+        //   sendChatMessage(`Welcome back to ${project.name || 'your project'}! Let's continue building where we left off.`, {
+        //     projectName: project.name,
+        //     projectId: project.id,
+        //     isReturning: true,
+        //     projectType: project.type
+        //   }).catch(console.error);
+        // }, 1000);
+        
+        console.log('🔄 DEBUG: Project opening completed successfully, skipping welcome message for now');
       } else {
         // Handle file picker or project browser fallback
         console.log('📂 Opening project browser');
@@ -6004,6 +7018,10 @@ Would you like to sign out?
       }
     } catch (error) {
       console.error('❌ Failed to open existing project:', error);
+      
+      // Clear the loading flag
+      window._projectLoadingInProgress = false;
+      
       // Fallback behavior
       setCurrentProject(project);
       setAppState('main-app');
@@ -6077,6 +7095,7 @@ Would you like to sign out?
           renderCompleted={renderCompleted}
           isConnected={standaloneReady}
           lastActivatedTool={lastActivatedTool}
+          autoSaveStatus={autoSaveStatus}
         />
       
       {/* Main Content */}
@@ -6112,7 +7131,8 @@ Would you like to sign out?
                 theme={viewportTheme}
                 selectedTool={selectedTool}
                 currentFloor={currentFloor}
-                doorParams={doorToolParams}
+                doorParams={null}
+                architect3DService={architect3DService}
                 onObjectClick={(objectId, object) => {
                   console.log('🎯 2D VIEWPORT: Object clicked:', objectId, object);
                   handleObjectSelect(objectId, object);
@@ -6125,6 +7145,84 @@ Would you like to sign out?
                       console.log('🧱 2D WALL CREATION: Wall created:', result);
                     }).catch(error => {
                       console.error('🧱 2D WALL CREATION: Error:', error);
+                    });
+                  } else if (selectedTool === 'ramp') {
+                    console.log('🛤️ 2D VIEWPORT CLICK DEBUG: Ramp tool detected, starting ramp creation...');
+                    console.log('🛤️ 2D VIEWPORT CLICK DEBUG: Position:', position);
+                    console.log('🛤️ 2D VIEWPORT CLICK DEBUG: selectedTool state:', selectedTool);
+                    console.log('🛤️ 2D VIEWPORT CLICK DEBUG: handleCreateRamp function:', typeof handleCreateRamp);
+                    
+                    const rampParams = {
+                      width: 5.0,
+                      depth: 5.0,
+                      thickness: 0.2,
+                      height: 1.0,
+                      slopeDirection: 'north',
+                      material: 'concrete',
+                      shape: 'rectangular',
+                      position: position
+                    };
+                    
+                    console.log('🛤️ 2D VIEWPORT CLICK DEBUG: About to call handleCreateRamp with params:', rampParams);
+                    
+                    handleCreateRamp(rampParams).then(result => {
+                      console.log('🛤️ 2D VIEWPORT CLICK DEBUG: Ramp creation completed, result:', result);
+                    }).catch(error => {
+                      console.error('🛤️ 2D VIEWPORT CLICK DEBUG: Ramp creation failed:', error);
+                    });
+                  } else if (selectedTool === 'stair') {
+                    console.log('🏗️ 2D VIEWPORT CLICK DEBUG: Stair tool detected, starting stair creation...');
+                    console.log('🏗️ 2D VIEWPORT CLICK DEBUG: Position:', position);
+                    console.log('🏗️ 2D VIEWPORT CLICK DEBUG: selectedTool state:', selectedTool);
+                    console.log('🏗️ 2D VIEWPORT CLICK DEBUG: handleCreateStair function:', typeof handleCreateStair);
+                    
+                    const stairParams = {
+                      stairType: 'straight',
+                      totalRise: 3.0,
+                      totalRun: 4.0,
+                      numberOfSteps: 16,
+                      stepWidth: 1.2,
+                      treadDepth: 0.25,
+                      riserHeight: 0.18,
+                      material: 'concrete',
+                      handrailHeight: 1.0,
+                      hasHandrail: true,
+                      landingDepth: 0.8,
+                      thickness: 0.15,
+                      position: position
+                    };
+                    
+                    console.log('🏗️ 2D VIEWPORT CLICK DEBUG: About to call handleCreateStair with params:', stairParams);
+                    
+                    handleCreateStair(stairParams).then(result => {
+                      console.log('🏗️ 2D VIEWPORT CLICK DEBUG: Stair creation completed, result:', result);
+                    }).catch(error => {
+                      console.error('🏗️ 2D VIEWPORT CLICK DEBUG: Stair creation failed:', error);
+                    });
+                  } else if (selectedTool === 'roof') {
+                    console.log('🏠 2D VIEWPORT CLICK DEBUG: Roof tool detected, starting roof creation...');
+                    console.log('🏠 2D VIEWPORT CLICK DEBUG: Position:', position);
+                    console.log('🏠 2D VIEWPORT CLICK DEBUG: selectedTool state:', selectedTool);
+                    console.log('🏠 2D VIEWPORT CLICK DEBUG: handleCreateRoof function:', typeof handleCreateRoof);
+                    
+                    const roofParams = {
+                      roofType: 'gable',
+                      width: 12.0,
+                      length: 16.0,
+                      height: 4.0,
+                      pitch: 30,
+                      overhang: 0.6,
+                      thickness: 0.2,
+                      material: 'asphalt_shingles',
+                      position: position
+                    };
+                    
+                    console.log('🏠 2D VIEWPORT CLICK DEBUG: About to call handleCreateRoof with params:', roofParams);
+                    
+                    handleCreateRoof(roofParams).then(result => {
+                      console.log('🏠 2D VIEWPORT CLICK DEBUG: Roof creation completed, result:', result);
+                    }).catch(error => {
+                      console.error('🏠 2D VIEWPORT CLICK DEBUG: Roof creation failed:', error);
                     });
                   }
                 }}
@@ -6139,63 +7237,106 @@ Would you like to sign out?
                   }
                 }}
                 onIFCImport={handleIFCImport}
+                onToolChange={(newTool) => {
+                  console.log('🔧 Tool change requested from viewport:', newTool);
+                  setSelectedTool(newTool);
+                }}
               />
             ) : (
-              /* 3D BIM Visualization Viewport */
-              <XeokitViewport
+              /* 3D Model Visualization Viewport */
+              <Architect3DViewport
                   theme={viewportTheme}
                   selectedTool={selectedTool}
-                  enable2D={false}
-                  enable3D={true}
-                  cadObjects={cadObjects}
-              sceneConfig={{
-                mode: 'hybrid', // Show both sample scene and CAD objects
-                sampleModel: null // Will create basic cube scene
-              }}
-              onViewerReady={(viewerConfig) => {
-                console.log('✅ Xeokit viewer ready:', viewerConfig);
-                // Store viewer reference for IFC imports
-                xeokitViewerRef.current = viewerConfig;
-              }}
-              onObjectClick={(clickData) => {
-                console.log('🎯 3D VIEWPORT: Click event received:', clickData);
-                // 3D viewport is for visualization - handle object selection only
-                if (clickData.entityId) {
-                  console.log('🎯 3D VIEWPORT: Selecting existing object:', clickData.entityId);  
-                  handleObjectSelect(clickData.entityId, clickData);
-                } else {
-                  // Clear selection when clicking empty space
-                  console.log('🎯 3D VIEWPORT: Clearing selection');
-                  handleObjectSelect(null);
-                }
-              }}
-              onObjectHover={(hoverData) => {
-                // Handle object hover feedback
-              }}
-              onModelLoaded={(modelData, modelId) => {
-                console.log('✅ Model loaded in xeokit:', modelId, modelData);
-                
-                // Debug the modelData structure
-                console.log('🔍 App.js Debug - Model callback data:', {
-                  modelId,
-                  modelDataType: typeof modelData,
-                  modelDataConstructor: modelData?.constructor?.name,
-                  modelDataKeys: modelData ? Object.keys(modelData) : [],
-                  hasModel: modelData?.model !== undefined,
-                  hasId: modelData?.id !== undefined,
-                  hasEntities: modelData?.entities !== undefined,
-                  modelDataStructure: {
-                    id: modelData?.id,
-                    type: modelData?.type,
-                    model: modelData?.model ? {
-                      id: modelData.model.id,
-                      type: typeof modelData.model,
-                      constructor: modelData.model.constructor?.name
-                    } : null
-                  }
-                });
-              }}
-              onThemeChange={setViewportTheme}
+                  onObjectClick={(objectId, object) => {
+                    console.log('🎯 ARCHITECT3D VIEWPORT: Object clicked:', objectId, object);
+                    handleObjectSelect(objectId, object);
+                  }}
+                  onGroundClick={(position) => {
+                    console.log('🏠 ARCHITECT3D VIEWPORT: Ground clicked:', position);
+                    // Handle ground clicks for tool placement if needed
+                    if (selectedTool !== 'pointer' && selectedTool !== 'pan' && selectedTool !== 'orbit') {
+                      if (selectedTool === 'ramp') {
+                        console.log('🛤️ 3D VIEWPORT CLICK DEBUG: Ramp tool detected, starting ramp creation...');
+                        console.log('🛤️ 3D VIEWPORT CLICK DEBUG: Position:', position);
+                        console.log('🛤️ 3D VIEWPORT CLICK DEBUG: selectedTool state:', selectedTool);
+                        console.log('🛤️ 3D VIEWPORT CLICK DEBUG: handleCreateRamp function:', typeof handleCreateRamp);
+                        
+                        const rampParams = {
+                          width: 5.0,
+                          depth: 5.0,
+                          thickness: 0.2,
+                          height: 1.0,
+                          slopeDirection: 'north',
+                          material: 'concrete',
+                          shape: 'rectangular',
+                          position: position
+                        };
+                        
+                        console.log('🛤️ 3D VIEWPORT CLICK DEBUG: About to call handleCreateRamp with params:', rampParams);
+                        
+                        handleCreateRamp(rampParams).then(result => {
+                          console.log('🛤️ 3D VIEWPORT CLICK DEBUG: Ramp creation completed, result:', result);
+                        }).catch(error => {
+                          console.error('🛤️ 3D VIEWPORT CLICK DEBUG: Ramp creation failed:', error);
+                        });
+                      } else if (selectedTool === 'stair') {
+                        console.log('🏗️ 3D VIEWPORT CLICK DEBUG: Stair tool detected, starting stair creation...');
+                        console.log('🏗️ 3D VIEWPORT CLICK DEBUG: Position:', position);
+                        console.log('🏗️ 3D VIEWPORT CLICK DEBUG: selectedTool state:', selectedTool);
+                        console.log('🏗️ 3D VIEWPORT CLICK DEBUG: handleCreateStair function:', typeof handleCreateStair);
+                        
+                        const stairParams = {
+                          stairType: 'straight',
+                          totalRise: 3.0,
+                          totalRun: 4.0,
+                          numberOfSteps: 16,
+                          stepWidth: 1.2,
+                          treadDepth: 0.25,
+                          riserHeight: 0.18,
+                          material: 'concrete',
+                          handrailHeight: 1.0,
+                          hasHandrail: true,
+                          landingDepth: 0.8,
+                          thickness: 0.15,
+                          position: position
+                        };
+                        
+                        console.log('🏗️ 3D VIEWPORT CLICK DEBUG: About to call handleCreateStair with params:', stairParams);
+                        
+                        handleCreateStair(stairParams).then(result => {
+                          console.log('🏗️ 3D VIEWPORT CLICK DEBUG: Stair creation completed, result:', result);
+                        }).catch(error => {
+                          console.error('🏗️ 3D VIEWPORT CLICK DEBUG: Stair creation failed:', error);
+                        });
+                      } else if (selectedTool === 'roof') {
+                        console.log('🏠 3D VIEWPORT CLICK DEBUG: Roof tool detected, starting roof creation...');
+                        console.log('🏠 3D VIEWPORT CLICK DEBUG: Position:', position);
+                        console.log('🏠 3D VIEWPORT CLICK DEBUG: selectedTool state:', selectedTool);
+                        console.log('🏠 3D VIEWPORT CLICK DEBUG: handleCreateRoof function:', typeof handleCreateRoof);
+                        
+                        const roofParams = {
+                          roofType: 'gable',
+                          width: 12.0,
+                          length: 16.0,
+                          height: 4.0,
+                          pitch: 30,
+                          overhang: 0.6,
+                          thickness: 0.2,
+                          material: 'asphalt_shingles',
+                          position: position
+                        };
+                        
+                        console.log('🏠 3D VIEWPORT CLICK DEBUG: About to call handleCreateRoof with params:', roofParams);
+                        
+                        handleCreateRoof(roofParams).then(result => {
+                          console.log('🏠 3D VIEWPORT CLICK DEBUG: Roof creation completed, result:', result);
+                        }).catch(error => {
+                          console.error('🏠 3D VIEWPORT CLICK DEBUG: Roof creation failed:', error);
+                        });
+                      }
+                      // Could trigger other tool placement here based on selectedTool
+                    }
+                  }}
             />
             )}
             
@@ -6243,6 +7384,10 @@ Would you like to sign out?
                   onCreateSlab={handleCreateSlab}
                   onUpdateSlab={handleUpdateSlab}
                   onCancelSlabTool={handleCancelSlabTool}
+                  // Ramp tool handlers
+                  onCreateRamp={handleCreateRamp}
+                  onUpdateRamp={handleUpdateRamp}
+                  onCancelRampTool={handleCancelRampTool}
                   // Door tool handlers
                   doorParams={doorToolParams}
                   onDoorParamsChange={setDoorToolParams}
@@ -6257,6 +7402,10 @@ Would you like to sign out?
                   onCreateRoof={handleCreateRoof}
                   onUpdateRoof={handleUpdateRoof}
                   onCancelRoofTool={handleCancelRoofTool}
+                  // Column tool handlers
+                  onCreateColumn={handleCreateColumn}
+                  onUpdateColumn={handleUpdateColumn}
+                  onCancelColumnTool={handleCancelColumnTool}
                   // Stair tool handlers
                   onCreateStair={handleCreateStair}
                   onUpdateStair={handleUpdateStair}
@@ -6289,6 +7438,8 @@ Would you like to sign out?
             onThemeChange={setViewportTheme}
             onFloorChange={setCurrentFloor}
             theme={viewportTheme}
+            initialPrompt={initialAIPrompt}
+            onInitialPromptProcessed={() => setInitialAIPrompt(null)}
           />
         </ResizableAIChat>
       </div>
@@ -6334,12 +7485,19 @@ Would you like to sign out?
         onRenderingActiveChange={setIsRenderingActive}
       />
 
+      {/* AI Settings Modal */}
+      <AISettingsModal
+        isOpen={showAISettingsModal}
+        onClose={() => setShowAISettingsModal(false)}
+      />
+
       {/* Save Dialog */}
       <SaveDialog
         isOpen={showSaveDialog}
         onClose={() => setShowSaveDialog(false)}
         onSave={handleSave}
       />
+
 
       {/* CAD Blocks Popup */}
       <CADBlocksPopup
@@ -6348,6 +7506,14 @@ Would you like to sign out?
         toolType={cadBlocksToolType}
         onImportBlock={handleImportBlock}
         position={cadBlocksPopupPosition}
+      />
+
+      {/* 2D CAD Blocks Modal */}
+      <CAD2DBlocksModal
+        isOpen={show2DCADBlocksModal}
+        onClose={() => setShow2DCADBlocksModal(false)}
+        onImportBlock={handleImport2DCADBlock}
+        position={cad2DBlocksModalPosition}
       />
     </div>
   );

@@ -102,9 +102,10 @@ module.exports = {
 
       return middlewares;
     },
-    headers: {
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-      'Cross-Origin-Opener-Policy': 'same-origin',
-    },
+    // Removed all security headers to allow Supabase images to load
+    // headers: {
+    //   'Cross-Origin-Embedder-Policy': 'require-corp',
+    //   'Cross-Origin-Opener-Policy': 'same-origin',
+    // },
   },
 }; 

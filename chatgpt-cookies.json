@@ -1,0 +1,84 @@
+[
+  {
+    "name": "__Host-next-auth.csrf-token",
+    "value": "652ba82e053e1c4e6475e27ccd95aadce68bba56c448d37e7dcf3fa5c405d066%7C38e592732ff32c68874510df5bbe003c869c8dd915d6a5c930cb6475ff942032",
+    "domain": "chatgpt.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "__Secure-next-auth.callback-url",
+    "value": "https%3A%2F%2Fchatgpt.com",
+    "domain": "chatgpt.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "oai-did",
+    "value": "649c14d5-e1ec-4a7d-894d-30f9eb40584a",
+    "domain": ".chatgpt.com",
+    "path": "/",
+    "expires": 1787220599.067801,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Lax"
+  },
+  {
+    "name": "__cf_bm",
+    "value": "aWiIPdh5yIZAGCQaGx7WGCKGM17fwFwoSAtL.hdNMZ0-1756116599-1.0.1.1-A41SWoQvYmHXHjmQ9sFadT.AM5v_BsNyPYG30H5UdLhG2TEUG001L36T2LR222VrRNwws9iFcVeoWU5TR3U2WWD6Oca3l3tXl1lH76LwMTk",
+    "domain": ".chatgpt.com",
+    "path": "/",
+    "expires": 1756118399.067828,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "__cflb",
+    "value": "0H28vzvP5FJafnkHxisecoAN6aLJh5C3b8XXkzDTaQK",
+    "domain": "chatgpt.com",
+    "path": "/",
+    "expires": 1756120199.068224,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "_cfuvid",
+    "value": "h9zK3xcL6UIow7VnXy.ucrSXb3cg5HeSVF_BM0ZU.00-1756116599525-0.0.1.1-604800000",
+    "domain": ".chatgpt.com",
+    "path": "/",
+    "expires": -1,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None"
+  },
+  {
+    "name": "cf_clearance",
+    "value": "1Os_4LE2xy1Vuj9vMZTO8vfO8aYmnO00rlF92Dch8No-1756116600-1.2.1.1-3Gj6gQvEYjN.64rSH7HawwGIkq2h2fb4mxwldiSpZcVd1gwA_jFGNpf74Ay.CkNZcRwQNg46SLMGaZRT0XWcHZuSFpbWZ_mtpqtxPiAN1fyEEBzUxkkWLo1Jjw8C3BNkuTKBdikWuvPqRF62oI9OvmZ1rydZnQrCbukPnT2z2rKJJURuxI9FzvdkOegp.QUT1cd1iJmIaA4qQ758Pfxct_1VhFO1LixPjVF27ffSfTA",
+    "domain": ".chatgpt.com",
+    "path": "/",
+    "expires": 1787652600.364089,
+    "httpOnly": true,
+    "secure": true,
+    "sameSite": "None",
+    "partitionKey": "https://chatgpt.com",
+    "_crHasCrossSiteAncestor": false
+  },
+  {
+    "name": "_dd_s",
+    "value": "rum=0&expire=1756117499932&logs=1&id=93d84694-65c1-4945-8e5b-23ca4a5a10db&created=1756116599932",
+    "domain": "chatgpt.com",
+    "path": "/",
+    "expires": 1756117504,
+    "httpOnly": false,
+    "secure": false,
+    "sameSite": "Strict"
+  }
+]

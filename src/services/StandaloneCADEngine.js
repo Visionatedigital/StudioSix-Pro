@@ -6,13 +6,17 @@
  */
 
 import * as THREE from 'three';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader';
 import { Door, Window } from '../models/BIMObjects.js';
 import { CommandFactory } from '../commands/architecturalCommands.js';
 import commandHistory from '../utils/commandHistory.js';
 
 class StandaloneCADEngine {
-  constructor() {
+  constructor(architect3DService = null) {
     this.objects = new Map(); // objectId -> CADObject
+    this.architect3DService = architect3DService; // Reference to sync adjusted endpoints
     this.nextObjectId = 1;
     this.listeners = new Map(); // event -> [callbacks]
     
@@ -20,21 +24,21 @@ class StandaloneCADEngine {
     this.scene3D = new THREE.Scene();
     this.scene2D = new THREE.Scene();
     
-    // Enhanced materials - PROFESSIONAL CAD STYLE (matching 2D colors)
+    // PROFESSIONAL MATERIAL DATABASE with thermal and structural properties
     this.materials = {
-      // Core materials
-      concrete: new THREE.MeshLambertMaterial({ color: 0x6b7280, roughness: 0.8 }), // Concrete grey
-      tiles: new THREE.MeshLambertMaterial({ color: 0xf3f4f6, roughness: 0.3 }), // Ceramic tiles
-      wood: new THREE.MeshLambertMaterial({ color: 0xd97706, roughness: 0.6 }), // Natural wood
-      marble: new THREE.MeshLambertMaterial({ color: 0xf9fafb, roughness: 0.1, metalness: 0.1 }), // Polished marble
-      granite: new THREE.MeshLambertMaterial({ color: 0x374151, roughness: 0.4 }), // Natural granite
-      steel: new THREE.MeshLambertMaterial({ color: 0x64748b, roughness: 0.2, metalness: 0.8 }), // Steel deck
-      carpet: new THREE.MeshLambertMaterial({ color: 0x8b5cf6, roughness: 0.9 }), // Soft carpet
-      vinyl: new THREE.MeshLambertMaterial({ color: 0x10b981, roughness: 0.5 }), // Vinyl flooring
-      stone: new THREE.MeshLambertMaterial({ color: 0x6b7280, roughness: 0.7 }), // Natural stone
-      precast: new THREE.MeshLambertMaterial({ color: 0x9ca3af, roughness: 0.6 }), // Precast concrete
+      // Core materials with enhanced properties
+      concrete: new THREE.MeshLambertMaterial({ color: 0x6b7280, roughness: 0.8 }),
+      tiles: new THREE.MeshLambertMaterial({ color: 0xf3f4f6, roughness: 0.3 }),
+      wood: new THREE.MeshLambertMaterial({ color: 0xd97706, roughness: 0.6 }),
+      marble: new THREE.MeshLambertMaterial({ color: 0xf9fafb, roughness: 0.1, metalness: 0.1 }),
+      granite: new THREE.MeshLambertMaterial({ color: 0x374151, roughness: 0.4 }),
+      steel: new THREE.MeshLambertMaterial({ color: 0x64748b, roughness: 0.2, metalness: 0.8 }),
+      carpet: new THREE.MeshLambertMaterial({ color: 0x8b5cf6, roughness: 0.9 }),
+      vinyl: new THREE.MeshLambertMaterial({ color: 0x10b981, roughness: 0.5 }),
+      stone: new THREE.MeshLambertMaterial({ color: 0x6b7280, roughness: 0.7 }),
+      precast: new THREE.MeshLambertMaterial({ color: 0x9ca3af, roughness: 0.6 }),
       
-      // Legacy materials for compatibility
+      // Wall-specific layer materials
       brick: new THREE.MeshLambertMaterial({ color: 0xd4a574, roughness: 0.7 }),
       aluminum: new THREE.MeshLambertMaterial({ color: 0xd6dde6, roughness: 0.3, metalness: 0.6 }),
       glass: new THREE.MeshLambertMaterial({ color: 0xf0f8ff, transparent: true, opacity: 0.4, roughness: 0.1 }),
@@ -44,10 +48,106 @@ class StandaloneCADEngine {
       fiberglass: new THREE.MeshLambertMaterial({ color: 0x6b7280, roughness: 0.5 }),
       pvc: new THREE.MeshLambertMaterial({ color: 0xf3f4f6, roughness: 0.4 }),
       
+      // Insulation materials
+      insulation_batt: new THREE.MeshLambertMaterial({ color: 0xffeaa7, roughness: 0.9 }),
+      insulation_rigid: new THREE.MeshLambertMaterial({ color: 0xff7675, roughness: 0.8 }),
+      insulation_spray: new THREE.MeshLambertMaterial({ color: 0xa29bfe, roughness: 0.9 }),
+      
+      // Air barriers and membranes
+      air_barrier: new THREE.MeshLambertMaterial({ color: 0x2d3436, roughness: 0.4, transparent: true, opacity: 0.8 }),
+      vapor_barrier: new THREE.MeshLambertMaterial({ color: 0x0984e3, roughness: 0.3, transparent: true, opacity: 0.7 }),
+      
       // Special materials
       wireframe: new THREE.MeshBasicMaterial({ wireframe: true, color: 0x00ff00 }),
       selected: new THREE.MeshBasicMaterial({ color: 0x00aaff, transparent: true, opacity: 0.5 }),
       preview: new THREE.MeshBasicMaterial({ color: 0xffaa00, transparent: true, opacity: 0.3 })
+    };
+
+    // PROFESSIONAL MATERIAL DATABASE with properties for analysis
+    this.materialDatabase = {
+      concrete: { 
+        thermalConductivity: 1.8, density: 2400, thermalCapacity: 880, 
+        compressiveStrength: 30, category: 'structural' 
+      },
+      brick: { 
+        thermalConductivity: 0.77, density: 1920, thermalCapacity: 840,
+        compressiveStrength: 20, category: 'masonry'
+      },
+      drywall: { 
+        thermalConductivity: 0.16, density: 640, thermalCapacity: 1150,
+        compressiveStrength: 2, category: 'finish'
+      },
+      insulation_batt: { 
+        thermalConductivity: 0.04, density: 12, thermalCapacity: 840,
+        compressiveStrength: 0, category: 'insulation'
+      },
+      insulation_rigid: { 
+        thermalConductivity: 0.028, density: 35, thermalCapacity: 1400,
+        compressiveStrength: 0.2, category: 'insulation'
+      },
+      wood: { 
+        thermalConductivity: 0.13, density: 600, thermalCapacity: 1600,
+        compressiveStrength: 40, category: 'structural'
+      },
+      steel: { 
+        thermalConductivity: 50, density: 7850, thermalCapacity: 460,
+        compressiveStrength: 250, category: 'structural'
+      }
+    };
+
+    // PROFESSIONAL WALL TYPE TEMPLATES - Industry Standard Assemblies
+    this.wallTypeTemplates = {
+      'exterior_wood_frame': {
+        name: 'Wood Frame Exterior Wall',
+        description: '2x6 Wood Frame with Brick Veneer',
+        totalThickness: 0.254, // 10 inches
+        layers: [
+          { material: 'brick', thickness: 0.102, function: 'finish_exterior', name: 'Brick Veneer' },
+          { material: 'air_barrier', thickness: 0.025, function: 'air_space', name: 'Air Gap' },
+          { material: 'insulation_batt', thickness: 0.140, function: 'insulation', name: 'Batt Insulation' },
+          { material: 'wood', thickness: 0.038, function: 'structure', name: '2x6 Wood Studs' },
+          { material: 'vapor_barrier', thickness: 0.001, function: 'vapor_control', name: 'Vapor Barrier' },
+          { material: 'drywall', thickness: 0.013, function: 'finish_interior', name: 'Gypsum Board' }
+        ],
+        properties: {
+          isExternal: true,
+          loadBearing: true,
+          thermalTransmittance: 0.35,
+          fireRating: 60
+        }
+      },
+      'interior_partition': {
+        name: 'Interior Partition Wall',
+        description: '2x4 Wood Frame Partition',
+        totalThickness: 0.114, // 4.5 inches
+        layers: [
+          { material: 'drywall', thickness: 0.013, function: 'finish_interior', name: 'Gypsum Board' },
+          { material: 'wood', thickness: 0.089, function: 'structure', name: '2x4 Wood Studs' },
+          { material: 'drywall', thickness: 0.013, function: 'finish_interior', name: 'Gypsum Board' }
+        ],
+        properties: {
+          isExternal: false,
+          loadBearing: false,
+          thermalTransmittance: 0.0,
+          fireRating: 30
+        }
+      },
+      'concrete_masonry': {
+        name: 'Concrete Masonry Unit Wall',
+        description: 'CMU Block with Insulation',
+        totalThickness: 0.305, // 12 inches
+        layers: [
+          { material: 'concrete', thickness: 0.203, function: 'structure', name: '8" CMU Block' },
+          { material: 'insulation_rigid', thickness: 0.051, function: 'insulation', name: 'Rigid Insulation' },
+          { material: 'drywall', thickness: 0.013, function: 'finish_interior', name: 'Gypsum Board' }
+        ],
+        properties: {
+          isExternal: true,
+          loadBearing: true,
+          thermalTransmittance: 0.28,
+          fireRating: 120
+        }
+      }
     };
     
     // Current selection
@@ -105,41 +205,102 @@ class StandaloneCADEngine {
     
     let geometry, mesh3D, mesh2D;
     
-    switch (type) {
-      case 'slab':
-        console.log('🏗️ SLAB CREATION DEBUG: Creating slab geometry...');
-        console.log('🏗️ SLAB CREATION DEBUG: Slab params:', params);
-        const result = this.createSlabGeometry(params);
-        geometry = result.geometry;
-        mesh3D = result.mesh3D;
-        mesh2D = result.mesh2D;
-        console.log('🏗️ SLAB CREATION DEBUG: Slab geometry created successfully');
-        console.log('🏗️ SLAB CREATION DEBUG: 3D mesh position:', mesh3D.position);
-        console.log('🏗️ SLAB CREATION DEBUG: 2D mesh position:', mesh2D.position);
-        console.log('🏗️ SLAB CREATION DEBUG: Geometry type:', geometry?.type);
-        break;
+    try {
+      switch (type) {
+        case 'slab':
+          console.log('🏗️ SLAB CREATION DEBUG: Creating slab geometry...');
+          console.log('🏗️ SLAB CREATION DEBUG: Slab params:', params);
+          const result = this.createSlabGeometry(params);
+          geometry = result.geometry;
+          mesh3D = result.mesh3D;
+          mesh2D = result.mesh2D;
+          console.log('🏗️ SLAB CREATION DEBUG: Slab geometry created successfully');
+          console.log('🏗️ SLAB CREATION DEBUG: 3D mesh position:', mesh3D.position);
+          console.log('🏗️ SLAB CREATION DEBUG: 2D mesh position:', mesh2D.position);
+          console.log('🏗️ SLAB CREATION DEBUG: Geometry type:', geometry?.type);
+          break;
+          
+        case 'ramp':
+          console.log('🛤️ RAMP CREATION DEBUG: Creating ramp geometry...');
+          console.log('🛤️ RAMP CREATION DEBUG: Ramp params:', params);
+          console.log('🛤️ RAMP CREATION DEBUG: Ramp-specific params:', {
+            height: params.height,
+            slopeDirection: params.slopeDirection,
+            grade: params.grade,
+            isRamp: params.isRamp
+          });
+          
+          // For now, use slab geometry but with ramp parameters
+          const rampResult = this.createSlabGeometry(params);
+          geometry = rampResult.geometry;
+          mesh3D = rampResult.mesh3D;
+          mesh2D = rampResult.mesh2D;
+          
+          console.log('🛤️ RAMP CREATION DEBUG: Ramp geometry created successfully');
+          console.log('🛤️ RAMP CREATION DEBUG: 3D mesh position:', mesh3D.position);
+          console.log('🛤️ RAMP CREATION DEBUG: 2D mesh position:', mesh2D.position);
+          console.log('🛤️ RAMP CREATION DEBUG: Geometry type:', geometry?.type);
+          break;
+          
+        case 'stair':
+          console.log('🏗️ STAIR CREATION DEBUG: Creating stair geometry...');
+          console.log('🏗️ STAIR CREATION DEBUG: Stair params:', params);
+          console.log('🏗️ STAIR CREATION DEBUG: Stair-specific params:', {
+            stairType: params.stairType,
+            totalRise: params.totalRise,
+            totalRun: params.totalRun,
+            numberOfSteps: params.numberOfSteps,
+            hasHandrail: params.hasHandrail
+          });
+          
+          // For now, use a simplified approach - create a basic stair structure
+          const stairResult = this.createStairGeometry(params);
+          geometry = stairResult.geometry;
+          mesh3D = stairResult.mesh3D;
+          mesh2D = stairResult.mesh2D;
+          
+          console.log('🏗️ STAIR CREATION DEBUG: Stair geometry created successfully');
+          console.log('🏗️ STAIR CREATION DEBUG: 3D mesh position:', mesh3D.position);
+          console.log('🏗️ STAIR CREATION DEBUG: 2D mesh position:', mesh2D.position);
+          console.log('🏗️ STAIR CREATION DEBUG: Geometry type:', geometry?.type);
+          break;
+          
+        case 'wall':
+          // Minimal diagnostics for wall placement sync
+          console.log('WALL_CREATE', {
+            start: params.startPoint,
+            end: params.endPoint,
+            length: params.length,
+            thickness: params.thickness,
+            height: params.height
+          });
+          
+          const wallResult = this.createWallGeometry(params);
+          geometry = wallResult.geometry;
+          mesh3D = wallResult.mesh3D;
+          mesh2D = wallResult.mesh2D;
+          console.log('WALL_GEOMETRY', { center: mesh3D.position, type: geometry?.type });
+          break;
+          
+        case 'door':
+          console.log('🚪 Creating door geometry...');
+          const doorResult = this.createDoorGeometry(params);
+          geometry = doorResult.geometry;
+          mesh3D = doorResult.mesh3D;
+          mesh2D = doorResult.mesh2D;
+          console.log('🚪 Door geometry created, position:', mesh3D.position);
+          break;
         
-      case 'wall':
-        console.log('🧱 WALL GEOMETRY DEBUG: Creating wall geometry...');
-        console.log('🧱 WALL GEOMETRY DEBUG: Wall params received:', params);
-        
-        const wallResult = this.createWallGeometry(params);
-        geometry = wallResult.geometry;
-        mesh3D = wallResult.mesh3D;
-        mesh2D = wallResult.mesh2D;
-        
-        console.log('🧱 WALL GEOMETRY DEBUG: Wall geometry created successfully');
-        console.log('🧱 WALL GEOMETRY DEBUG: 3D mesh position:', mesh3D.position);
-        console.log('🧱 WALL GEOMETRY DEBUG: Geometry type:', geometry?.type);
-        break;
-        
-      case 'door':
-        console.log('🚪 Creating door geometry...');
-        const doorResult = this.createDoorGeometry(params);
-        geometry = doorResult.geometry;
-        mesh3D = doorResult.mesh3D;
-        mesh2D = doorResult.mesh2D;
-        console.log('🚪 Door geometry created, position:', mesh3D.position);
+      case 'column':
+        console.log('🏢 COLUMN CREATION DEBUG: Creating column geometry...');
+        console.log('🏢 COLUMN CREATION DEBUG: Column params:', params);
+        const columnResult = this.createColumnGeometry(params);
+        geometry = columnResult.geometry;
+        mesh3D = columnResult.mesh3D;
+        mesh2D = columnResult.mesh2D;
+        console.log('🏢 COLUMN CREATION DEBUG: Column geometry created successfully');
+        console.log('🏢 COLUMN CREATION DEBUG: 3D mesh position:', mesh3D.position);
+        console.log('🏢 COLUMN CREATION DEBUG: Geometry type:', geometry?.type);
         break;
         
       case 'window':
@@ -149,15 +310,6 @@ class StandaloneCADEngine {
         mesh3D = windowResult.mesh3D;
         mesh2D = windowResult.mesh2D;
         console.log('🪟 Window geometry created, position:', mesh3D.position);
-        break;
-        
-      case 'column':
-        console.log('🏢 Creating column geometry...');
-        const columnResult = this.createColumnGeometry(params);
-        geometry = columnResult.geometry;
-        mesh3D = columnResult.mesh3D;
-        mesh2D = columnResult.mesh2D;
-        console.log('🏢 Column geometry created, position:', mesh3D.position);
         break;
         
       case 'furniture':
@@ -179,8 +331,35 @@ class StandaloneCADEngine {
         break;
         
       default:
-        console.warn(`Unknown object type: ${type}`);
+        console.error(`❌ CAD ENGINE ERROR: Unknown object type: "${type}"`);
+        console.error(`📋 CAD ENGINE ERROR: Available types: wall, slab, door, window, column, furniture, fixture`);
+        console.error(`📋 CAD ENGINE ERROR: Received params:`, params);
         return null;
+    }
+    } catch (error) {
+      console.error(`❌ CAD ENGINE ERROR: Failed to create ${type} object:`, error);
+      console.error(`❌ CAD ENGINE ERROR: Stack trace:`, error.stack);
+      console.error(`❌ CAD ENGINE ERROR: Params that caused error:`, params);
+      
+      // Decrement the object ID since creation failed
+      this.nextObjectId--;
+      
+      // Return null to indicate failure
+      return null;
+    }
+    
+    // Validate that geometry creation succeeded
+    if (!geometry || !mesh3D || !mesh2D) {
+      console.error(`❌ CAD ENGINE ERROR: Geometry creation incomplete for ${type}:`, {
+        hasGeometry: !!geometry,
+        hasMesh3D: !!mesh3D,
+        hasMesh2D: !!mesh2D
+      });
+      
+      // Decrement the object ID since creation failed
+      this.nextObjectId--;
+      
+      return null;
     }
 
     // Create BIM object if applicable
@@ -249,6 +428,19 @@ class StandaloneCADEngine {
       visible: true,
       selected: false
     };
+    
+    // DEBUG: Log the params being stored in CAD object
+    if (type === 'furniture' || type === 'fixture') {
+      console.log('🔍 CAD OBJECT PARAMS DEBUG:', {
+        objectId,
+        type,
+        'original params': params,
+        'stored params': cadObject.params,
+        'params.modelUrl': cadObject.params.modelUrl,
+        'params.format': cadObject.params.format,
+        'paramsKeys': Object.keys(cadObject.params)
+      });
+    }
 
     console.log('📦 CAD object created:', {
       id: objectId,
@@ -284,6 +476,15 @@ class StandaloneCADEngine {
       objects: Array.from(this.objects.values()).map(obj => this.serializeObject(obj))
     });
 
+    // Auto-join wall corners after creation/update for clean 3D corners
+    if (type === 'wall') {
+      try {
+        this.applyProfessionalWallJoinery({ tolerance: 0.05 });
+      } catch (e) {
+        console.warn('Joinery post-create failed:', e);
+      }
+    }
+
     console.log(`✅ Created ${type} object:`, objectId, 'Total objects:', this.objects.size);
     console.log(`📊 CADEngine DEBUG: Object stored successfully:`, {
       objectId,
@@ -311,12 +512,125 @@ class StandaloneCADEngine {
     if (type === 'wall') {
       // FIXED: Single joinery attempt with debouncing to prevent infinite loops
       console.log('🔧 POST-CREATION: Triggering wall joinery analysis after wall creation...');
+      console.log('🔧 DEBUG: Wall created with params:', {
+        startPoint: params.startPoint,
+        endPoint: params.endPoint,
+        length: params.length,
+        thickness: params.thickness
+      });
       
       // Use a debounced joinery call to prevent multiple simultaneous attempts
       this.scheduleJoineryUpdate();
     }
     
+    // Special debugging for ramps
+    if (type === 'ramp') {
+      console.log('🛤️ RAMP POST-CREATION DEBUG: Ramp creation completed successfully');
+      console.log('🛤️ RAMP POST-CREATION DEBUG: Final object ID:', objectId);
+      console.log('🛤️ RAMP POST-CREATION DEBUG: Object stored in engine:', this.objects.has(objectId));
+      console.log('🛤️ RAMP POST-CREATION DEBUG: Total objects now:', this.objects.size);
+      console.log('🛤️ RAMP POST-CREATION DEBUG: Ramp object data:', this.objects.get(objectId));
+    }
+    
+    console.log(`🏗️ CAD ENGINE DEBUG: Object creation completed for ${type}, returning ID:`, objectId);
+    console.log(`🏗️ CAD ENGINE DEBUG: Total objects in engine:`, this.objects.size);
+    
     return objectId;
+  }
+
+  /**
+   * Get object by ID
+   */
+  getObject(objectId) {
+    return this.objects.get(objectId) || null;
+  }
+
+  /**
+   * Update object position
+   */
+  updateObjectPosition(objectId, newPosition) {
+    const cadObject = this.objects.get(objectId);
+    if (!cadObject) {
+      console.error(`❌ Object ${objectId} not found for position update`);
+      return false;
+    }
+
+    console.log(`🔄 Updating position for ${cadObject.type} ${objectId}:`, newPosition);
+
+    // Update params
+    cadObject.params.position = { ...newPosition };
+
+    // Update 3D mesh position
+    if (cadObject.mesh3D) {
+      cadObject.mesh3D.position.set(newPosition.x, newPosition.y, newPosition.z);
+    }
+
+    // Update 2D mesh position
+    if (cadObject.mesh2D) {
+      cadObject.mesh2D.position.set(newPosition.x, newPosition.z, -newPosition.y);
+    }
+
+    // Emit update event
+    this.emit('object_updated', {
+      object: this.serializeObject(cadObject)
+    });
+
+    console.log(`✅ Position updated for ${cadObject.type} ${objectId}`);
+    return true;
+  }
+
+  /**
+   * Update object scale/size
+   */
+  updateObjectScale(objectId, newScale) {
+    const cadObject = this.objects.get(objectId);
+    if (!cadObject) {
+      console.error(`❌ Object ${objectId} not found for scale update`);
+      return false;
+    }
+
+    console.log(`🔄 Updating scale for ${cadObject.type} ${objectId}:`, newScale);
+
+    // Store original scale if not already stored
+    if (!cadObject.originalScale) {
+      cadObject.originalScale = {
+        width: cadObject.params.width || 1,
+        height: cadObject.params.height || 1,
+        depth: cadObject.params.depth || 1
+      };
+    }
+
+    // Update params dimensions
+    if (newScale.width !== undefined) cadObject.params.width = newScale.width;
+    if (newScale.height !== undefined) cadObject.params.height = newScale.height;
+    if (newScale.depth !== undefined) cadObject.params.depth = newScale.depth;
+
+    // Update 3D mesh scale
+    if (cadObject.mesh3D) {
+      const scaleVector = new THREE.Vector3(
+        newScale.width !== undefined ? newScale.width / cadObject.originalScale.width : 1,
+        newScale.height !== undefined ? newScale.height / cadObject.originalScale.height : 1,
+        newScale.depth !== undefined ? newScale.depth / cadObject.originalScale.depth : 1
+      );
+      cadObject.mesh3D.scale.copy(scaleVector);
+    }
+
+    // Update 2D mesh scale
+    if (cadObject.mesh2D) {
+      cadObject.mesh2D.scale.set(
+        newScale.width !== undefined ? newScale.width / cadObject.originalScale.width : 1,
+        newScale.depth !== undefined ? newScale.depth / cadObject.originalScale.depth : 1,
+        1
+      );
+    }
+
+    // Emit update event
+    this.emit('object_updated', {
+      object: this.serializeObject(cadObject)
+    });
+
+    console.log(`✅ Scale updated for ${cadObject.type} ${objectId}`);
+    return true;
   }
 
   /**
@@ -354,7 +668,8 @@ class StandaloneCADEngine {
       console.log(`📊 WALLS: ${walls.length} walls available for joinery analysis`);
       
       // Execute joinery
-      const result = this.applyWallJoinery();
+      // Use professional wall joinery system
+      const result = this.applyProfessionalWallJoinery();
       
       if (result) {
         console.log('✅ SCHEDULED SUCCESS: Wall joinery completed successfully');
@@ -459,10 +774,11 @@ class StandaloneCADEngine {
   }
 
   /**
-   * Create slab geometry and meshes
+   * PROFESSIONAL SLAB SYSTEM
+   * Advanced reinforced concrete slab with structural properties and analysis
    */
   createSlabGeometry(params) {
-    console.log('🏗️ SLAB CREATION DEBUG: createSlabGeometry called with params:', params);
+    console.log('🏗️ Creating professional slab system with params:', params);
     
     const { 
       width = 5, 
@@ -471,59 +787,763 @@ class StandaloneCADEngine {
       material = 'concrete', 
       shape = 'rectangular',
       startPoint = null,
-      endPoint = null
+      endPoint = null,
+      polygonPoints = null,
+      slabType = 'flat',
+      structuralProperties = {},
+      reinforcement = {},
+      loadBearing = true,
+      offset = 0.0
     } = params;
     
-    // Calculate actual dimensions and position if start/end points are provided
+    // Calculate actual dimensions and position
     let actualWidth = width;
     let actualDepth = depth;
-    let centerPosition = { x: 0, y: thickness / 2, z: 0 };
+    let centerPosition = { x: 0, y: thickness / 2 + offset, z: 0 };
     
     if (startPoint && endPoint) {
       actualWidth = Math.abs(endPoint.x - startPoint.x);
       actualDepth = Math.abs(endPoint.z - startPoint.z);
       centerPosition = {
         x: (startPoint.x + endPoint.x) / 2,
-        y: thickness / 2, // Half thickness above ground
+        y: thickness / 2 + offset,
         z: (startPoint.z + endPoint.z) / 2
       };
     }
     
+    console.log(`🏗️ Creating ${slabType} slab: ${actualWidth}m x ${actualDepth}m x ${thickness}m`);
+    
+    // PROFESSIONAL SLAB ASSEMBLY CREATION
+    const slabAssembly = this.createProfessionalSlabAssembly({
+      width: actualWidth,
+      depth: actualDepth,
+      thickness,
+      material,
+      shape,
+      slabType,
+      polygonPoints,
+      structuralProperties,
+      reinforcement,
+      loadBearing,
+      offset
+    });
+    
+    const slabGroup = slabAssembly.group;
+    
+    // Position the slab assembly
+    slabGroup.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
+    
+    // Use the slab group as the main mesh
+    const mesh3D = slabGroup;
+    mesh3D.userData = { objectId: null, type: 'slab' };
+    
+    // Create professional 2D representation
+    const slab2DGroup = new THREE.Group();
+    
+    // Get materials for 2D representation
+    const slabMat = this.materials[material] || this.materials.concrete;
+    
+    // Main slab area in 2D
+    let geometry2D;
+    if (shape === 'circular') {
+      const radius = Math.min(actualWidth, actualDepth) / 2;
+      geometry2D = new THREE.CircleGeometry(radius, 32);
+    } else if (shape === 'polygon' && polygonPoints && polygonPoints.length >= 3) {
+      geometry2D = this.createPolygonGeometry(polygonPoints);
+    } else {
+      geometry2D = new THREE.PlaneGeometry(actualWidth, actualDepth);
+    }
+    
+    const material2D = new THREE.MeshBasicMaterial({ 
+      color: slabMat.color, 
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.8
+    });
+    
+    const slab2D = new THREE.Mesh(geometry2D, material2D);
+    slab2D.rotation.x = -Math.PI / 2;
+    slab2DGroup.add(slab2D);
+    
+    // Add reinforcement pattern in 2D if specified
+    if (reinforcement.showPattern) {
+      const reinforcementPattern = this.createReinforcement2DPattern({
+        width: actualWidth,
+        depth: actualDepth,
+        shape,
+        polygonPoints,
+        spacing: reinforcement.spacing || 0.2
+      });
+      if (reinforcementPattern) {
+        slab2DGroup.add(reinforcementPattern);
+      }
+    }
+    
+    // Add structural grid/support indicators
+    if (loadBearing && slabAssembly.supportPoints) {
+      const supportIndicators = this.createSupportIndicators2D(slabAssembly.supportPoints);
+      if (supportIndicators) {
+        slab2DGroup.add(supportIndicators);
+      }
+    }
+    
+    // Set up 2D group
+    const mesh2D = slab2DGroup;
+    mesh2D.userData = { objectId: null, type: 'slab' };
+    mesh2D.position.set(centerPosition.x, 0, centerPosition.z);
+    
+    return { 
+      geometry: geometry2D, 
+      mesh3D: mesh3D, 
+      mesh2D: mesh2D,
+      structuralProperties: slabAssembly.structuralProperties
+    };
+  }
+
+  /**
+   * PROFESSIONAL SLAB ASSEMBLY CREATION
+   * Complete structural slab with reinforcement, analysis, and proper materials
+   */
+  createProfessionalSlabAssembly(config) {
+    const {
+      width, depth, thickness, material, shape, slabType,
+      polygonPoints, structuralProperties, reinforcement, loadBearing, offset
+    } = config;
+    
+    const slabGroup = new THREE.Group();
+    
+    console.log(`🏗️ Creating professional ${slabType} slab assembly: ${width}m x ${depth}m`);
+    
+    // Get structural material properties
+    const structuralMat = this.materials[material] || this.materials.concrete;
+    const enhancedStructuralProperties = this.calculateSlabStructuralProperties({
+      width, depth, thickness, material, structuralProperties, loadBearing
+    });
+    
+    // 1. Create main slab structure
+    const mainSlab = this.createSlabStructure({
+      width, depth, thickness, material: structuralMat,
+      shape, polygonPoints, slabType
+    });
+    slabGroup.add(mainSlab);
+    
+    // 2. Create reinforcement system
+    if (reinforcement.enabled !== false) {
+      const reinforcementSystem = this.createSlabReinforcement({
+        width, depth, thickness, shape, polygonPoints,
+        reinforcement: { 
+          spacing: 0.2, 
+          diameter: 0.012, 
+          cover: 0.025,
+          ...reinforcement 
+        }
+      });
+      if (reinforcementSystem) {
+        slabGroup.add(reinforcementSystem);
+      }
+    }
+    
+    // 3. Add edge beams for structural slabs
+    if (loadBearing && (slabType === 'beam_slab' || enhancedStructuralProperties.requiresBeams)) {
+      const edgeBeams = this.createSlabEdgeBeams({
+        width, depth, thickness, shape, polygonPoints,
+        beamWidth: thickness, beamHeight: thickness * 1.5
+      });
+      if (edgeBeams) {
+        slabGroup.add(edgeBeams);
+      }
+    }
+    
+    // 4. Add openings/penetrations if specified
+    if (structuralProperties.openings) {
+      // This would be handled by the opening system similar to walls
+      console.log('🔳 Slab openings would be processed here');
+    }
+    
+    // 5. Calculate support points for structural analysis
+    const supportPoints = this.calculateSlabSupportPoints({
+      width, depth, shape, polygonPoints, loadBearing,
+      structuralProperties: enhancedStructuralProperties
+    });
+    
+    return {
+      group: slabGroup,
+      structuralProperties: enhancedStructuralProperties,
+      supportPoints,
+      reinforcement
+    };
+  }
+
+  /**
+   * Create main slab structure geometry
+   */
+  createSlabStructure(config) {
+    const { width, depth, thickness, material, shape, polygonPoints, slabType } = config;
+    
     let geometry;
     
-    if (shape === 'circular') {
-      // Circular slab
-      const radius = Math.min(actualWidth, actualDepth) / 2;
-      geometry = new THREE.CylinderGeometry(radius, radius, thickness, 32);
+    // Create geometry based on shape and type
+    switch (shape) {
+      case 'circular':
+        const radius = Math.min(width, depth) / 2;
+        geometry = new THREE.CylinderGeometry(radius, radius, thickness, 32);
+        break;
+        
+      case 'polygon':
+        if (polygonPoints && polygonPoints.length >= 3) {
+          geometry = this.createExtrudedPolygonGeometry(polygonPoints, thickness);
+        } else {
+          geometry = new THREE.BoxGeometry(width, thickness, depth);
+        }
+        break;
+        
+      default: // rectangular
+        geometry = new THREE.BoxGeometry(width, thickness, depth);
+        break;
+    }
+    
+    // Apply slab type modifications
+    if (slabType === 'waffle') {
+      // Create waffle pattern (simplified - would be more complex in real implementation)
+      geometry = this.createWaffleSlabGeometry(width, depth, thickness);
+    } else if (slabType === 'hollow_core') {
+      // Create hollow core pattern
+      geometry = this.createHollowCoreSlabGeometry(width, depth, thickness);
+    }
+    
+    const slabMesh = new THREE.Mesh(geometry, material.clone());
+    return slabMesh;
+  }
+
+  /**
+   * Create slab reinforcement system
+   */
+  createSlabReinforcement(config) {
+    const { width, depth, thickness, shape, polygonPoints, reinforcement } = config;
+    const reinforcementGroup = new THREE.Group();
+    
+    console.log('🔧 Creating slab reinforcement system');
+    
+    const rebarMaterial = this.materials.steel || this.materials.aluminum;
+    const { spacing, diameter, cover } = reinforcement;
+    
+    // Bottom reinforcement (main tensile reinforcement)
+    const bottomReinforcement = this.createReinforcementMesh({
+      width, depth, spacing, diameter, 
+      yPosition: -thickness/2 + cover,
+      direction: 'both' // Both X and Z directions
+    });
+    reinforcementGroup.add(bottomReinforcement);
+    
+    // Top reinforcement (for continuous slabs)
+    if (reinforcement.topReinforcement) {
+      const topReinforcement = this.createReinforcementMesh({
+        width, depth, spacing: spacing * 1.5, diameter: diameter * 0.8,
+        yPosition: thickness/2 - cover,
+        direction: 'both'
+      });
+      reinforcementGroup.add(topReinforcement);
+    }
+    
+    // Shear reinforcement around openings
+    if (reinforcement.shearReinforcement && reinforcement.openings) {
+      // Would add stirrups around openings
+      console.log('🔧 Shear reinforcement around openings would be added here');
+    }
+    
+    return reinforcementGroup.children.length > 0 ? reinforcementGroup : null;
+  }
+
+  /**
+   * Create reinforcement mesh (rebar grid)
+   */
+  createReinforcementMesh(config) {
+    const { width, depth, spacing, diameter, yPosition, direction } = config;
+    const meshGroup = new THREE.Group();
+    const rebarMaterial = this.materials.steel || this.materials.aluminum;
+    
+    // Create rebar geometry
+    const rebarGeometry = new THREE.CylinderGeometry(diameter/2, diameter/2, 1, 8);
+    
+    if (direction === 'both' || direction === 'x') {
+      // X-direction bars
+      const barLength = width;
+      const numBarsZ = Math.floor(depth / spacing) + 1;
+      
+      for (let i = 0; i < numBarsZ; i++) {
+        const zPos = (-depth/2) + (i * spacing);
+        const bar = new THREE.Mesh(rebarGeometry.clone(), rebarMaterial.clone());
+        bar.scale.y = barLength;
+        bar.rotation.z = Math.PI / 2;
+        bar.position.set(0, yPosition, zPos);
+        meshGroup.add(bar);
+      }
+    }
+    
+    if (direction === 'both' || direction === 'z') {
+      // Z-direction bars
+      const barLength = depth;
+      const numBarsX = Math.floor(width / spacing) + 1;
+      
+      for (let i = 0; i < numBarsX; i++) {
+        const xPos = (-width/2) + (i * spacing);
+        const bar = new THREE.Mesh(rebarGeometry.clone(), rebarMaterial.clone());
+        bar.scale.y = barLength;
+        bar.rotation.x = Math.PI / 2;
+        bar.position.set(xPos, yPosition, 0);
+        meshGroup.add(bar);
+      }
+    }
+    
+    return meshGroup;
+  }
+
+  /**
+   * Create edge beams for structural slabs
+   */
+  createSlabEdgeBeams(config) {
+    const { width, depth, thickness, shape, polygonPoints, beamWidth, beamHeight } = config;
+    const beamGroup = new THREE.Group();
+    const beamMaterial = this.materials.concrete.clone();
+    
+    console.log('🏗️ Creating edge beams for structural slab');
+    
+    if (shape === 'rectangular') {
+      // Create four edge beams
+      const beamGeometry = new THREE.BoxGeometry(beamWidth, beamHeight, 1);
+      
+      // Top and bottom beams
+      const topBeam = new THREE.Mesh(beamGeometry.clone(), beamMaterial.clone());
+      topBeam.scale.z = width;
+      topBeam.position.set(0, (thickness + beamHeight)/2, depth/2);
+      beamGroup.add(topBeam);
+      
+      const bottomBeam = new THREE.Mesh(beamGeometry.clone(), beamMaterial.clone());
+      bottomBeam.scale.z = width;
+      bottomBeam.position.set(0, (thickness + beamHeight)/2, -depth/2);
+      beamGroup.add(bottomBeam);
+      
+      // Left and right beams
+      const leftBeam = new THREE.Mesh(beamGeometry.clone(), beamMaterial.clone());
+      leftBeam.scale.z = depth;
+      leftBeam.rotation.y = Math.PI / 2;
+      leftBeam.position.set(-width/2, (thickness + beamHeight)/2, 0);
+      beamGroup.add(leftBeam);
+      
+      const rightBeam = new THREE.Mesh(beamGeometry.clone(), beamMaterial.clone());
+      rightBeam.scale.z = depth;
+      rightBeam.rotation.y = Math.PI / 2;
+      rightBeam.position.set(width/2, (thickness + beamHeight)/2, 0);
+      beamGroup.add(rightBeam);
+    }
+    
+    return beamGroup.children.length > 0 ? beamGroup : null;
+  }
+
+  /**
+   * Calculate structural properties for slab
+   */
+  calculateSlabStructuralProperties(config) {
+    const { width, depth, thickness, material, structuralProperties, loadBearing } = config;
+    
+    // Get base material properties
+    const materialProps = this.materials[material]?.structuralProperties || {
+      density: 2400, // kg/m³ for concrete
+      compressiveStrength: 25, // MPa
+      elasticModulus: 30000, // MPa
+      poissonRatio: 0.2
+    };
+    
+    // Calculate basic properties
+    const area = width * depth; // m²
+    const volume = area * thickness; // m³
+    const weight = volume * materialProps.density; // kg
+    const selfWeight = weight * 9.81; // N (self-weight force)
+    
+    // Calculate moment of inertia
+    const momentOfInertiaX = (width * Math.pow(thickness, 3)) / 12;
+    const momentOfInertiaY = (depth * Math.pow(thickness, 3)) / 12;
+    
+    // Determine if edge beams are required based on span
+    const maxSpan = Math.max(width, depth);
+    const spanToDepthRatio = maxSpan / thickness;
+    const requiresBeams = loadBearing && spanToDepthRatio > 25; // Typical limit
+    
+    // Calculate load capacity (simplified)
+    const uniformLoadCapacity = loadBearing ? 
+      this.calculateSlabLoadCapacity(width, depth, thickness, materialProps) : 0;
+    
+    return {
+      // Geometric properties
+      area,
+      volume,
+      perimeter: 2 * (width + depth),
+      
+      // Mass properties  
+      weight,
+      selfWeight,
+      density: materialProps.density,
+      
+      // Structural properties
+      momentOfInertiaX,
+      momentOfInertiaY,
+      elasticModulus: materialProps.elasticModulus,
+      compressiveStrength: materialProps.compressiveStrength,
+      poissonRatio: materialProps.poissonRatio,
+      
+      // Design properties
+      spanToDepthRatio,
+      requiresBeams,
+      uniformLoadCapacity,
+      maxDeflection: maxSpan / 250, // Typical serviceability limit
+      
+      // Additional properties
+      loadBearing,
+      slabClassification: this.classifySlabType(width, depth, thickness),
+      
+      ...structuralProperties
+    };
+  }
+
+  /**
+   * Calculate slab load capacity (simplified)
+   */
+  calculateSlabLoadCapacity(width, depth, thickness, materialProps) {
+    // Simplified calculation - real analysis would be much more complex
+    const span = Math.max(width, depth);
+    const momentCapacity = (materialProps.compressiveStrength * Math.pow(thickness, 2)) / 6;
+    const uniformLoad = (8 * momentCapacity) / Math.pow(span, 2);
+    return uniformLoad / 1000; // Convert to kN/m²
+  }
+
+  /**
+   * Classify slab type based on geometry
+   */
+  classifySlabType(width, depth, thickness) {
+    const maxSpan = Math.max(width, depth);
+    const spanToDepthRatio = maxSpan / thickness;
+    
+    if (spanToDepthRatio > 30) return 'thin_slab';
+    if (spanToDepthRatio < 15) return 'thick_slab';
+    return 'normal_slab';
+  }
+
+  /**
+   * Calculate support points for structural analysis
+   */
+  calculateSlabSupportPoints(config) {
+    const { width, depth, shape, polygonPoints, loadBearing, structuralProperties } = config;
+    
+    if (!loadBearing) return [];
+    
+    // Generate typical support points (simplified)
+    const supportPoints = [];
+    const supportSpacing = Math.max(width, depth) > 6 ? 3 : Math.max(width, depth) / 2;
+    
+    // Corner supports for rectangular slabs
+    if (shape === 'rectangular') {
+      supportPoints.push(
+        { x: -width/2, z: -depth/2, type: 'column' },
+        { x: width/2, z: -depth/2, type: 'column' },
+        { x: -width/2, z: depth/2, type: 'column' },
+        { x: width/2, z: depth/2, type: 'column' }
+      );
+      
+      // Add intermediate supports for large slabs
+      if (width > 6 || depth > 6) {
+        supportPoints.push(
+          { x: 0, z: -depth/2, type: 'beam' },
+          { x: 0, z: depth/2, type: 'beam' },
+          { x: -width/2, z: 0, type: 'beam' },
+          { x: width/2, z: 0, type: 'beam' }
+        );
+      }
+    }
+    
+    return supportPoints;
+  }
+
+  /**
+   * Create 2D reinforcement pattern visualization
+   */
+  createReinforcement2DPattern(config) {
+    const { width, depth, shape, polygonPoints, spacing } = config;
+    const patternGroup = new THREE.Group();
+    
+    const lineMateria = new THREE.LineBasicMaterial({ 
+      color: 0xff0000, 
+      transparent: true, 
+      opacity: 0.4 
+    });
+    
+    // Create grid pattern for reinforcement
+    const numLinesX = Math.floor(width / spacing);
+    const numLinesZ = Math.floor(depth / spacing);
+    
+    // X-direction lines
+    for (let i = 0; i <= numLinesX; i++) {
+      const x = (-width/2) + (i * spacing);
+      const points = [
+        new THREE.Vector3(x, 0.002, -depth/2),
+        new THREE.Vector3(x, 0.002, depth/2)
+      ];
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(geometry, lineMateria);
+      patternGroup.add(line);
+    }
+    
+    // Z-direction lines
+    for (let i = 0; i <= numLinesZ; i++) {
+      const z = (-depth/2) + (i * spacing);
+      const points = [
+        new THREE.Vector3(-width/2, 0.002, z),
+        new THREE.Vector3(width/2, 0.002, z)
+      ];
+      const geometry = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(geometry, lineMateria);
+      patternGroup.add(line);
+    }
+    
+    return patternGroup.children.length > 0 ? patternGroup : null;
+  }
+
+  /**
+   * Create support indicators for 2D view
+   */
+  createSupportIndicators2D(supportPoints) {
+    if (!supportPoints || supportPoints.length === 0) return null;
+    
+    const indicatorGroup = new THREE.Group();
+    
+    supportPoints.forEach(point => {
+      let geometry, material;
+      
+      if (point.type === 'column') {
+        geometry = new THREE.CircleGeometry(0.1, 8);
+        material = new THREE.MeshBasicMaterial({ 
+          color: 0x00ff00, 
+          transparent: true, 
+          opacity: 0.7 
+        });
+      } else if (point.type === 'beam') {
+        geometry = new THREE.RingGeometry(0.05, 0.1, 8);
+        material = new THREE.MeshBasicMaterial({ 
+          color: 0x0000ff, 
+          transparent: true, 
+          opacity: 0.7 
+        });
+      }
+      
+      if (geometry && material) {
+        const indicator = new THREE.Mesh(geometry, material);
+        indicator.rotation.x = -Math.PI / 2;
+        indicator.position.set(point.x, 0.003, point.z);
+        indicatorGroup.add(indicator);
+      }
+    });
+    
+    return indicatorGroup.children.length > 0 ? indicatorGroup : null;
+  }
+
+  /**
+   * Create polygon geometry from points
+   */
+  createPolygonGeometry(points) {
+    if (!points || points.length < 3) return new THREE.PlaneGeometry(1, 1);
+    
+    // Convert points to Shape
+    const shape = new THREE.Shape();
+    shape.moveTo(points[0].x, points[0].y);
+    
+    for (let i = 1; i < points.length; i++) {
+      shape.lineTo(points[i].x, points[i].y);
+    }
+    
+    shape.lineTo(points[0].x, points[0].y); // Close the shape
+    
+    return new THREE.ShapeGeometry(shape);
+  }
+
+  /**
+   * Create extruded polygon geometry
+   */
+  createExtrudedPolygonGeometry(points, thickness) {
+    if (!points || points.length < 3) return new THREE.BoxGeometry(1, thickness, 1);
+    
+    const shape = new THREE.Shape();
+    shape.moveTo(points[0].x, points[0].z);
+    
+    for (let i = 1; i < points.length; i++) {
+      shape.lineTo(points[i].x, points[i].z);
+    }
+    
+    const extrudeSettings = {
+      depth: thickness,
+      bevelEnabled: false
+    };
+    
+    return new THREE.ExtrudeGeometry(shape, extrudeSettings);
+  }
+
+  /**
+   * Create waffle slab geometry (simplified)
+   */
+  createWaffleSlabGeometry(width, depth, thickness) {
+    // Simplified waffle pattern - real implementation would be more complex
+    return new THREE.BoxGeometry(width, thickness, depth);
+  }
+
+  /**
+   * Create hollow core slab geometry (simplified)
+   */
+  createHollowCoreSlabGeometry(width, depth, thickness) {
+    // Simplified hollow core - real implementation would create actual voids
+    return new THREE.BoxGeometry(width, thickness, depth);
+  }
+
+  /**
+   * Create column geometry and meshes
+   */
+  createColumnGeometry(params) {
+    console.log('🏢 COLUMN GEOMETRY DEBUG: createColumnGeometry called with params:', params);
+    
+    const { 
+      width = 0.4, 
+      depth = 0.4,
+      height = 3.0,
+      radius = 0.2,
+      shape = 'rect',
+      material = 'concrete',
+      inclinationAngle = 0,
+      inclinationAxis = 'x',
+      rotation = 0,
+      position = { x: 0, y: 0, z: 0 }
+    } = params;
+    
+    let geometry;
+    
+    // Create geometry based on shape
+    if (shape === 'circle') {
+      // Circular column (cylinder)
+      geometry = new THREE.CylinderGeometry(radius, radius, height, 16, 1, false);
+      console.log('🏢 COLUMN GEOMETRY: Created circular column geometry with radius:', radius);
     } else {
-      // Rectangular slab (default)
-      geometry = new THREE.BoxGeometry(actualWidth, thickness, actualDepth);
+      // Rectangular column (box)
+      geometry = new THREE.BoxGeometry(width, height, depth);
+      console.log('🏢 COLUMN GEOMETRY: Created rectangular column geometry with dimensions:', { width, height, depth });
     }
     
     // Get material
     const mat = this.materials[material] || this.materials.concrete;
+    console.log('🏢 COLUMN GEOMETRY: Using material:', material);
     
     // Create 3D mesh
-    const mesh3D = new THREE.Mesh(geometry, mat.clone());
-    mesh3D.userData = { objectId: null, type: 'slab' }; // Will be set by caller
+    const mesh3D = new THREE.Mesh(geometry, mat);
     
-    // Set position
-    mesh3D.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
+    // Position the column - base at specified position, column extends upward
+    const columnPosition = {
+      x: position.x,
+      y: position.y + height / 2, // Center the column vertically with base at position.y
+      z: position.z
+    };
     
-    // Create 2D representation (top-down view for slab)
-    const geometry2D = new THREE.PlaneGeometry(actualWidth, actualDepth);
+    mesh3D.position.set(columnPosition.x, columnPosition.y, columnPosition.z);
+    
+    // Apply rotation around vertical axis (Y-axis)
+    if (rotation !== 0) {
+      mesh3D.rotation.y = rotation * Math.PI / 180; // Convert degrees to radians
+    }
+    
+    // Apply inclination if specified
+    if (inclinationAngle !== 0) {
+      const inclinationRad = inclinationAngle * Math.PI / 180;
+      
+      switch (inclinationAxis) {
+        case 'x':
+          mesh3D.rotation.x = inclinationRad;
+          break;
+        case 'y':
+          // Y-axis inclination doesn't make sense for columns, treat as no inclination
+          console.warn('🏢 COLUMN GEOMETRY: Y-axis inclination not supported for columns');
+          break;
+        case 'z':
+          mesh3D.rotation.z = inclinationRad;
+          break;
+        default:
+          console.warn('🏢 COLUMN GEOMETRY: Unknown inclination axis:', inclinationAxis);
+      }
+      
+      console.log('🏢 COLUMN GEOMETRY: Applied inclination:', inclinationAngle, 'degrees on', inclinationAxis, 'axis');
+    }
+    
+    // Add the mesh to the 3D scene
+    this.scene3D.add(mesh3D);
+    
+    // Create 2D representation for top-down view
+    const mesh2D = new THREE.Group();
+    
+    // Create 2D footprint geometry
+    let footprintGeometry;
+    if (shape === 'circle') {
+      footprintGeometry = new THREE.CircleGeometry(radius, 16);
+    } else {
+      footprintGeometry = new THREE.PlaneGeometry(width, depth);
+    }
+    
+    // Create 2D material with column outline
     const material2D = new THREE.MeshBasicMaterial({ 
-      color: mat.color, 
-      side: THREE.DoubleSide,
+      color: mat.color,
       transparent: true,
-      opacity: 0.7
+      opacity: 0.8,
+      side: THREE.DoubleSide
     });
-    const mesh2D = new THREE.Mesh(geometry2D, material2D);
-    mesh2D.rotation.x = -Math.PI / 2; // Lay flat for top-down view
-    mesh2D.userData = { objectId: null, type: 'slab' }; // Will be set by caller
     
-    // Set position for 2D mesh
-    mesh2D.position.set(centerPosition.x, 0, centerPosition.z);
+    const footprintMesh = new THREE.Mesh(footprintGeometry, material2D);
+    footprintMesh.rotation.x = -Math.PI / 2; // Rotate to lie flat on XZ plane
+    footprintMesh.position.set(position.x, 0.01, position.z); // Slightly above ground plane
+    
+    // Apply 2D rotation if specified
+    if (rotation !== 0) {
+      footprintMesh.rotation.z = rotation * Math.PI / 180; // Apply rotation in 2D plane
+    }
+    
+    mesh2D.add(footprintMesh);
+    
+    // Add optional outline for better visibility in 2D
+    if (shape === 'circle') {
+      const outlineGeometry = new THREE.RingGeometry(radius * 0.95, radius, 16);
+      const outlineMaterial = new THREE.MeshBasicMaterial({ 
+        color: 0x000000, 
+        transparent: true, 
+        opacity: 0.6,
+        side: THREE.DoubleSide
+      });
+      const outlineMesh = new THREE.Mesh(outlineGeometry, outlineMaterial);
+      outlineMesh.rotation.x = -Math.PI / 2;
+      outlineMesh.position.set(position.x, 0.02, position.z);
+      if (rotation !== 0) {
+        outlineMesh.rotation.z = rotation * Math.PI / 180;
+      }
+      mesh2D.add(outlineMesh);
+    } else {
+      // Create edge lines for rectangular column
+      const edges = new THREE.EdgesGeometry(footprintGeometry);
+      const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 2 });
+      const edgeLines = new THREE.LineSegments(edges, edgeMaterial);
+      edgeLines.rotation.x = -Math.PI / 2;
+      edgeLines.position.set(position.x, 0.02, position.z);
+      if (rotation !== 0) {
+        edgeLines.rotation.z = rotation * Math.PI / 180;
+      }
+      mesh2D.add(edgeLines);
+    }
+    
+    // Add the 2D mesh to the 2D scene
+    this.scene2D.add(mesh2D);
+    
+    console.log('🏢 COLUMN GEOMETRY: Column meshes created and positioned at:', columnPosition);
+    console.log('🏢 COLUMN GEOMETRY: 3D mesh rotation:', mesh3D.rotation);
+    console.log('🏢 COLUMN GEOMETRY: 2D footprint at:', { x: position.x, z: position.z });
     
     return { geometry, mesh3D, mesh2D };
   }
@@ -543,7 +1563,8 @@ class StandaloneCADEngine {
       startAdjustment = 0,     // Length adjustment at start
       endAdjustment = 0,       // Length adjustment at end
       autoExtend = true,       // Auto-extend to nearby corners
-      skipJoinery = false      // Skip joinery adjustments (for property updates)
+      skipJoinery = false,     // Skip joinery adjustments (for property updates)
+      forceCornerExtension = false  // Force extension for proper corner joinery
     } = params;
     
     // PROPERTY UPDATE FIX: Skip joinery-related adjustments for property panel updates
@@ -580,7 +1601,6 @@ class StandaloneCADEngine {
       // WALL UPDATE FIX: If a specific length is provided and differs significantly from calculated length,
       // adjust the endPoint to match the desired length (for property panel updates)
       if (length && Math.abs(length - calculatedLength) > 0.01) {
-        console.log(`🔧 WALL UPDATE: Adjusting wall length from ${calculatedLength.toFixed(2)}m to ${length.toFixed(2)}m`);
         
         // Calculate direction unit vector
         const dirX = deltaX / calculatedLength;
@@ -593,20 +1613,74 @@ class StandaloneCADEngine {
           z: adjustedStartPoint.z + (dirZ * length)
         };
         
-        console.log(`🔧 WALL UPDATE: Adjusted endPoint from [${deltaX.toFixed(2)}, ${deltaZ.toFixed(2)}] to [${(dirX * length).toFixed(2)}, ${(dirZ * length).toFixed(2)}]`);
         
         // Use the desired length
         originalLength = length;
         rotationY = Math.atan2(dirZ, dirX);
+        actualLength = length;
+        
+        // FORCE CORNER EXTENSION: Extend wall length by wall thickness for proper corner joinery
+        if (forceCornerExtension) {
+          const extension = thickness; // Extend by full wall thickness
+          actualLength = length + extension;
+          console.log(`🔧 CORNER EXTENSION: Extended wall from ${length.toFixed(3)}m to ${actualLength.toFixed(3)}m for corner joinery`);
+          
+          // Also extend the endpoint to match the extended length
+          adjustedEndPoint = {
+            x: adjustedStartPoint.x + (dirX * actualLength),
+            y: adjustedStartPoint.y,
+            z: adjustedStartPoint.z + (dirZ * actualLength)
+          };
+        }
+        
+        console.log('WALL_DIR', {
+          start: adjustedStartPoint,
+          end: adjustedEndPoint,
+          deltaX: +(dirX * actualLength).toFixed(3),
+          deltaZ: +(dirZ * actualLength).toFixed(3),
+          rotationYDeg: +(rotationY * 180 / Math.PI).toFixed(2),
+          forceCornerExtension,
+          originalLength: length,
+          actualLength
+        });
       } else {
         // Use calculated length from points
         originalLength = calculatedLength;
+        actualLength = calculatedLength;
         rotationY = Math.atan2(deltaZ, deltaX);
+        
+        // FORCE CORNER EXTENSION: Extend wall length by wall thickness for proper corner joinery
+        if (forceCornerExtension) {
+          const extension = thickness; // Extend by full wall thickness
+          const dirX = deltaX / calculatedLength;
+          const dirZ = deltaZ / calculatedLength;
+          actualLength = calculatedLength + extension;
+          console.log(`🔧 CORNER EXTENSION: Extended wall from ${calculatedLength.toFixed(3)}m to ${actualLength.toFixed(3)}m for corner joinery`);
+          
+          // Also extend the endpoint to match the extended length
+          adjustedEndPoint = {
+            x: adjustedStartPoint.x + (dirX * actualLength),
+            y: adjustedStartPoint.y,
+            z: adjustedStartPoint.z + (dirZ * actualLength)
+          };
+        }
+        
+        console.log('WALL_DIR', {
+          start: adjustedStartPoint,
+          end: adjustedEndPoint,
+          deltaX: +(adjustedEndPoint.x - adjustedStartPoint.x).toFixed(3),
+          deltaZ: +(adjustedEndPoint.z - adjustedStartPoint.z).toFixed(3),
+          rotationYDeg: +(rotationY * 180 / Math.PI).toFixed(2),
+          forceCornerExtension,
+          originalLength: calculatedLength,
+          actualLength
+        });
       }
       
       // Apply joinery adjustments by modifying the actual start and end points (skip for property updates)
-      if (adjustForJoinery && (startAdjustment > 0 || endAdjustment > 0) && !shouldSkipJoinery) {
-        console.log(`🔧 Applying CAD joinery adjustments: start=${startAdjustment}, end=${endAdjustment}`);
+      // FIXED: Allow both positive and negative adjustments (extensions and shortenings)
+      if (adjustForJoinery && (startAdjustment !== 0 || endAdjustment !== 0) && !shouldSkipJoinery) {
+        console.log(`🔧 Applying CAD joinery adjustments: start=${startAdjustment > 0 ? '+' : ''}${startAdjustment}, end=${endAdjustment > 0 ? '+' : ''}${endAdjustment} (negative = extension)`);
         
         // Calculate unit direction vector
         const dirX = deltaX / originalLength;
@@ -625,10 +1699,17 @@ class StandaloneCADEngine {
           z: adjustedEndPoint.z - (dirZ * endAdjustment)
         };
         
-        // Recalculate based on adjusted points
+        // Recalculate based on adjusted points (preserve corner extension)
         const adjustedDeltaX = adjustedEndPoint.x - adjustedStartPoint.x;
         const adjustedDeltaZ = adjustedEndPoint.z - adjustedStartPoint.z;
-        actualLength = Math.sqrt(adjustedDeltaX * adjustedDeltaX + adjustedDeltaZ * adjustedDeltaZ);
+        const recalculatedLength = Math.sqrt(adjustedDeltaX * adjustedDeltaX + adjustedDeltaZ * adjustedDeltaZ);
+        
+        // Only update actualLength if we don't have a corner extension
+        if (!forceCornerExtension) {
+          actualLength = recalculatedLength;
+        } else {
+          console.log(`🔧 PRESERVING CORNER EXTENSION: Keeping extended length ${actualLength.toFixed(3)}m instead of recalculated ${recalculatedLength.toFixed(3)}m`);
+        }
         
         // Center position is at the center of the adjusted wall
         centerPosition = {
@@ -640,7 +1721,12 @@ class StandaloneCADEngine {
         console.log(`🔧 Wall adjusted: ${originalLength.toFixed(2)}m → ${actualLength.toFixed(2)}m`);
       } else {
         // Standard center position using adjusted points
-        actualLength = originalLength;
+        // Only update actualLength if we don't have a corner extension
+        if (!forceCornerExtension) {
+          actualLength = originalLength;
+        } else {
+          console.log(`🔧 PRESERVING CORNER EXTENSION: Keeping extended length ${actualLength.toFixed(3)}m instead of original ${originalLength.toFixed(3)}m`);
+        }
         centerPosition = {
           x: (adjustedStartPoint.x + adjustedEndPoint.x) / 2,
           y: height / 2,
@@ -649,25 +1735,118 @@ class StandaloneCADEngine {
       }
     }
     
-    // Create standard wall geometry (vertical box) - always use BoxGeometry for reliability
-    const geometry = new THREE.BoxGeometry(actualLength, height, thickness);
+    // PROFESSIONAL MULTI-LAYER WALL SYSTEM
+    const wallType = params.wallType || 'exterior_wood_frame';
+    const wallTemplate = this.wallTypeTemplates[wallType] || this.wallTypeTemplates['exterior_wood_frame'];
     
-    // Get material
-    const mat = this.materials[material] || this.materials.concrete;
+    // Use template thickness or fallback to parameter thickness
+    const actualThickness = wallTemplate.totalThickness || thickness;
     
-    // Create 3D mesh
-    const mesh3D = new THREE.Mesh(geometry, mat.clone());
-    mesh3D.userData = { objectId: null, type: 'wall' };
-    
-    // Set position and rotation
-    mesh3D.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
-    if (rotationY !== 0) {
-      mesh3D.rotation.y = rotationY;
+    // --- Mitered corner extension helpers (scoped) ---
+    // Loosened tolerance to robustly detect shared endpoints between walls (meters)
+    const EPS_JOIN = 0.05;
+    const MITER_LIMIT_MULT = 4.0;
+    function dist2(a, b) { const dx = a.x - b.x, dy = a.y - b.y; return dx * dx + dy * dy; }
+    function almostSamePoint(a, b) { return dist2(a, b) <= EPS_JOIN * EPS_JOIN; }
+    function unit(v) { const n = Math.hypot(v.x, v.y); return n ? { x: v.x / n, y: v.y / n } : { x: 1, y: 0 }; }
+    function angleBetween(u, v) { const d = Math.max(-1, Math.min(1, u.x * v.x + u.y * v.y)); return Math.acos(d); }
+    function computeEndExtensions(currentWall, allWalls, totalThicknessM) {
+      const A = currentWall.start;
+      const B = currentWall.end;
+      const dirAB = unit({ x: B.x - A.x, y: B.y - A.y });
+      const dirBA = { x: -dirAB.x, y: -dirAB.y };
+      function neighborAt(point) {
+        for (const w of allWalls) {
+          if (w === currentWall) continue;
+          if (almostSamePoint(w.start, point)) {
+            const out = unit({ x: w.end.x - w.start.x, y: w.end.y - w.start.y });
+            return out;
+          }
+          if (almostSamePoint(w.end, point)) {
+            const out = unit({ x: w.start.x - w.end.x, y: w.start.y - w.end.y });
+            return out;
+          }
+        }
+        return null;
+      }
+      const neighAtA = neighborAt(A);
+      const neighAtB = neighborAt(B);
+      const defaultCap = totalThicknessM / 2;
+      const miterLimit = MITER_LIMIT_MULT * totalThicknessM;
+      function extFor(neighDir, incomingDir) {
+        if (!neighDir) return defaultCap;
+        const theta = angleBetween(incomingDir, neighDir);
+        if (theta < 1e-3) return 0;
+        const tanHalf = Math.tan(theta / 2);
+        if (Math.abs(tanHalf) < 1e-4) return defaultCap;
+        const e = (totalThicknessM / 2) / tanHalf;
+        return Math.min(Math.max(0, e), miterLimit);
+      }
+      const extStart = extFor(neighAtA, dirBA);
+      const extEnd = extFor(neighAtB, dirAB);
+      return { extStart, extEnd };
     }
+
+    // Compute neighbor-aware end extensions and adjust length/center
+    let lengthFor3D = actualLength;
+    let centerFor3D = { ...centerPosition };
+    try {
+      if (adjustedStartPoint && adjustedEndPoint) {
+        const A2D = { x: adjustedStartPoint.x, y: adjustedStartPoint.z };
+        const B2D = { x: adjustedEndPoint.x, y: adjustedEndPoint.z };
+        const currentSimple = { start: A2D, end: B2D };
+        const allWallsSimple = [];
+        const existingWalls = Array.from(this.objects.values()).filter(obj => obj.type === 'wall');
+        for (const w of existingWalls) {
+          const sp = w.params?.startPoint;
+          const ep = w.params?.endPoint;
+          if (!sp || !ep) continue;
+          allWallsSimple.push({ start: { x: sp.x, y: sp.z }, end: { x: ep.x, y: ep.z } });
+        }
+        allWallsSimple.push(currentSimple);
+        const { extStart, extEnd } = computeEndExtensions(currentSimple, allWallsSimple, actualThickness);
+        console.log('🪚 Miter extension', { extStart: +extStart.toFixed(3), extEnd: +extEnd.toFixed(3), baseLength: +actualLength.toFixed(3) });
+        const lengthWithCaps = actualLength + extStart + extEnd;
+        const dir = unit({ x: B2D.x - A2D.x, y: B2D.y - A2D.y });
+        const shift = (extStart - extEnd) / 2;
+        centerFor3D = {
+          x: centerPosition.x + dir.x * shift,
+          y: centerPosition.y,
+          z: centerPosition.z + dir.y * shift
+        };
+        lengthFor3D = lengthWithCaps;
+        console.log('🧭 Wall center shift (m)', { shift: +shift.toFixed(3), centerBefore: centerPosition, centerAfter: centerFor3D, finalLength: +lengthFor3D.toFixed(3) });
+      }
+    } catch (e) {
+      console.warn('Wall miter extension computation failed, using original length/center:', e);
+    }
+
+    // Create multi-layer wall geometry with symmetric thickness about the centerline
+    // Ensure layer offset orientation uses wall direction so all sides render consistently
+    const { geometry, mesh3D } = this.createMultiLayerWallGeometry(
+      lengthFor3D,
+      height,
+      actualThickness,
+      wallTemplate,
+      centerFor3D,
+      rotationY,
+      material
+    );
     
-    // Create 2D representation - ARCHITECTURAL FLOOR PLAN STYLE
-    const mesh2D = this.createArchitecturalWall2D(actualLength, thickness, centerPosition, rotationY, material);
-    mesh2D.userData = { objectId: null, type: 'wall' };
+    mesh3D.userData = { 
+      objectId: null, 
+      type: 'wall',
+      wallType: wallType,
+      wallTemplate: wallTemplate,
+      isExternal: wallTemplate.properties.isExternal,
+      loadBearing: wallTemplate.properties.loadBearing,
+      thermalTransmittance: wallTemplate.properties.thermalTransmittance,
+      fireRating: wallTemplate.properties.fireRating
+    };
+    
+    // Create 2D representation - PROFESSIONAL ARCHITECTURAL PLAN
+    const mesh2D = this.createProfessionalWall2D(lengthFor3D, actualThickness, centerFor3D, rotationY, wallTemplate);
+    mesh2D.userData = { objectId: null, type: 'wall', wallType: wallType };
     
     return {
       geometry: geometry,
@@ -675,8 +1854,2020 @@ class StandaloneCADEngine {
       mesh2D: mesh2D,
       actualLength: actualLength,
       adjustedStartPoint: adjustedStartPoint,
-      adjustedEndPoint: adjustedEndPoint
+      adjustedEndPoint: adjustedEndPoint,
+      actualThickness: actualThickness,
+      wallType: wallType,
+      wallTemplate: wallTemplate
     };
+  }
+
+  /**
+   * Create multi-layer wall geometry with individual layer materials
+   * Professional BIM approach with separate geometries per layer
+   */
+  createMultiLayerWallGeometry(length, height, totalThickness, wallTemplate, centerPosition, rotationY, fallbackMaterial = 'concrete') {
+    const wallGroup = new THREE.Group();
+    // Offset layers symmetrically around centerline, orientation follows rotationY but remains centered
+    let currentOffset = -totalThickness / 2;
+    
+    // Create individual layer geometries
+    for (const layer of wallTemplate.layers) {
+      const layerThickness = layer.thickness;
+      const layerMaterial = this.materials[layer.material] || this.materials[fallbackMaterial];
+      
+      // Create geometry for this layer
+      const layerGeometry = new THREE.BoxGeometry(length, height, layerThickness);
+      const layerMesh = new THREE.Mesh(layerGeometry, layerMaterial.clone());
+      
+      // Position layer centered on wall centerline with symmetric offsets
+      layerMesh.position.set(0, 0, currentOffset + layerThickness / 2);
+      layerMesh.userData = {
+        layerName: layer.name,
+        layerFunction: layer.function,
+        layerMaterial: layer.material,
+        layerThickness: layerThickness
+      };
+      
+      wallGroup.add(layerMesh);
+      currentOffset += layerThickness;
+    }
+    
+    // Set group position and rotation
+    wallGroup.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
+    if (rotationY !== 0) {
+      wallGroup.rotation.y = rotationY;
+    }
+    
+    // Create overall bounding box geometry for collision/selection
+    const boundingGeometry = new THREE.BoxGeometry(length, height, totalThickness);
+    
+    return {
+      geometry: boundingGeometry,
+      mesh3D: wallGroup
+    };
+  }
+
+  /**
+   * Create professional 2D architectural wall representation with layer lines
+   */
+  createProfessionalWall2D(length, thickness, centerPosition, rotationY, wallTemplate) {
+    const wallGroup = new THREE.Group();
+    
+    // Professional line weights
+    const WALL_OUTLINE_WIDTH = 0.005; // Heavy lines for exterior walls
+    const INTERIOR_WALL_WIDTH = 0.003; // Medium lines for interior walls
+    const LAYER_LINE_WIDTH = 0.001;   // Light lines for layer divisions
+    
+    // Determine line weight based on wall type
+    const isExterior = wallTemplate.properties.isExternal;
+    const mainLineWidth = isExterior ? WALL_OUTLINE_WIDTH : INTERIOR_WALL_WIDTH;
+    
+    // 1. Create main wall outline
+    const outlineGeometry = new THREE.PlaneGeometry(length, thickness);
+    const outlineMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.8,
+      side: THREE.DoubleSide
+    });
+    
+    // Create outline as wireframe edges
+    const outlineEdges = new THREE.EdgesGeometry(outlineGeometry);
+    const outlineLines = new THREE.LineSegments(
+      outlineEdges, 
+      new THREE.LineBasicMaterial({ color: 0x000000, linewidth: mainLineWidth * 1000 })
+    );
+    outlineLines.rotation.x = -Math.PI / 2;
+    outlineLines.position.y = 0.01;
+    wallGroup.add(outlineLines);
+    
+    // 2. Create layer division lines for multi-layer walls
+    if (wallTemplate.layers && wallTemplate.layers.length > 1) {
+      let currentOffset = -thickness / 2;
+      
+      for (let i = 0; i < wallTemplate.layers.length - 1; i++) {
+        currentOffset += wallTemplate.layers[i].thickness;
+        
+        // Create division line
+        const divisionGeometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(-length / 2, 0, currentOffset),
+          new THREE.Vector3(length / 2, 0, currentOffset)
+        ]);
+        
+        const divisionLine = new THREE.Line(
+          divisionGeometry,
+          new THREE.LineBasicMaterial({ 
+            color: 0x666666, 
+            linewidth: LAYER_LINE_WIDTH * 1000,
+            transparent: true,
+            opacity: 0.6
+          })
+        );
+        
+        divisionLine.rotation.x = -Math.PI / 2;
+        divisionLine.position.y = 0.005;
+        wallGroup.add(divisionLine);
+      }
+    }
+    
+    // 3. Create material-based fill pattern
+    const fillGeometry = new THREE.PlaneGeometry(length * 0.98, thickness * 0.98);
+    const fillMaterial = this.createWallFillPattern(wallTemplate);
+    const fillMesh = new THREE.Mesh(fillGeometry, fillMaterial);
+    fillMesh.rotation.x = -Math.PI / 2;
+    fillMesh.position.y = 0.001;
+    wallGroup.add(fillMesh);
+    
+    // 4. Add insulation hatching for insulated walls
+    if (this.hasInsulation(wallTemplate)) {
+      const insulationHatch = this.createInsulationHatching(length, thickness);
+      insulationHatch.rotation.x = -Math.PI / 2;
+      insulationHatch.position.y = 0.003;
+      wallGroup.add(insulationHatch);
+    }
+    
+    // Set group position and rotation
+    wallGroup.position.set(centerPosition.x, 0, centerPosition.z);
+    if (rotationY !== 0) {
+      wallGroup.rotation.y = rotationY;
+    }
+    
+    return wallGroup;
+  }
+
+  /**
+   * Create wall fill pattern based on primary material
+   */
+  createWallFillPattern(wallTemplate) {
+    // Determine primary structural material
+    const structuralLayer = wallTemplate.layers.find(layer => 
+      layer.function === 'structure' || layer.function === 'finish_exterior'
+    );
+    
+    const primaryMaterial = structuralLayer ? structuralLayer.material : 'concrete';
+    const materialInfo = this.materialDatabase[primaryMaterial] || this.materialDatabase.concrete;
+    
+    // Create material-specific fill
+    let fillColor = 0xf0f0f0; // Default light gray
+    
+    switch (materialInfo.category) {
+      case 'masonry':
+        fillColor = 0xe8d5b7; // Light brick color
+        break;
+      case 'structural':
+        if (primaryMaterial === 'concrete') {
+          fillColor = 0xe0e0e0; // Light concrete gray
+        } else if (primaryMaterial === 'wood') {
+          fillColor = 0xf4e4bc; // Light wood color
+        } else if (primaryMaterial === 'steel') {
+          fillColor = 0xe8e8e8; // Light steel gray
+        }
+        break;
+      case 'finish':
+        fillColor = 0xfafafa; // Very light gray for finishes
+        break;
+    }
+    
+    return new THREE.MeshBasicMaterial({
+      color: fillColor,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide
+    });
+  }
+
+  /**
+   * Check if wall template has insulation layers
+   */
+  hasInsulation(wallTemplate) {
+    return wallTemplate.layers.some(layer => layer.function === 'insulation');
+  }
+
+  /**
+   * Create insulation hatching pattern
+   */
+  createInsulationHatching(length, thickness) {
+    const hatchGroup = new THREE.Group();
+    const hatchSpacing = 0.05; // 5cm spacing for hatch lines
+    const hatchColor = 0xffc107; // Yellow/orange for insulation
+    
+    // Create diagonal hatch lines
+    for (let x = -length / 2; x < length / 2; x += hatchSpacing) {
+      const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x, 0, -thickness / 2),
+        new THREE.Vector3(x + thickness * 0.5, 0, thickness / 2)
+      ]);
+      
+      const hatchLine = new THREE.Line(
+        lineGeometry,
+        new THREE.LineBasicMaterial({ 
+          color: hatchColor,
+          transparent: true,
+          opacity: 0.4,
+          linewidth: 1
+        })
+      );
+      
+      hatchGroup.add(hatchLine);
+    }
+    
+    return hatchGroup;
+  }
+
+  /**
+   * PROFESSIONAL DOOR ASSEMBLY CREATION
+   * Complete door system with frame, panels, hardware, and glazing
+   */
+  createProfessionalDoorAssembly(config) {
+    const {
+      width, height, thickness, material, frameMaterial,
+      frameDepth, doorType, frameType, openingDirection,
+      jamb, sill, head, hardware, glazing, hostWallData
+    } = config;
+
+    const doorGroup = new THREE.Group();
+    
+    // Get materials
+    const doorMat = this.materials[material] || this.materials.wood;
+    const frameMat = this.materials[frameMaterial] || this.materials.wood;
+    
+    // 1. Create professional door frame (jamb, head, sill)
+    const frame = this.createDoorFrame({
+      width, height, frameDepth, frameMaterial: frameMat,
+      jamb, sill, head, frameType, hostWallData
+    });
+    doorGroup.add(frame);
+    
+    // 2. Create door panel(s) based on type
+    const panels = this.createDoorPanels({
+      width, height, thickness, material: doorMat,
+      doorType, openingDirection, glazing
+    });
+    doorGroup.add(panels);
+    
+    // 3. Create hardware (handles, hinges, closer)
+    const hardwareGroup = this.createDoorHardware({
+      width, height, hardware, openingDirection, doorType
+    });
+    doorGroup.add(hardwareGroup);
+    
+    // 4. Create door swing visualization (2D only)
+    const swingArc = this.createDoorSwingArc({
+      width, openingDirection, doorType
+    });
+    
+    return {
+      group: doorGroup,
+      swingArc: swingArc,
+      frame: frame,
+      panels: panels,
+      hardware: hardwareGroup
+    };
+  }
+
+  /**
+   * Create professional door frame with jamb, head, and sill
+   */
+  createDoorFrame(config) {
+    const { width, height, frameDepth, frameMaterial, jamb, sill, head, frameType, hostWallData } = config;
+    const frameGroup = new THREE.Group();
+    
+    // Calculate frame dimensions based on wall layers
+    let actualFrameDepth = frameDepth;
+    if (hostWallData && hostWallData.layers) {
+      // Frame should span from interior to exterior finish
+      actualFrameDepth = hostWallData.thickness;
+    }
+    
+    // Jamb (vertical sides)
+    const jambWidth = jamb.width || 0.04;
+    const jambDepth = jamb.depth || actualFrameDepth;
+    
+    // Left jamb
+    const leftJambGeometry = new THREE.BoxGeometry(jambWidth, height, jambDepth);
+    const leftJamb = new THREE.Mesh(leftJambGeometry, frameMaterial);
+    leftJamb.position.set(-(width/2 + jambWidth/2), 0, 0);
+    frameGroup.add(leftJamb);
+    
+    // Right jamb
+    const rightJambGeometry = new THREE.BoxGeometry(jambWidth, height, jambDepth);
+    const rightJamb = new THREE.Mesh(rightJambGeometry, frameMaterial);
+    rightJamb.position.set(width/2 + jambWidth/2, 0, 0);
+    frameGroup.add(rightJamb);
+    
+    // Head (top)
+    const headWidth = width + (jambWidth * 2);
+    const headHeight = head.height || 0.05;
+    const headGeometry = new THREE.BoxGeometry(headWidth, headHeight, jambDepth);
+    const headMesh = new THREE.Mesh(headGeometry, frameMaterial);
+    headMesh.position.set(0, height/2 + headHeight/2, 0);
+    frameGroup.add(headMesh);
+    
+    // Sill (bottom) - only if elevated
+    if (sill.height > 0) {
+      const sillWidth = width + (jambWidth * 2) + (sill.overhang * 2);
+      const sillGeometry = new THREE.BoxGeometry(sillWidth, sill.height, jambDepth + sill.overhang);
+      const sillMesh = new THREE.Mesh(sillGeometry, frameMaterial);
+      sillMesh.position.set(0, -(height/2 + sill.height/2), sill.overhang/2);
+      frameGroup.add(sillMesh);
+    }
+    
+    return frameGroup;
+  }
+
+  /**
+   * Create door panels based on door type
+   */
+  createDoorPanels(config) {
+    const { width, height, thickness, material, doorType, openingDirection, glazing } = config;
+    const panelsGroup = new THREE.Group();
+    
+    switch (doorType) {
+      case 'single_swing':
+        const singlePanel = this.createSingleDoorPanel(width, height, thickness, material, glazing);
+        panelsGroup.add(singlePanel);
+        break;
+        
+      case 'double_swing':
+        const leftPanel = this.createSingleDoorPanel(width/2 - 0.01, height, thickness, material, glazing);
+        leftPanel.position.x = -width/4;
+        const rightPanel = this.createSingleDoorPanel(width/2 - 0.01, height, thickness, material, glazing);
+        rightPanel.position.x = width/4;
+        panelsGroup.add(leftPanel);
+        panelsGroup.add(rightPanel);
+        break;
+        
+      case 'sliding':
+        const slidingPanel = this.createSlidingDoorPanel(width, height, thickness, material, glazing);
+        panelsGroup.add(slidingPanel);
+        break;
+        
+      default:
+        const defaultPanel = this.createSingleDoorPanel(width, height, thickness, material, glazing);
+        panelsGroup.add(defaultPanel);
+    }
+    
+    return panelsGroup;
+  }
+
+  /**
+   * Create single door panel with professional details
+   */
+  createSingleDoorPanel(width, height, thickness, material, glazing) {
+    const panelGroup = new THREE.Group();
+    
+    // Main door panel
+    const panelGeometry = new THREE.BoxGeometry(width, height, thickness);
+    const doorPanel = new THREE.Mesh(panelGeometry, material);
+    panelGroup.add(doorPanel);
+    
+    // Add glazing if specified
+    if (glazing) {
+      const glassPanel = this.createDoorGlazing(width, height, glazing);
+      glassPanel.position.z = thickness/2 + 0.001;
+      panelGroup.add(glassPanel);
+    }
+    
+    // Add raised panels for traditional doors
+    if (material === this.materials.wood) {
+      const raisedPanels = this.createRaisedDoorPanels(width, height, thickness);
+      panelGroup.add(raisedPanels);
+    }
+    
+    return panelGroup;
+  }
+
+  /**
+   * Create raised door panels for traditional doors
+   */
+  createRaisedDoorPanels(width, height, thickness) {
+    const panelsGroup = new THREE.Group();
+    
+    // Simple raised panel geometry
+    const panelWidth = width * 0.7;
+    const panelHeight = height * 0.4;
+    const raisedHeight = thickness * 0.1;
+    
+    // Upper panel
+    const upperPanel = new THREE.BoxGeometry(panelWidth, panelHeight, raisedHeight);
+    const upperPanelMesh = new THREE.Mesh(upperPanel, this.materials.wood);
+    upperPanelMesh.position.set(0, height * 0.2, thickness/2 + raisedHeight/2);
+    panelsGroup.add(upperPanelMesh);
+    
+    // Lower panel  
+    const lowerPanel = new THREE.BoxGeometry(panelWidth, panelHeight, raisedHeight);
+    const lowerPanelMesh = new THREE.Mesh(lowerPanel, this.materials.wood);
+    lowerPanelMesh.position.set(0, -height * 0.2, thickness/2 + raisedHeight/2);
+    panelsGroup.add(lowerPanelMesh);
+    
+    return panelsGroup;
+  }
+
+  /**
+   * Create door swing arc visualization
+   */
+  createDoorSwingArc(config) {
+    const { width, openingDirection, doorType } = config;
+    const swingGroup = new THREE.Group();
+    
+    // Create arc geometry for door swing
+    const radius = width;
+    const segments = 32;
+    const arcGeometry = new THREE.RingGeometry(radius * 0.95, radius, 0, Math.PI * 0.5, segments);
+    
+    // Swing arc material (semi-transparent)
+    const arcMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0x00ff00, 
+      transparent: true, 
+      opacity: 0.2,
+      side: THREE.DoubleSide
+    });
+    
+    const arcMesh = new THREE.Mesh(arcGeometry, arcMaterial);
+    arcMesh.rotation.x = -Math.PI / 2;
+    
+    // Flip for left opening doors
+    if (openingDirection === 'left') {
+      arcMesh.rotation.z = Math.PI;
+    }
+    
+    swingGroup.add(arcMesh);
+    return swingGroup;
+  }
+
+  /**
+   * Create door hardware (handles, hinges, closer)
+   */
+  createDoorHardware(config) {
+    const { width, height, hardware, openingDirection, doorType } = config;
+    const hardwareGroup = new THREE.Group();
+    
+    // Door handle
+    const handleSide = openingDirection === 'left' ? -1 : 1;
+    const handleX = width * 0.35 * handleSide;
+    const handleY = 0; // Center height
+    
+    // Handle assembly
+    const handleGeometry = new THREE.CylinderGeometry(0.01, 0.01, 0.12);
+    const handleMaterial = this.materials.steel || this.materials.aluminum;
+    const handle = new THREE.Mesh(handleGeometry, handleMaterial);
+    handle.rotation.z = Math.PI / 2;
+    handle.position.set(handleX, handleY, 0.03);
+    hardwareGroup.add(handle);
+    
+    // Hinges (3 hinges for standard door)
+    const hingePositions = [-height * 0.35, 0, height * 0.35];
+    const hingeX = openingDirection === 'left' ? width/2 : -width/2;
+    
+    hingePositions.forEach(y => {
+      const hinge = this.createDoorHinge();
+      hinge.position.set(hingeX, y, 0);
+      hardwareGroup.add(hinge);
+    });
+    
+    return hardwareGroup;
+  }
+
+  /**
+   * Create door hinge geometry
+   */
+  createDoorHinge() {
+    const hingeGroup = new THREE.Group();
+    const hingeMaterial = this.materials.steel || this.materials.aluminum;
+    
+    // Hinge leaves
+    const leafGeometry = new THREE.BoxGeometry(0.08, 0.10, 0.002);
+    const leaf1 = new THREE.Mesh(leafGeometry, hingeMaterial);
+    leaf1.position.z = -0.001;
+    const leaf2 = new THREE.Mesh(leafGeometry, hingeMaterial);
+    leaf2.position.z = 0.001;
+    
+    hingeGroup.add(leaf1);
+    hingeGroup.add(leaf2);
+    
+    return hingeGroup;
+  }
+
+  /**
+   * PROFESSIONAL WALL OPENING SYSTEM
+   * Create intelligent wall opening with layer awareness
+   */
+  createProfessionalWallOpening(wallId, openingConfig) {
+    const { type, width, height, position, offset, frameDepth, preserveLayers } = openingConfig;
+    const wall = this.objects.get(wallId);
+    
+    if (!wall || !wall.params) {
+      console.warn(`Cannot create opening: wall ${wallId} not found`);
+      return false;
+    }
+    
+    console.log(`🔳 Creating professional ${type} opening: ${width.toFixed(2)}m × ${height.toFixed(2)}m`);
+    
+    // Store opening data for wall regeneration
+    if (!wall.params.openings) {
+      wall.params.openings = [];
+    }
+    
+    const opening = {
+      id: `opening_${Date.now()}`,
+      type: type,
+      width: width,
+      height: height,
+      position: position,
+      offset: offset,
+      frameDepth: frameDepth,
+      preserveLayers: preserveLayers
+    };
+    
+    wall.params.openings.push(opening);
+    
+    // Trigger wall geometry regeneration with openings
+    this.regenerateWallWithOpenings(wallId);
+    
+    return opening;
+  }
+
+  /**
+   * Regenerate wall geometry with openings cut out
+   * PROFESSIONAL IMPLEMENTATION: Uses boolean operations to cut precise openings
+   */
+  regenerateWallWithOpenings(wallId) {
+    const wall = this.objects.get(wallId);
+    if (!wall || !wall.params.openings || wall.params.openings.length === 0) {
+      return;
+    }
+    
+    console.log(`🔧 Regenerating wall ${wallId} with ${wall.params.openings.length} openings`);
+    
+    try {
+      // Remove existing wall meshes
+      if (wall.mesh3D) {
+        this.scene3D.remove(wall.mesh3D);
+      }
+      if (wall.mesh2D) {
+        this.scene2D.remove(wall.mesh2D);
+      }
+      
+      // Get wall parameters
+      const params = wall.params;
+      const layers = params.layers || [{
+        material: params.material || 'concrete',
+        thickness: params.thickness || 0.2,
+        thermalTransmittance: 0.5
+      }];
+      
+      // Create new wall geometry with openings
+      const wallGeometry = this.createWallWithOpenings(params, layers);
+      
+      if (wallGeometry) {
+        wall.mesh3D = wallGeometry.mesh3D;
+        wall.mesh2D = wallGeometry.mesh2D;
+        wall.params.hasOpenings = true;
+        
+        // Add to scenes
+        this.scene3D.add(wallGeometry.mesh3D);
+        this.scene2D.add(wallGeometry.mesh2D);
+        
+        console.log(`✅ Wall ${wallId} regenerated with ${params.openings.length} openings`);
+        
+        // Emit update event
+        this.emit('object_updated', {
+          object: this.serializeObject(wall),
+          type: 'opening_added'
+        });
+      }
+      
+    } catch (error) {
+      console.error(`❌ Failed to regenerate wall ${wallId} with openings:`, error);
+    }
+    
+  }
+
+  /**
+   * Create wall geometry with openings using boolean operations
+   * PROFESSIONAL IMPLEMENTATION: Precise opening cuts with frame support
+   */
+  createWallWithOpenings(params, layers) {
+    const { 
+      startPoint, 
+      endPoint, 
+      height = 2.7, 
+      openings = [] 
+    } = params;
+    
+    // Calculate wall dimensions and direction
+    const wallVector = {
+      x: endPoint.x - startPoint.x,
+      y: endPoint.y - startPoint.y,
+      z: endPoint.z - startPoint.z
+    };
+    const wallLength = Math.sqrt(wallVector.x ** 2 + wallVector.y ** 2 + wallVector.z ** 2);
+    
+    // Calculate wall center and rotation
+    const wallCenter = {
+      x: (startPoint.x + endPoint.x) / 2,
+      y: (startPoint.y + endPoint.y) / 2,
+      z: (startPoint.z + endPoint.z) / 2
+    };
+    
+    const wallAngle = Math.atan2(wallVector.z, wallVector.x);
+    
+    // Create wall segments between openings
+    const segments = this.calculateWallSegments(wallLength, openings);
+    
+    // Create 3D wall group with segments
+    const wallGroup3D = new THREE.Group();
+    const wallGroup2D = new THREE.Group();
+    
+    // Process each layer for multi-layer walls
+    let layerOffset = 0;
+    
+    layers.forEach((layer, layerIndex) => {
+      const layerThickness = layer.thickness;
+      const material = this.materials[layer.material] || this.materials.concrete;
+      
+      // Create segments for this layer
+      segments.forEach((segment, segmentIndex) => {
+        if (segment.length > 0.01) { // Only create segments with meaningful length
+          // 3D segment
+          const segmentGeometry3D = new THREE.BoxGeometry(
+            segment.length,
+            height,
+            layerThickness
+          );
+          
+          const layerMaterial3D = material.clone();
+          layerMaterial3D.transparent = layers.length > 1;
+          layerMaterial3D.opacity = layers.length > 1 ? 0.8 : 1.0;
+          
+          const segmentMesh3D = new THREE.Mesh(segmentGeometry3D, layerMaterial3D);
+          
+          // Position segment relative to wall start
+          segmentMesh3D.position.set(
+            segment.centerPosition - wallLength / 2,
+            height / 2,
+            layerOffset - (this.getTotalWallThickness(layers) / 2)
+          );
+          
+          wallGroup3D.add(segmentMesh3D);
+          
+          // 2D segment (top view)
+          if (layerIndex === 0) { // Only create 2D view for first layer
+            const segmentGeometry2D = new THREE.PlaneGeometry(segment.length, layerThickness);
+            const layerMaterial2D = new THREE.MeshBasicMaterial({
+              color: material.color,
+              side: THREE.DoubleSide,
+              transparent: true,
+              opacity: 0.8
+            });
+            
+            const segmentMesh2D = new THREE.Mesh(segmentGeometry2D, layerMaterial2D);
+            segmentMesh2D.position.set(
+              segment.centerPosition - wallLength / 2,
+              0,
+              layerOffset - (this.getTotalWallThickness(layers) / 2)
+            );
+            segmentMesh2D.rotation.x = -Math.PI / 2;
+            
+            wallGroup2D.add(segmentMesh2D);
+          }
+        }
+      });
+      
+      layerOffset += layerThickness;
+    });
+    
+    // Add opening frames if specified
+    openings.forEach(opening => {
+      if (opening.frameDepth > 0) {
+        const frameGroup = this.createOpeningFrame(opening, wallLength, height, layers);
+        if (frameGroup) {
+          wallGroup3D.add(frameGroup);
+        }
+      }
+    });
+    
+    // Position and rotate wall groups
+    wallGroup3D.position.set(wallCenter.x, wallCenter.y, wallCenter.z);
+    wallGroup3D.rotation.y = wallAngle;
+    
+    wallGroup2D.position.set(wallCenter.x, wallCenter.y, wallCenter.z);
+    wallGroup2D.rotation.y = wallAngle;
+    
+    console.log(`🏗️ Created wall with ${segments.length} segments and ${openings.length} openings`);
+    
+    return {
+      mesh3D: wallGroup3D,
+      mesh2D: wallGroup2D,
+      segments: segments,
+      openings: openings
+    };
+  }
+
+  /**
+   * Calculate wall segments around openings
+   * PROFESSIONAL IMPLEMENTATION: Handles overlapping openings and edge cases
+   */
+  calculateWallSegments(wallLength, openings) {
+    if (!openings || openings.length === 0) {
+      return [{
+        startPosition: 0,
+        endPosition: wallLength,
+        centerPosition: wallLength / 2,
+        length: wallLength
+      }];
+    }
+    
+    // Sort openings by position along wall
+    const sortedOpenings = [...openings].sort((a, b) => a.position - b.position);
+    
+    const segments = [];
+    let currentPosition = 0;
+    
+    sortedOpenings.forEach(opening => {
+      const openingStart = Math.max(0, opening.position - opening.width / 2);
+      const openingEnd = Math.min(wallLength, opening.position + opening.width / 2);
+      
+      // Create segment before opening if there's space
+      if (openingStart > currentPosition + 0.01) {
+        const segmentLength = openingStart - currentPosition;
+        segments.push({
+          startPosition: currentPosition,
+          endPosition: openingStart,
+          centerPosition: currentPosition + segmentLength / 2,
+          length: segmentLength,
+          type: 'wall'
+        });
+      }
+      
+      // Record the opening segment (for potential frame creation)
+      segments.push({
+        startPosition: openingStart,
+        endPosition: openingEnd,
+        centerPosition: (openingStart + openingEnd) / 2,
+        length: openingEnd - openingStart,
+        type: 'opening',
+        opening: opening
+      });
+      
+      currentPosition = Math.max(currentPosition, openingEnd);
+    });
+    
+    // Create final segment after last opening
+    if (currentPosition < wallLength - 0.01) {
+      const segmentLength = wallLength - currentPosition;
+      segments.push({
+        startPosition: currentPosition,
+        endPosition: wallLength,
+        centerPosition: currentPosition + segmentLength / 2,
+        length: segmentLength,
+        type: 'wall'
+      });
+    }
+    
+    // Filter out wall segments (openings are handled separately)
+    return segments.filter(segment => segment.type === 'wall');
+  }
+
+  /**
+   * Create opening frame geometry
+   * PROFESSIONAL IMPLEMENTATION: Proper frame construction
+   */
+  createOpeningFrame(opening, wallLength, wallHeight, layers) {
+    const frameGroup = new THREE.Group();
+    const frameDepth = opening.frameDepth || 0.05;
+    const frameMaterial = this.materials.wood || this.materials.concrete;
+    
+    // Frame dimensions
+    const openingLeft = opening.position - opening.width / 2;
+    const openingRight = opening.position + opening.width / 2;
+    const openingBottom = opening.offset || 0;
+    const openingTop = openingBottom + opening.height;
+    
+    // Create frame components
+    const frameComponents = [
+      // Left jamb
+      {
+        width: frameDepth,
+        height: opening.height,
+        depth: this.getTotalWallThickness(layers),
+        position: { x: openingLeft - frameDepth / 2, y: (openingBottom + openingTop) / 2, z: 0 }
+      },
+      // Right jamb
+      {
+        width: frameDepth,
+        height: opening.height,
+        depth: this.getTotalWallThickness(layers),
+        position: { x: openingRight + frameDepth / 2, y: (openingBottom + openingTop) / 2, z: 0 }
+      },
+      // Top header
+      {
+        width: opening.width + frameDepth * 2,
+        height: frameDepth,
+        depth: this.getTotalWallThickness(layers),
+        position: { x: opening.position, y: openingTop + frameDepth / 2, z: 0 }
+      }
+    ];
+    
+    // Add sill for windows
+    if (opening.type === 'window' && openingBottom > 0) {
+      frameComponents.push({
+        width: opening.width + frameDepth * 2,
+        height: frameDepth,
+        depth: this.getTotalWallThickness(layers),
+        position: { x: opening.position, y: openingBottom - frameDepth / 2, z: 0 }
+      });
+    }
+    
+    // Create frame meshes
+    frameComponents.forEach(component => {
+      const frameGeometry = new THREE.BoxGeometry(
+        component.width,
+        component.height,
+        component.depth
+      );
+      
+      const frameMesh = new THREE.Mesh(frameGeometry, frameMaterial.clone());
+      frameMesh.position.set(
+        component.position.x - wallLength / 2,
+        component.position.y,
+        component.position.z
+      );
+      
+      frameGroup.add(frameMesh);
+    });
+    
+    return frameGroup;
+  }
+
+  /**
+   * Calculate total wall thickness from all layers
+   */
+  getTotalWallThickness(layers) {
+    return layers.reduce((total, layer) => total + layer.thickness, 0);
+  }
+
+  /**
+   * Remove opening from wall
+   * PROFESSIONAL IMPLEMENTATION: Clean opening removal with geometry regeneration
+   */
+  removeWallOpening(wallId, openingId) {
+    const wall = this.objects.get(wallId);
+    if (!wall || !wall.params.openings) {
+      console.warn(`Wall ${wallId} or openings not found`);
+      return false;
+    }
+
+    const openingIndex = wall.params.openings.findIndex(opening => opening.id === openingId);
+    if (openingIndex === -1) {
+      console.warn(`Opening ${openingId} not found in wall ${wallId}`);
+      return false;
+    }
+
+    // Remove the opening
+    wall.params.openings.splice(openingIndex, 1);
+    
+    console.log(`🗑️ Removed opening ${openingId} from wall ${wallId}`);
+
+    // Regenerate wall geometry if there are still openings
+    if (wall.params.openings.length > 0) {
+      this.regenerateWallWithOpenings(wallId);
+    } else {
+      // No more openings, regenerate as solid wall
+      wall.params.hasOpenings = false;
+      this.regenerateWallGeometry(wallId);
+    }
+
+    return true;
+  }
+
+  /**
+   * Update opening properties
+   * PROFESSIONAL IMPLEMENTATION: Live opening editing
+   */
+  updateWallOpening(wallId, openingId, newParams) {
+    const wall = this.objects.get(wallId);
+    if (!wall || !wall.params.openings) {
+      console.warn(`Wall ${wallId} or openings not found`);
+      return false;
+    }
+
+    const opening = wall.params.openings.find(opening => opening.id === openingId);
+    if (!opening) {
+      console.warn(`Opening ${openingId} not found in wall ${wallId}`);
+      return false;
+    }
+
+    // Update opening properties
+    Object.assign(opening, newParams);
+    
+    console.log(`✏️ Updated opening ${openingId} in wall ${wallId}:`, newParams);
+
+    // Regenerate wall geometry with updated opening
+    this.regenerateWallWithOpenings(wallId);
+
+    return true;
+  }
+
+  /**
+   * Regenerate solid wall geometry (without openings)
+   */
+  regenerateWallGeometry(wallId) {
+    const wall = this.objects.get(wallId);
+    if (!wall) return;
+
+    // Remove existing meshes
+    if (wall.mesh3D) {
+      this.scene3D.remove(wall.mesh3D);
+    }
+    if (wall.mesh2D) {
+      this.scene2D.remove(wall.mesh2D);
+    }
+
+    // Create new solid wall geometry
+    const geometry = this.createMultiLayerWallGeometry(wall.params);
+    if (geometry) {
+      wall.mesh3D = geometry.mesh3D;
+      wall.mesh2D = geometry.mesh2D;
+      
+      this.scene3D.add(geometry.mesh3D);
+      this.scene2D.add(geometry.mesh2D);
+      
+      console.log(`🔄 Regenerated solid wall geometry for ${wallId}`);
+    }
+  }
+
+  /**
+   * Get all openings in a wall
+   */
+  getWallOpenings(wallId) {
+    const wall = this.objects.get(wallId);
+    return wall?.params?.openings || [];
+  }
+
+  /**
+   * Check if opening fits within wall boundaries
+   * PROFESSIONAL IMPLEMENTATION: Validation for opening placement
+   */
+  validateOpeningPlacement(wallId, opening) {
+    const wall = this.objects.get(wallId);
+    if (!wall) return { valid: false, error: 'Wall not found' };
+
+    const wallLength = wall.params.length || 3.0;
+    const wallHeight = wall.params.height || 2.7;
+    
+    // Check horizontal bounds
+    const openingLeft = opening.position - opening.width / 2;
+    const openingRight = opening.position + opening.width / 2;
+    
+    if (openingLeft < 0 || openingRight > wallLength) {
+      return { 
+        valid: false, 
+        error: `Opening extends beyond wall length (${wallLength}m)` 
+      };
+    }
+
+    // Check vertical bounds
+    const openingTop = (opening.offset || 0) + opening.height;
+    
+    if (openingTop > wallHeight) {
+      return { 
+        valid: false, 
+        error: `Opening extends beyond wall height (${wallHeight}m)` 
+      };
+    }
+
+    // Check for overlaps with existing openings
+    const existingOpenings = wall.params.openings || [];
+    for (const existing of existingOpenings) {
+      if (existing.id === opening.id) continue; // Skip self when updating
+      
+      const existingLeft = existing.position - existing.width / 2;
+      const existingRight = existing.position + existing.width / 2;
+      
+      // Check horizontal overlap
+      if (!(openingRight < existingLeft || openingLeft > existingRight)) {
+        // Check vertical overlap
+        const existingBottom = existing.offset || 0;
+        const existingTop = existingBottom + existing.height;
+        const openingBottom = opening.offset || 0;
+        
+        if (!(openingTop < existingBottom || openingBottom > existingTop)) {
+          return { 
+            valid: false, 
+            error: `Opening overlaps with existing opening` 
+          };
+        }
+      }
+    }
+
+    return { valid: true };
+  }
+
+  /**
+   * ADVANCED WALL EDITING SYSTEM
+   * Professional CAD editing tools for walls
+   */
+  
+  /**
+   * Split wall at specified point
+   * Creates two separate walls from one
+   */
+  splitWall(wallId, splitPoint, options = {}) {
+    const wall = this.objects.get(wallId);
+    if (!wall || wall.type !== 'wall') {
+      console.warn(`Cannot split wall: ${wallId} not found or not a wall`);
+      return null;
+    }
+
+    const { maintainProperties = true, autoJoin = true } = options;
+    
+    console.log(`🔪 Splitting wall ${wallId} at point:`, splitPoint);
+    
+    // Calculate split position along wall
+    const startPoint = wall.params.startPoint;
+    const endPoint = wall.params.endPoint;
+    
+    // Project split point onto wall line
+    const projectedPoint = this.projectPointOntoLine(splitPoint, startPoint, endPoint);
+    const distanceFromStart = this.calculateDistance(startPoint, projectedPoint);
+    const totalLength = wall.params.length || this.calculateDistance(startPoint, endPoint);
+    
+    if (distanceFromStart <= 0.01 || distanceFromStart >= totalLength - 0.01) {
+      console.warn('Split point too close to wall end - no split performed');
+      return null;
+    }
+    
+    // Create two new walls
+    const wallParams1 = {
+      ...wall.params,
+      startPoint: startPoint,
+      endPoint: projectedPoint,
+      length: distanceFromStart
+    };
+    
+    const wallParams2 = {
+      ...wall.params,
+      startPoint: projectedPoint,
+      endPoint: endPoint,
+      length: totalLength - distanceFromStart
+    };
+    
+    // Create the new walls
+    const wall1Id = this.createObject('wall', wallParams1);
+    const wall2Id = this.createObject('wall', wallParams2);
+    
+    // Remove original wall
+    this.removeObject(wallId);
+    
+    // Auto-join with adjacent walls if enabled
+    if (autoJoin) {
+      this.applyProfessionalWallJoinery();
+    }
+    
+    return {
+      wall1: wall1Id,
+      wall2: wall2Id,
+      splitPoint: projectedPoint
+    };
+  }
+
+  /**
+   * Merge two adjacent walls into one
+   */
+  mergeWalls(wallId1, wallId2, options = {}) {
+    const wall1 = this.objects.get(wallId1);
+    const wall2 = this.objects.get(wallId2);
+    
+    if (!wall1 || !wall2 || wall1.type !== 'wall' || wall2.type !== 'wall') {
+      console.warn('Cannot merge: walls not found or invalid');
+      return null;
+    }
+
+    const { tolerance = 0.05, maintainProperties = 'first' } = options;
+    
+    console.log(`🔗 Merging walls ${wallId1} and ${wallId2}`);
+    
+    // Check if walls are adjacent and collinear
+    const adjacency = this.checkWallAdjacency(wall1, wall2, tolerance);
+    if (!adjacency.areAdjacent) {
+      console.warn('Walls are not adjacent - cannot merge');
+      return null;
+    }
+    
+    // Determine merge properties based on option
+    const baseWall = maintainProperties === 'first' ? wall1 : wall2;
+    const mergedParams = {
+      ...baseWall.params,
+      startPoint: adjacency.newStartPoint,
+      endPoint: adjacency.newEndPoint,
+      length: adjacency.newLength
+    };
+    
+    // Create merged wall
+    const mergedWallId = this.createObject('wall', mergedParams);
+    
+    // Remove original walls
+    this.removeObject(wallId1);
+    this.removeObject(wallId2);
+    
+    return {
+      mergedWall: mergedWallId,
+      originalWalls: [wallId1, wallId2],
+      newLength: adjacency.newLength
+    };
+  }
+
+  /**
+   * Extend wall to specified point or length
+   */
+  extendWall(wallId, extension, options = {}) {
+    const wall = this.objects.get(wallId);
+    if (!wall || wall.type !== 'wall') {
+      console.warn(`Cannot extend wall: ${wallId} not found`);
+      return false;
+    }
+
+    const { end = 'end', autoTrim = false, autoJoin = true } = options;
+    
+    console.log(`📏 Extending wall ${wallId}:`, extension);
+    
+    let newStartPoint = wall.params.startPoint;
+    let newEndPoint = wall.params.endPoint;
+    let newLength = wall.params.length;
+    
+    if (typeof extension === 'number') {
+      // Extend by distance
+      const direction = this.getWallDirection(wall);
+      
+      if (end === 'start') {
+        newStartPoint = {
+          x: newStartPoint.x - direction.x * extension,
+          y: newStartPoint.y,
+          z: newStartPoint.z - direction.z * extension
+        };
+      } else {
+        newEndPoint = {
+          x: newEndPoint.x + direction.x * extension,
+          y: newEndPoint.y,
+          z: newEndPoint.z + direction.z * extension
+        };
+      }
+      
+      newLength += extension;
+    } else {
+      // Extend to point
+      if (end === 'start') {
+        newStartPoint = extension;
+      } else {
+        newEndPoint = extension;
+      }
+      
+      newLength = this.calculateDistance(newStartPoint, newEndPoint);
+    }
+    
+    // Update wall parameters
+    const updatedParams = {
+      ...wall.params,
+      startPoint: newStartPoint,
+      endPoint: newEndPoint,
+      length: newLength
+    };
+    
+    // Regenerate wall geometry
+    const newGeometry = this.createWallGeometry(updatedParams);
+    wall.params = updatedParams;
+    wall.geometry = newGeometry.geometry;
+    wall.mesh3D = newGeometry.mesh3D;
+    wall.mesh2D = newGeometry.mesh2D;
+    
+    // Update user data
+    wall.mesh3D.userData.objectId = wallId;
+    wall.mesh2D.userData.objectId = wallId;
+    
+    // Auto-join with intersecting walls
+    if (autoJoin) {
+      this.applyProfessionalWallJoinery();
+    }
+    
+    return {
+      newLength: newLength,
+      newStartPoint: newStartPoint,
+      newEndPoint: newEndPoint
+    };
+  }
+
+  /**
+   * Trim wall to intersection with another wall or element
+   */
+  trimWall(wallId, trimElement, options = {}) {
+    const wall = this.objects.get(wallId);
+    if (!wall || wall.type !== 'wall') {
+      console.warn(`Cannot trim wall: ${wallId} not found`);
+      return false;
+    }
+
+    const { end = 'auto', keepExtended = false } = options;
+    
+    console.log(`✂️ Trimming wall ${wallId} to element:`, trimElement);
+    
+    // Find intersection point
+    const intersectionPoint = this.findWallIntersection(wall, trimElement);
+    if (!intersectionPoint) {
+      console.warn('No intersection found - cannot trim');
+      return false;
+    }
+    
+    // Determine which end to trim
+    let trimEnd = end;
+    if (trimEnd === 'auto') {
+      const distToStart = this.calculateDistance(wall.params.startPoint, intersectionPoint);
+      const distToEnd = this.calculateDistance(wall.params.endPoint, intersectionPoint);
+      trimEnd = distToStart < distToEnd ? 'start' : 'end';
+    }
+    
+    // Create new wall parameters
+    const newParams = { ...wall.params };
+    
+    if (trimEnd === 'start') {
+      newParams.startPoint = intersectionPoint;
+    } else {
+      newParams.endPoint = intersectionPoint;
+    }
+    
+    newParams.length = this.calculateDistance(newParams.startPoint, newParams.endPoint);
+    
+    // Update wall
+    this.updateWallGeometry(wallId, newParams);
+    
+    return {
+      trimmedAt: intersectionPoint,
+      trimmedEnd: trimEnd,
+      newLength: newParams.length
+    };
+  }
+
+  /**
+   * Move wall endpoint with constraint solving
+   */
+  moveWallEndpoint(wallId, endpoint, newPosition, options = {}) {
+    const wall = this.objects.get(wallId);
+    if (!wall || wall.type !== 'wall') {
+      console.warn(`Cannot move wall endpoint: ${wallId} not found`);
+      return false;
+    }
+
+    const { maintainLength = false, autoJoin = true, snapToGrid = false } = options;
+    
+    console.log(`🎯 Moving wall ${wallId} ${endpoint} to:`, newPosition);
+    
+    let finalPosition = newPosition;
+    
+    // Apply grid snapping if enabled
+    if (snapToGrid) {
+      finalPosition = this.snapToGrid(newPosition);
+    }
+    
+    const newParams = { ...wall.params };
+    
+    if (maintainLength) {
+      // Move wall maintaining length (translate)
+      const originalLength = wall.params.length;
+      const direction = this.getWallDirection(wall);
+      
+      if (endpoint === 'start') {
+        newParams.startPoint = finalPosition;
+        newParams.endPoint = {
+          x: finalPosition.x + direction.x * originalLength,
+          y: finalPosition.y,
+          z: finalPosition.z + direction.z * originalLength
+        };
+      } else {
+        newParams.endPoint = finalPosition;
+        newParams.startPoint = {
+          x: finalPosition.x - direction.x * originalLength,
+          y: finalPosition.y,
+          z: finalPosition.z - direction.z * originalLength
+        };
+      }
+    } else {
+      // Move endpoint changing wall length
+      if (endpoint === 'start') {
+        newParams.startPoint = finalPosition;
+      } else {
+        newParams.endPoint = finalPosition;
+      }
+      
+      newParams.length = this.calculateDistance(newParams.startPoint, newParams.endPoint);
+    }
+    
+    // Update wall
+    this.updateWallGeometry(wallId, newParams);
+    
+    // Auto-join with intersecting walls
+    if (autoJoin) {
+      this.applyProfessionalWallJoinery();
+    }
+    
+    return {
+      newStartPoint: newParams.startPoint,
+      newEndPoint: newParams.endPoint,
+      newLength: newParams.length
+    };
+  }
+
+  /**
+   * Helper: Project point onto line segment
+   */
+  projectPointOntoLine(point, lineStart, lineEnd) {
+    const dx = lineEnd.x - lineStart.x;
+    const dz = lineEnd.z - lineStart.z;
+    const length = Math.sqrt(dx * dx + dz * dz);
+    
+    if (length === 0) return lineStart;
+    
+    const t = Math.max(0, Math.min(1, 
+      ((point.x - lineStart.x) * dx + (point.z - lineStart.z) * dz) / (length * length)
+    ));
+    
+    return {
+      x: lineStart.x + t * dx,
+      y: lineStart.y,
+      z: lineStart.z + t * dz
+    };
+  }
+
+  /**
+   * Helper: Check if two walls are adjacent and can be merged
+   */
+  checkWallAdjacency(wall1, wall2, tolerance) {
+    const endpoints1 = [wall1.params.startPoint, wall1.params.endPoint];
+    const endpoints2 = [wall2.params.startPoint, wall2.params.endPoint];
+    
+    // Check all endpoint combinations
+    for (let i = 0; i < 2; i++) {
+      for (let j = 0; j < 2; j++) {
+        const distance = this.calculateDistance(endpoints1[i], endpoints2[j]);
+        
+        if (distance <= tolerance) {
+          // Check if walls are collinear
+          const direction1 = this.getWallDirection(wall1);
+          const direction2 = this.getWallDirection(wall2);
+          
+          const dotProduct = Math.abs(direction1.x * direction2.x + direction1.z * direction2.z);
+          
+          if (dotProduct > 0.99) { // Nearly parallel
+            // Determine new start and end points
+            const allPoints = [
+              wall1.params.startPoint,
+              wall1.params.endPoint,
+              wall2.params.startPoint,
+              wall2.params.endPoint
+            ].filter((point, index, array) => {
+              // Remove the adjacent endpoints
+              if ((index < 2 && index === i) || (index >= 2 && index - 2 === j)) {
+                return false;
+              }
+              return true;
+            });
+            
+            const newLength = this.calculateDistance(allPoints[0], allPoints[1]);
+            
+            return {
+              areAdjacent: true,
+              newStartPoint: allPoints[0],
+              newEndPoint: allPoints[1],
+              newLength: newLength
+            };
+          }
+        }
+      }
+    }
+    
+    return { areAdjacent: false };
+  }
+
+  /**
+   * Helper: Get wall direction vector (normalized)
+   */
+  getWallDirection(wall) {
+    const dx = wall.params.endPoint.x - wall.params.startPoint.x;
+    const dz = wall.params.endPoint.z - wall.params.startPoint.z;
+    const length = Math.sqrt(dx * dx + dz * dz);
+    
+    return {
+      x: dx / length,
+      z: dz / length
+    };
+  }
+
+  /**
+   * Helper: Update wall geometry with new parameters
+   */
+  updateWallGeometry(wallId, newParams) {
+    const wall = this.objects.get(wallId);
+    if (!wall) return false;
+    
+    // Create new geometry
+    const newGeometry = this.createWallGeometry(newParams);
+    
+    // Update wall object
+    wall.params = newParams;
+    wall.geometry = newGeometry.geometry;
+    wall.mesh3D = newGeometry.mesh3D;
+    wall.mesh2D = newGeometry.mesh2D;
+    
+    // Preserve object IDs
+    wall.mesh3D.userData.objectId = wallId;
+    wall.mesh2D.userData.objectId = wallId;
+    
+    // Emit update event
+    this.emit('wallUpdated', { wallId, params: newParams });
+    
+    return true;
+  }
+
+  /**
+   * Helper: Calculate distance between two 3D points
+   */
+  calculateDistance(point1, point2) {
+    const dx = point2.x - point1.x;
+    const dz = point2.z - point1.z;
+    return Math.sqrt(dx * dx + dz * dz);
+  }
+
+  /**
+   * Helper: Snap point to grid
+   */
+  snapToGrid(point, gridSize = 0.1) {
+    return {
+      x: Math.round(point.x / gridSize) * gridSize,
+      y: point.y,
+      z: Math.round(point.z / gridSize) * gridSize
+    };
+  }
+
+  /**
+   * Calculate wall thermal performance based on layer composition
+   * Professional building physics calculation
+   */
+  calculateWallThermalPerformance(wallTemplate) {
+    let totalRValue = 0;
+    let totalThickness = 0;
+    
+    for (const layer of wallTemplate.layers) {
+      const materialData = this.materialDatabase[layer.material];
+      if (materialData && layer.thickness > 0) {
+        // R-value = thickness / thermal conductivity
+        const layerRValue = layer.thickness / materialData.thermalConductivity;
+        totalRValue += layerRValue;
+        totalThickness += layer.thickness;
+      }
+    }
+    
+    // U-value = 1 / total R-value (thermal transmittance)
+    const uValue = totalRValue > 0 ? 1 / totalRValue : 0;
+    
+    return {
+      rValue: totalRValue,
+      uValue: uValue,
+      totalThickness: totalThickness,
+      thermalTransmittance: uValue
+    };
+  }
+
+  /**
+   * Get IFC properties for wall based on template
+   * Professional BIM compliance
+   */
+  getWallIFCProperties(wallTemplate, objectId) {
+    const thermalPerf = this.calculateWallThermalPerformance(wallTemplate);
+    
+    return {
+      // IFC Common Properties (Pset_WallCommon)
+      isExternal: wallTemplate.properties.isExternal,
+      loadBearing: wallTemplate.properties.loadBearing,
+      thermalTransmittance: thermalPerf.uValue,
+      fireRating: wallTemplate.properties.fireRating,
+      
+      // Additional BIM Properties
+      wallType: wallTemplate.name,
+      wallDescription: wallTemplate.description,
+      totalThickness: wallTemplate.totalThickness,
+      layerCount: wallTemplate.layers.length,
+      
+      // Thermal Properties
+      rValue: thermalPerf.rValue,
+      uValue: thermalPerf.uValue,
+      
+      // Construction Information
+      assemblyCode: this.getAssemblyCode(wallTemplate),
+      constructionType: this.getConstructionType(wallTemplate),
+      
+      // Sustainability
+      embodiedCarbon: this.calculateEmbodiedCarbon(wallTemplate),
+      recyclableContent: this.calculateRecyclableContent(wallTemplate)
+    };
+  }
+
+  /**
+   * Get construction assembly code for wall type
+   */
+  getAssemblyCode(wallTemplate) {
+    // MasterFormat-style assembly codes
+    const assemblyCodes = {
+      'exterior_wood_frame': '07 41 13.16',
+      'interior_partition': '09 29 00.00', 
+      'concrete_masonry': '04 22 00.00'
+    };
+    
+    return assemblyCodes[wallTemplate.name] || '00 00 00.00';
+  }
+
+  /**
+   * Determine construction type from layer composition
+   */
+  getConstructionType(wallTemplate) {
+    const hasWood = wallTemplate.layers.some(layer => layer.material === 'wood');
+    const hasConcrete = wallTemplate.layers.some(layer => layer.material === 'concrete');
+    const hasSteel = wallTemplate.layers.some(layer => layer.material === 'steel');
+    
+    if (hasWood) return 'wood_frame';
+    if (hasConcrete) return 'concrete';
+    if (hasSteel) return 'steel_frame';
+    return 'other';
+  }
+
+  /**
+   * Calculate embodied carbon for wall assembly
+   */
+  calculateEmbodiedCarbon(wallTemplate) {
+    // Simplified embodied carbon calculation (kg CO2e per m2)
+    const carbonFactors = {
+      concrete: 400,
+      brick: 240,
+      wood: 50,
+      steel: 2500,
+      drywall: 120,
+      insulation_batt: 45,
+      insulation_rigid: 150
+    };
+    
+    let totalCarbon = 0;
+    for (const layer of wallTemplate.layers) {
+      const factor = carbonFactors[layer.material] || 100;
+      const volume = layer.thickness; // per m2
+      totalCarbon += factor * volume;
+    }
+    
+    return totalCarbon;
+  }
+
+  /**
+   * Calculate recyclable content percentage
+   */
+  calculateRecyclableContent(wallTemplate) {
+    const recyclableFactors = {
+      concrete: 0.3,
+      brick: 0.95,
+      wood: 0.8,
+      steel: 0.9,
+      drywall: 0.25,
+      insulation_batt: 0.6,
+      insulation_rigid: 0.2
+    };
+    
+    let totalVolume = 0;
+    let recyclableVolume = 0;
+    
+    for (const layer of wallTemplate.layers) {
+      const factor = recyclableFactors[layer.material] || 0.1;
+      totalVolume += layer.thickness;
+      recyclableVolume += layer.thickness * factor;
+    }
+    
+    return totalVolume > 0 ? (recyclableVolume / totalVolume) * 100 : 0;
+  }
+
+  /**
+   * PROFESSIONAL WALL JOINERY SYSTEM
+   * Advanced corner cleanup algorithms matching professional CAD standards
+   */
+  applyProfessionalWallJoinery(options = {}) {
+    const settings = {
+      tolerance: options.tolerance || 0.1, // 10cm tolerance
+      joinType: options.joinType || 'auto', // auto, butt, miter, overlap
+      cleanupT: options.cleanupT || true, // T-junction cleanup
+      cleanupL: options.cleanupL || true, // L-corner cleanup  
+      cleanupX: options.cleanupX || true, // X-intersection cleanup
+      prioritizeStructural: options.prioritizeStructural || true,
+      maintainLayers: options.maintainLayers || true,
+      ...options
+    };
+
+    console.log('🏗️ PROFESSIONAL WALL JOINERY: Starting advanced corner cleanup');
+    
+    const walls = this.getWallsForJoinery();
+    const junctions = this.detectWallJunctions(walls, settings.tolerance);
+    
+    console.log(`📊 Found ${junctions.length} wall junctions to resolve`);
+    
+    let processedJunctions = 0;
+    
+    for (const junction of junctions) {
+      try {
+        const success = this.resolveWallJunction(junction, settings);
+        if (success) {
+          processedJunctions++;
+          console.log(`✅ Resolved ${junction.type} junction between ${junction.walls.length} walls`);
+        }
+      } catch (error) {
+        console.error(`❌ Failed to resolve junction:`, error);
+      }
+    }
+    
+    // Update all wall geometries after joinery
+    this.updateWallGeometriesAfterJoinery();
+    
+    console.log(`🎯 COMPLETED: ${processedJunctions}/${junctions.length} junctions resolved`);
+    
+    // Sync adjusted endpoints back to Architect3D system to fix 2D/3D mismatch
+    if (this.architect3DService && processedJunctions > 0) {
+      console.log('🔄 SYNC: Syncing adjusted wall endpoints back to Architect3D system...');
+      this.architect3DService.syncAdjustedEndpoints(this.objects);
+    }
+    
+    return processedJunctions;
+  }
+
+  /**
+   * Get walls suitable for joinery processing
+   */
+  getWallsForJoinery() {
+    return Array.from(this.objects.values())
+      .filter(obj => obj.type === 'wall')
+      .map(wall => ({
+        id: wall.id,
+        params: wall.params,
+        template: wall.params?.wallTemplate || this.wallTypeTemplates.exterior_wood_frame,
+        startPoint: wall.params?.startPoint,
+        endPoint: wall.params?.endPoint,
+        thickness: wall.params?.wallTemplate?.totalThickness || wall.params?.thickness || 0.2,
+        isStructural: wall.params?.wallTemplate?.properties?.loadBearing || false
+      }));
+  }
+
+  /**
+   * Detect wall junction types and intersection points
+   */
+  detectWallJunctions(walls, tolerance) {
+    const junctions = [];
+    
+    for (let i = 0; i < walls.length; i++) {
+      for (let j = i + 1; j < walls.length; j++) {
+        const wall1 = walls[i];
+        const wall2 = walls[j];
+        
+        const intersection = this.calculateWallIntersection(wall1, wall2, tolerance);
+        if (intersection) {
+          // Determine junction type
+          const junctionType = this.classifyJunctionType(intersection, wall1, wall2);
+          
+          junctions.push({
+            type: junctionType,
+            walls: [wall1, wall2],
+            intersection: intersection,
+            priority: this.calculateJunctionPriority(wall1, wall2, junctionType)
+          });
+        }
+      }
+    }
+    
+    // Sort by priority (structural walls first)
+    return junctions.sort((a, b) => b.priority - a.priority);
+  }
+
+  /**
+   * Calculate precise wall intersection point and relationship
+   */
+  calculateWallIntersection(wall1, wall2, tolerance) {
+    if (!wall1 || !wall2 || !wall1.startPoint || !wall1.endPoint || !wall2.startPoint || !wall2.endPoint) {
+      return null;
+    }
+    const line1 = this.getWallCenterline(wall1);
+    const line2 = this.getWallCenterline(wall2);
+    
+    // Calculate line intersection
+    const intersection = this.lineIntersection(line1, line2);
+    if (!intersection) return null;
+    
+    // Check if intersection is within tolerance of both walls
+    const onWall1 = this.pointOnLineSegment(intersection, line1, tolerance);
+    const onWall2 = this.pointOnLineSegment(intersection, line2, tolerance);
+    
+    if (onWall1 && onWall2) {
+      return {
+        point: intersection,
+        angle: this.calculateWallAngle(line1, line2),
+        distance1: this.distanceFromWallEnd(intersection, wall1),
+        distance2: this.distanceFromWallEnd(intersection, wall2),
+        onWall1: onWall1,
+        onWall2: onWall2
+      };
+    }
+    
+    return null;
+  }
+
+  /**
+   * Get wall centerline as line segment
+   */
+  getWallCenterline(wall) {
+    return {
+      start: wall.startPoint,
+      end: wall.endPoint,
+      vector: {
+        x: wall.endPoint.x - wall.startPoint.x,
+        y: wall.endPoint.y - wall.startPoint.y,
+        z: wall.endPoint.z - wall.startPoint.z
+      }
+    };
+  }
+
+  /**
+   * Calculate intersection of two lines
+   */
+  lineIntersection(line1, line2) {
+    const x1 = line1.start.x, y1 = line1.start.z;
+    const x2 = line1.end.x, y2 = line1.end.z;
+    const x3 = line2.start.x, y3 = line2.start.z;
+    const x4 = line2.end.x, y4 = line2.end.z;
+    
+    const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(denom) < 1e-6) return null; // Parallel lines
+    
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+    const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+    
+    return {
+      x: x1 + t * (x2 - x1),
+      y: 0, // Keep at ground level
+      z: y1 + t * (y2 - y1),
+      t: t, // Parameter for line1
+      u: u  // Parameter for line2
+    };
+  }
+
+  /**
+   * Helper: distance from intersection point to nearest end of wall (along centerline)
+   */
+  distanceFromWallEnd(point, wall) {
+    if (!wall || !wall.startPoint || !wall.endPoint) return Infinity;
+    const dx1 = point.x - wall.startPoint.x;
+    const dz1 = point.z - wall.startPoint.z;
+    const dx2 = point.x - wall.endPoint.x;
+    const dz2 = point.z - wall.endPoint.z;
+    const d1 = Math.sqrt(dx1 * dx1 + dz1 * dz1);
+    const d2 = Math.sqrt(dx2 * dx2 + dz2 * dz2);
+    return Math.min(d1, d2);
+  }
+
+  /**
+   * Calculate distance from point to line segment (from architect3d Utils)
+   */
+  pointToLineDistance(point, line) {
+    const lineStart = line.start;
+    const lineEnd = line.end;
+    
+    const A = point.x - lineStart.x;
+    const B = point.y - lineStart.y;
+    const C = lineEnd.x - lineStart.x;
+    const D = lineEnd.y - lineStart.y;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+
+    if (lenSq !== 0) {
+      param = dot / lenSq;
+    }
+
+    let xx, yy;
+
+    if (param < 0) {
+      xx = lineStart.x;
+      yy = lineStart.y;
+    } else if (param > 1) {
+      xx = lineEnd.x;
+      yy = lineEnd.y;
+    } else {
+      xx = lineStart.x + param * C;
+      yy = lineStart.y + param * D;
+    }
+
+    const dx = point.x - xx;
+    const dy = point.y - yy;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  /**
+   * Check if point lies on the line segment (not just the infinite line)
+   */
+  pointOnSegment(point, line, tolerance = 0.1) {
+    const lineStart = line.start;
+    const lineEnd = line.end;
+    
+    // Calculate dot product to determine if point is between start and end
+    const A = point.x - lineStart.x;
+    const B = point.y - lineStart.y;
+    const C = lineEnd.x - lineStart.x;
+    const D = lineEnd.y - lineStart.y;
+
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    
+    if (lenSq === 0) return false; // Zero length line
+    
+    const param = dot / lenSq;
+    
+    // Point is on segment if parameter is between 0 and 1 (with tolerance)
+    return param >= -tolerance && param <= (1 + tolerance);
+  }
+
+  /**
+   * Check if point is on line segment within tolerance
+   */
+  pointOnLineSegment(point, line, tolerance) {
+    const distance = this.pointToLineDistance(point, line);
+    const onSegment = this.pointOnSegment(point, line, tolerance);
+    
+    return distance <= tolerance && onSegment;
+  }
+
+  /**
+   * Calculate angle between two wall lines
+   */
+  calculateWallAngle(line1, line2) {
+    const dot = line1.vector.x * line2.vector.x + line1.vector.z * line2.vector.z;
+    const mag1 = Math.sqrt(line1.vector.x ** 2 + line1.vector.z ** 2);
+    const mag2 = Math.sqrt(line2.vector.x ** 2 + line2.vector.z ** 2);
+    
+    return Math.acos(Math.max(-1, Math.min(1, dot / (mag1 * mag2))));
+  }
+
+  /**
+   * Classify junction type based on geometry
+   */
+  classifyJunctionType(intersection, wall1, wall2) {
+    const angle = intersection.angle;
+    const angleDegrees = angle * 180 / Math.PI;
+    
+    // Check if intersection is at wall endpoints (L-corner vs T-junction)
+    const atWall1End = intersection.distance1 < 0.05 || intersection.distance1 > (wall1.params?.length || 4) - 0.05;
+    const atWall2End = intersection.distance2 < 0.05 || intersection.distance2 > (wall2.params?.length || 4) - 0.05;
+    
+    if (atWall1End && atWall2End) {
+      if (Math.abs(angleDegrees - 90) < 5) return 'L_CORNER_90';
+      if (Math.abs(angleDegrees - 180) < 5) return 'STRAIGHT_JOIN';
+      return 'L_CORNER_ANGLED';
+    } else if (atWall1End || atWall2End) {
+      return 'T_JUNCTION';
+    } else {
+      return 'X_INTERSECTION';
+    }
+  }
+
+  /**
+   * Calculate junction processing priority
+   */
+  calculateJunctionPriority(wall1, wall2, junctionType) {
+    let priority = 0;
+    
+    // Structural walls get higher priority
+    if (wall1.isStructural) priority += 10;
+    if (wall2.isStructural) priority += 10;
+    
+    // Corner junctions are higher priority than T-junctions
+    if (junctionType.includes('L_CORNER')) priority += 5;
+    else if (junctionType === 'T_JUNCTION') priority += 3;
+    
+    return priority;
+  }
+
+  /**
+   * Resolve wall junction based on type and settings
+   */
+  resolveWallJunction(junction, settings) {
+    switch (junction.type) {
+      case 'L_CORNER_90':
+        return this.resolveRightAngleCorner(junction, settings);
+      case 'L_CORNER_ANGLED':
+        return this.resolveAngledCorner ? this.resolveAngledCorner(junction, settings) : this.resolveRightAngleCorner(junction, settings);
+      case 'T_JUNCTION':
+        return this.resolveTJunction(junction, settings);
+      case 'X_INTERSECTION':
+        return this.resolveXIntersection(junction, settings);
+      case 'STRAIGHT_JOIN':
+        return this.resolveStraightJoin(junction, settings);
+      default:
+        console.warn(`Unknown junction type: ${junction.type}`);
+        return false;
+    }
+  }
+
+  /**
+   * Resolve 90-degree corner junction
+   */
+  resolveRightAngleCorner(junction, settings) {
+    const [wall1, wall2] = junction.walls;
+    const intersection = junction.intersection;
+    
+    // Determine which wall should be continuous (usually structural)
+    const continuousWall = wall1.isStructural ? wall1 : wall2;
+    const terminatingWall = continuousWall === wall1 ? wall2 : wall1;
+    
+    // Calculate corner cleanup geometry
+    const cleanup = this.calculateCornerCleanup(continuousWall, terminatingWall, intersection, 'L_90');
+    
+    // Apply geometry adjustments
+    this.applyWallAdjustments(continuousWall.id, cleanup.continuousAdjustment);
+    this.applyWallAdjustments(terminatingWall.id, cleanup.terminatingAdjustment);
+    
+    return true;
+  }
+
+  /**
+   * Calculate precise corner cleanup geometry
+   */
+  calculateCornerCleanup(wall1, wall2, intersection, cornerType) {
+    // This would contain complex geometry calculations for different corner types
+    // For now, return basic adjustments
+    return {
+      continuousAdjustment: {
+        startAdjustment: 0,
+        endAdjustment: 0
+      },
+      terminatingAdjustment: {
+        startAdjustment: 0,
+        endAdjustment: wall2.thickness / 2
+      }
+    };
+  }
+
+  /**
+   * Apply calculated adjustments to wall geometry
+   */
+  applyWallAdjustments(wallId, adjustments) {
+    const wall = this.objects.get(wallId);
+    if (wall && wall.params) {
+      wall.params.startAdjustment = adjustments.startAdjustment;
+      wall.params.endAdjustment = adjustments.endAdjustment;
+      wall.params.adjustForJoinery = true;
+      
+      // Trigger geometry regeneration
+      this.regenerateWallGeometry(wallId);
+    }
+  }
+
+  /**
+   * Update all wall geometries after joinery processing
+   */
+  updateWallGeometriesAfterJoinery() {
+    const walls = Array.from(this.objects.values()).filter(obj => obj.type === 'wall');
+    
+    for (const wall of walls) {
+      if (wall.params?.adjustForJoinery) {
+        this.regenerateWallGeometry(wall.id);
+      }
+    }
+    
+    // Emit update event
+    this.emit('wallJoineryComplete');
+  }
+
+  /**
+   * Regenerate wall geometry with current parameters
+   */
+  regenerateWallGeometry(wallId) {
+    const wall = this.objects.get(wallId);
+    if (!wall) return;
+    
+    try {
+      // Recreate geometry with joinery adjustments
+      const newGeometry = this.createWallGeometry(wall.params);
+      
+      // Update the stored geometry
+      wall.geometry = newGeometry.geometry;
+      wall.mesh3D = newGeometry.mesh3D;
+      wall.mesh2D = newGeometry.mesh2D;
+      
+      // Update userdata
+      wall.mesh3D.userData.objectId = wallId;
+      wall.mesh2D.userData.objectId = wallId;
+      
+    } catch (error) {
+      console.error(`Failed to regenerate wall ${wallId}:`, error);
+    }
   }
 
   /**
@@ -1236,6 +4427,9 @@ class StandaloneCADEngine {
    * Calculate the angle between two walls at their connection point
    */
   calculateWallAngle(wall1, wall2, connection) {
+    if (!connection || !connection.w1Point || !connection.w2Point) {
+      return 0;
+    }
     const w1Params = wall1.params;
     const w2Params = wall2.params;
     
@@ -1319,8 +4513,8 @@ class StandaloneCADEngine {
     try {
       // Default enhanced settings
       const settings = joinerySettings || {
-        tolerance: 0.25,        // 25cm tolerance for much easier connections (increased due to user frustration)
-        cornerStyle: 'butt',    // butt, miter, overlap
+        tolerance: 0.5,         // 50cm tolerance for much easier connections (increased for better detection)
+        cornerStyle: 'overlap', // CHANGED: Use overlap instead of butt for better joining
         tightCorners: false,    // Disabled for easier connections
         autoExtend: true        // Auto-extend walls to meet corners
       };
@@ -1349,22 +4543,12 @@ class StandaloneCADEngine {
     
       console.log(`🔗 SUCCESS: Found ${intersections.length} wall intersections`);
     
-    // Group intersections by position to handle multiple walls meeting at one point
-    const intersectionGroups = this.groupIntersectionsByPosition(intersections);
-    
-    intersectionGroups.forEach((group, groupIndex) => {
-        console.log(`🏗️ PROCESSING: Intersection group ${groupIndex + 1} with ${group.length} walls`);
-      
-      if (group.length === 2) {
-        // Two walls meeting - create proper corner joint
-          console.log(`🔨 CORNER: Creating corner joint for group ${groupIndex + 1}`);
-          this.createCornerJoint(group[0], settings);
-      } else if (group.length > 2) {
-        // Multiple walls meeting - create T-junction or cross
-          console.log(`🔧 MULTI: Creating multi-wall joint for group ${groupIndex + 1}`);
-          this.createMultiWallJoint(group, settings);
-        }
-      });
+    // FIXED: Process each intersection individually (each intersection = 2 walls meeting)
+    intersections.forEach((intersection, index) => {
+      console.log(`🏗️ PROCESSING: Intersection ${index + 1} between walls ${intersection.wall1} and ${intersection.wall2}`);
+      console.log(`🔨 CORNER: Creating ${intersection.jointType} joint at ${(intersection.angle * 180 / Math.PI).toFixed(1)}°`);
+      this.createCornerJoint(intersection, settings);
+    });
       
       console.log(`✅ SUCCESS: Applied enhanced wall joinery to ${intersections.length} intersections`);
       console.log(`🕒 Joinery completed at: ${new Date().toISOString()}`);
@@ -1507,6 +4691,7 @@ class StandaloneCADEngine {
 
   /**
    * Create butt joint - one wall runs through, other butts against it
+   * FIXED: Proper corner joining without gaps
    */
   createButtJoint(wall1Obj, wall2Obj, connection, thickness) {
     // Determine which wall should run through (usually the longer one)
@@ -1529,14 +4714,16 @@ class StandaloneCADEngine {
     
     console.log(`🔧 Butt joint: ${throughWall.id} runs through, ${buttWall.id} butts against it`);
     
-    // Get the actual thickness of the through wall
+    // Get the actual thickness of both walls
     const throughWallThickness = throughWall.params.thickness || throughWall.params.width || 0.2;
+    const buttWallThickness = buttWall.params.thickness || buttWall.params.width || 0.2;
     
-    // The butt wall is shortened by half the through wall's thickness
-    // This creates a proper architectural butt joint where walls meet at their centerlines
-    const adjustment = throughWallThickness / 2;
+    // FIXED: For proper corner joining, extend the butt wall slightly INTO the through wall
+    // This ensures no gap at the corner by creating a small overlap
+    const overlap = 0.001; // 1mm overlap to eliminate visual gaps
+    const adjustment = -(throughWallThickness / 2 + overlap); // Negative means extend (don't shorten)
     
-    console.log(`🔧 Using through wall thickness: ${throughWallThickness}m, adjustment: ${adjustment}m`);
+    console.log(`🔧 FIXED BUTT JOINT: Through wall thickness: ${throughWallThickness}m, extending butt wall by: ${Math.abs(adjustment)}m`);
     
     let startAdj = 0, endAdj = 0;
     if (buttConnection === 'start') {
@@ -1545,8 +4732,8 @@ class StandaloneCADEngine {
       endAdj = adjustment;
     }
     
-    // Rebuild the butt wall with adjustment
-    console.log(`🔧 BUTT JOINT: Applying adjustments to wall ${buttWall.id}:`, { startAdj, endAdj });
+    // Rebuild the butt wall with adjustment (negative adjustment = extension)
+    console.log(`🔧 BUTT JOINT: Applying extension to wall ${buttWall.id}:`, { startAdj, endAdj });
     this.rebuildWallWithAdjustments(buttWall.id, startAdj, endAdj);
   }
 
@@ -1593,9 +4780,10 @@ class StandaloneCADEngine {
 
   /**
    * Create overlap joint - one wall extends past the other
+   * ENHANCED: More aggressive overlap to eliminate gaps
    */
   createOverlapJoint(wall1Obj, wall2Obj, connection, thickness) {
-    console.log(`🔧 Creating overlap joint between ${wall1Obj.id} and ${wall2Obj.id}`);
+    console.log(`🔧 Creating ENHANCED overlap joint between ${wall1Obj.id} and ${wall2Obj.id}`);
     
     // Determine which wall should extend (usually the longer one)
     const wall1Length = this.calculateWallLength(wall1Obj);
@@ -1615,13 +4803,17 @@ class StandaloneCADEngine {
       shortenedConnection = connection.w1Point;
     }
     
-    console.log(`🔧 Overlap joint: ${extendingWall.id} extends, ${shortenedWall.id} is shortened`);
+    console.log(`🔧 ENHANCED Overlap joint: ${extendingWall.id} extends, ${shortenedWall.id} is extended into it`);
     
-    // The shortened wall is reduced by the full thickness of the extending wall
+    // ENHANCED: Instead of shortening one wall, extend both walls to ensure complete overlap
     const extendingWallThickness = extendingWall.params.thickness || extendingWall.params.width || 0.2;
-    const adjustment = extendingWallThickness;
+    const shortenedWallThickness = shortenedWall.params.thickness || shortenedWall.params.width || 0.2;
     
-    console.log(`🔧 Using extending wall thickness: ${extendingWallThickness}m, adjustment: ${adjustment}m`);
+    // Extend the "shortened" wall into the extending wall by the full thickness plus overlap
+    const overlap = 0.005; // 5mm overlap for complete joining
+    const adjustment = -(extendingWallThickness + overlap); // Negative = extend
+    
+    console.log(`🔧 ENHANCED: Extending wall ${shortenedWall.id} by ${Math.abs(adjustment)}m into wall ${extendingWall.id}`);
     
     let startAdj = 0, endAdj = 0;
     if (shortenedConnection === 'start') {
@@ -1630,8 +4822,8 @@ class StandaloneCADEngine {
       endAdj = adjustment;
     }
     
-    // Rebuild the shortened wall with adjustment
-    console.log(`🔧 OVERLAP JOINT: Applying adjustments to wall ${shortenedWall.id}:`, { startAdj, endAdj });
+    // Rebuild the wall with extension (negative adjustment)
+    console.log(`🔧 ENHANCED OVERLAP: Applying extension to wall ${shortenedWall.id}:`, { startAdj, endAdj });
     this.rebuildWallWithAdjustments(shortenedWall.id, startAdj, endAdj);
   }
 
@@ -2109,6 +5301,10 @@ class StandaloneCADEngine {
   /**
    * Create door geometry and meshes
    */
+  /**
+   * PROFESSIONAL DOOR SYSTEM with advanced wall integration
+   * Automatic frame generation, wall opening creation, and IFC compliance
+   */
   createDoorGeometry(params) {
     const { 
       width = 0.9, 
@@ -2116,17 +5312,36 @@ class StandaloneCADEngine {
       thickness = 0.05, 
       material = 'wood',
       frameWidth = 0.05,
+      frameMaterial = 'wood',
+      frameDepth = null, // Auto-calculate from wall thickness
       openingDirection = 'right',
       startPoint = null,
       endPoint = null,
       hostWallId = null,
       insertionPosition = 0.5,
-      insertionMode = 'create_standalone'
+      insertionMode = 'create_standalone',
+      // PROFESSIONAL PARAMETERS
+      doorType = 'single_swing', // single_swing, double_swing, sliding, bi_fold
+      frameType = 'standard', // standard, cased, reveal
+      sillHeight = 0.0, // Height above floor
+      headHeight = null, // Auto-calculate or specify
+      jamb = { width: 0.04, depth: null }, // Jamb dimensions
+      sill = { height: 0.02, overhang: 0.01 }, // Sill details
+      head = { height: 0.05, overhang: 0.01 }, // Head details
+      hardware = 'lever', // lever, knob, push_pull
+      fireRating = 0, // Fire rating in minutes
+      accessibility = false, // ADA compliance features
+      glazing = null, // Glass panels configuration
+      // IFC PROPERTIES
+      ifcProperties = {}
     } = params;
     
     // Calculate position
     let centerPosition = { x: 0, y: height / 2, z: 0 };
     let wallOrientation = 0;
+    
+    // PROFESSIONAL WALL INTEGRATION SYSTEM
+    let hostWallData = null;
     
     if (insertionMode === 'insert_in_wall' && hostWallId) {
       // Find the host wall
@@ -2136,14 +5351,17 @@ class StandaloneCADEngine {
         return this.createDoorGeometry({ ...params, insertionMode: 'create_standalone' });
       }
       
-      // Calculate position along the wall
+      // Extract wall template and properties
+      const wallTemplate = hostWall.params?.wallTemplate || this.wallTypeTemplates.exterior_wood_frame;
+      const wallThickness = wallTemplate.totalThickness || hostWall.params?.thickness || 0.2;
       const wallLength = hostWall.params.length || 3.0;
-      const wallThickness = hostWall.params.thickness || 0.2;
       
-      // Calculate insertion position along wall
+      // Auto-calculate frame depth from wall thickness
+      const calculatedFrameDepth = frameDepth || wallThickness;
+      const calculatedHeadHeight = headHeight || (height + head.height);
+      
+      // Calculate door position within wall
       const distanceFromStart = insertionPosition * wallLength;
-      
-      // Get wall position and rotation
       const wallPos = hostWall.mesh3D.position;
       const wallRotation = hostWall.mesh3D.rotation.y || 0;
       wallOrientation = wallRotation;
@@ -2154,71 +5372,58 @@ class StandaloneCADEngine {
       
       centerPosition = {
         x: wallPos.x + (distanceFromStart - wallLength / 2) * cosRotation,
-        y: height / 2,
+        y: (height / 2) + sillHeight,
         z: wallPos.z + (distanceFromStart - wallLength / 2) * sinRotation
       };
       
-      console.log(`🚪 Door positioned in wall ${hostWallId} at position ${insertionPosition} (${distanceFromStart.toFixed(1)}m from start)`);
+      // Store wall data for frame generation
+      hostWallData = {
+        id: hostWallId,
+        wall: hostWall,
+        template: wallTemplate,
+        thickness: wallThickness,
+        layers: wallTemplate.layers,
+        rotation: wallRotation,
+        insertionPosition: distanceFromStart
+      };
       
-      // Create wall opening
-      this.createWallOpening(hostWallId, {
+      console.log(`🚪 PROFESSIONAL DOOR: Inserting ${doorType} door in ${wallTemplate.name} wall`);
+      console.log(`📐 Frame depth: ${calculatedFrameDepth.toFixed(3)}m, Wall thickness: ${wallThickness.toFixed(3)}m`);
+      
+      // Create intelligent wall opening with layer awareness
+      this.createProfessionalWallOpening(hostWallId, {
         type: 'door',
-        width: width,
-        height: height,
+        width: width + (frameWidth * 2), // Include frame width
+        height: calculatedHeadHeight,
         position: distanceFromStart,
-        offset: 0 // Doors typically start at floor level
+        offset: sillHeight,
+        frameDepth: calculatedFrameDepth,
+        preserveLayers: true
       });
       
     } else if (startPoint && endPoint) {
       centerPosition = {
         x: (startPoint.x + endPoint.x) / 2,
-        y: height / 2,
+        y: (height / 2) + sillHeight,
         z: (startPoint.z + endPoint.z) / 2
       };
     }
     
-    // Create professional door geometry with proper frame and panels
-    const doorGroup = new THREE.Group();
+    // PROFESSIONAL DOOR ASSEMBLY CREATION
+    const doorAssembly = this.createProfessionalDoorAssembly({
+      width, height, thickness, material, frameMaterial,
+      frameDepth: hostWallData?.thickness || frameWidth,
+      doorType, frameType, openingDirection,
+      jamb, sill, head, hardware, glazing,
+      hostWallData
+    });
     
-    // Get materials
-    const doorMat = this.materials[material] || this.materials.wood;
-    const frameMat = this.materials.wood ? this.materials.wood.clone() : doorMat.clone();
-    frameMat.color = frameMat.color.clone().multiplyScalar(0.7); // Darker for frame
+    const doorGroup = doorAssembly.group;
     
-    // Professional door frame (jamb) - full size
-    const frameDepth = Math.max(frameWidth, 0.05); // Minimum 5cm frame
-    const jamberGeometry = new THREE.BoxGeometry(width + frameDepth * 2, height + frameDepth, frameDepth);
-    const jamber = new THREE.Mesh(jamberGeometry, frameMat.clone());
-    jamber.position.set(0, 0, -frameDepth/2);
-    doorGroup.add(jamber);
-    
-    // Door panel (main door surface) - recessed into frame
-    const panelGeometry = new THREE.BoxGeometry(width - 0.01, height - 0.01, thickness);
-    const doorPanel = new THREE.Mesh(panelGeometry, doorMat.clone());
-    doorPanel.position.set(0, 0, thickness/2 - frameDepth/2);
-    doorGroup.add(doorPanel);
-    
-    // Door panels (classic 6-panel door style for wood)
-    if (material === 'wood') {
-      const panelInset = 0.005; // 5mm inset
-      const panelThickness = thickness * 0.3;
-      
-      // Create 6 traditional door panels
-      const panelConfigs = [
-        { x: -width/4, y: height/3, w: width/2.5, h: height/4 },
-        { x: width/4, y: height/3, w: width/2.5, h: height/4 },
-        { x: -width/4, y: 0, w: width/2.5, h: height/4 },
-        { x: width/4, y: 0, w: width/2.5, h: height/4 },
-        { x: -width/4, y: -height/3, w: width/2.5, h: height/4 },
-        { x: width/4, y: -height/3, w: width/2.5, h: height/4 }
-      ];
-      
-      panelConfigs.forEach(config => {
-        const smallPanelGeom = new THREE.BoxGeometry(config.w, config.h, panelThickness);
-        const smallPanel = new THREE.Mesh(smallPanelGeom, doorMat.clone());
-        smallPanel.position.set(config.x, config.y, thickness/2 - frameDepth/2 + panelInset);
-        doorGroup.add(smallPanel);
-      });
+    // Position the door assembly
+    doorGroup.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
+    if (wallOrientation !== 0) {
+      doorGroup.rotation.y = wallOrientation;
     }
     
     // Professional door handle assembly
@@ -2262,6 +5467,10 @@ class StandaloneCADEngine {
     
     // Create professional 2D representation with swing arc
     const door2DGroup = new THREE.Group();
+    
+    // Get materials for 2D representation
+    const doorMat = this.materials[material] || this.materials.wood;
+    const frameMat = this.materials[frameMaterial] || this.materials.wood;
     
     // Door panel in 2D
     const doorPanelGeometry2D = new THREE.PlaneGeometry(width, thickness);
@@ -2333,14 +5542,15 @@ class StandaloneCADEngine {
     }
     
     return {
-      geometry: panelGeometry, // Use panel geometry for reference
+      geometry: doorPanelGeometry2D, // Use door geometry for reference
       mesh3D: mesh3D,
       mesh2D: mesh2D
     };
   }
 
   /**
-   * Create window geometry and meshes
+   * PROFESSIONAL WINDOW SYSTEM
+   * Complete window assembly with frame, glazing, hardware, and thermal properties
    */
   createWindowGeometry(params) {
     const { 
@@ -2350,6 +5560,9 @@ class StandaloneCADEngine {
       material = 'aluminum',
       frameWidth = 0.05,
       glazingLayers = 2,
+      windowType = 'casement',
+      openable = true,
+      thermalTransmittance = 2.5,
       startPoint = null,
       endPoint = null,
       hostWallId = null,
@@ -2358,23 +5571,28 @@ class StandaloneCADEngine {
       sillHeight = 0.9
     } = params;
     
-    // Calculate position
+    console.log(`🪟 Creating professional window system: ${windowType} window (${width}m x ${height}m)`);
+    
+    // Calculate position and wall integration
     let centerPosition = { x: 0, y: height / 2 + sillHeight, z: 0 }; 
     let wallOrientation = 0;
+    let hostWallData = null;
     
     if (insertionMode === 'insert_in_wall' && hostWallId) {
-      // Find the host wall
       const hostWall = this.objects.get(hostWallId);
       if (!hostWall) {
         console.warn(`Host wall ${hostWallId} not found for window insertion`);
         return this.createWindowGeometry({ ...params, insertionMode: 'create_standalone' });
       }
       
-      // Calculate position along the wall
-      const wallLength = hostWall.params.length || 3.0;
-      const wallThickness = hostWall.params.thickness || 0.2;
+      // Extract wall data for integration
+      hostWallData = {
+        thickness: this.getTotalWallThickness(hostWall.params.layers || [{ thickness: hostWall.params.thickness || 0.2 }]),
+        layers: hostWall.params.layers || [{ material: hostWall.params.material || 'concrete', thickness: hostWall.params.thickness || 0.2 }],
+        material: hostWall.params.material || 'concrete'
+      };
       
-      // Calculate insertion position along wall
+      const wallLength = hostWall.params.length || 3.0;
       const distanceFromStart = insertionPosition * wallLength;
       
       // Get wall position and rotation
@@ -2392,15 +5610,17 @@ class StandaloneCADEngine {
         z: wallPos.z + (distanceFromStart - wallLength / 2) * sinRotation
       };
       
-      console.log(`🪟 Window positioned in wall ${hostWallId} at position ${insertionPosition} (${distanceFromStart.toFixed(1)}m from start)`);
+      console.log(`🪟 Window positioned in wall ${hostWallId} at ${distanceFromStart.toFixed(1)}m from start`);
       
-      // Create wall opening
+      // Create wall opening with frame consideration
       this.createWallOpening(hostWallId, {
         type: 'window',
         width: width,
         height: height,
         position: distanceFromStart,
-        offset: sillHeight // Windows have a sill height offset
+        offset: sillHeight,
+        frameDepth: frameWidth,
+        preserveLayers: true
       });
       
     } else if (startPoint && endPoint) {
@@ -2411,109 +5631,448 @@ class StandaloneCADEngine {
       };
     }
     
-    // Create window frame geometry
-    const frameGeometry = new THREE.BoxGeometry(width, height, thickness);
+    // PROFESSIONAL WINDOW ASSEMBLY CREATION
+    const windowAssembly = this.createProfessionalWindowAssembly({
+      width, height, thickness, material,
+      frameWidth: hostWallData?.thickness || frameWidth,
+      windowType, glazingLayers, openable, thermalTransmittance,
+      sillHeight,
+      frameType: 'standard',
+      glazing: { 
+        type: 'clear', 
+        layers: glazingLayers,
+        thermalTransmittance,
+        lightTransmission: 0.8 
+      },
+      hardware: { 
+        handles: openable, 
+        locks: openable && windowType !== 'fixed',
+        hinges: windowType === 'casement' || windowType === 'awning' 
+      },
+      sill: { 
+        height: 0.05, 
+        overhang: 0.02, 
+        material: 'concrete' 
+      },
+      hostWallData
+    });
     
-    // Get material
-    const mat = this.materials[material] || this.materials.aluminum;
+    const windowGroup = windowAssembly.group;
     
-    // Create 3D mesh
-    const mesh3D = new THREE.Mesh(frameGeometry, mat.clone());
-    mesh3D.userData = { objectId: null, type: 'window' };
-    mesh3D.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
+    // Position the window assembly
+    windowGroup.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
+    if (wallOrientation !== 0) {
+      windowGroup.rotation.y = wallOrientation;
+    }
+    
+    // Use the window group as the main mesh
+    const mesh3D = windowGroup;
     
     // Apply wall orientation if inserted in wall
     if (insertionMode === 'insert_in_wall' && hostWallId) {
       mesh3D.rotation.y = wallOrientation;
     }
     
-    // Create 2D representation (top-down view)
-    const geometry2D = new THREE.PlaneGeometry(width, thickness);
-    const material2D = new THREE.MeshBasicMaterial({ 
-      color: mat.color, 
+    // Create professional 2D representation
+    const window2DGroup = new THREE.Group();
+    
+    // Get materials for 2D representation
+    const windowMat = this.materials[material] || this.materials.aluminum;
+    
+    // Window frame in 2D
+    const frameGeometry2D = new THREE.PlaneGeometry(width, frameWidth * 2);
+    const frameMaterial2D = new THREE.MeshBasicMaterial({ 
+      color: windowMat.color, 
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.6
+      opacity: 0.8
     });
-    const mesh2D = new THREE.Mesh(geometry2D, material2D);
+    const frame2D = new THREE.Mesh(frameGeometry2D, frameMaterial2D);
+    frame2D.rotation.x = -Math.PI / 2;
+    window2DGroup.add(frame2D);
+    
+    // Glazing area in 2D (lighter color)
+    const glazingGeometry2D = new THREE.PlaneGeometry(width - frameWidth * 2, frameWidth);
+    const glazingMaterial2D = new THREE.MeshBasicMaterial({
+      color: 0x87CEEB, // Light blue for glazing
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.4
+    });
+    const glazing2D = new THREE.Mesh(glazingGeometry2D, glazingMaterial2D);
+    glazing2D.rotation.x = -Math.PI / 2;
+    glazing2D.position.y = 0.001; // Slightly above frame
+    window2DGroup.add(glazing2D);
+    
+    // Window opening indication in 2D
+    if (openable && windowType !== 'fixed') {
+      const openingIndicator = this.createWindowOpeningIndicator2D(windowType, width, height);
+      if (openingIndicator) {
+        window2DGroup.add(openingIndicator);
+      }
+    }
+    
+    // Set up 2D group
+    const mesh2D = window2DGroup;
     mesh2D.userData = { objectId: null, type: 'window' };
     mesh2D.position.set(centerPosition.x, 0, centerPosition.z);
     
     // Apply wall orientation to 2D representation as well
     if (insertionMode === 'insert_in_wall' && hostWallId) {
-      mesh2D.rotation.z = wallOrientation;
+      mesh2D.rotation.y = wallOrientation;
     }
     
     return {
-      geometry: frameGeometry,
+      geometry: frameGeometry2D, // Use frame geometry for reference
       mesh3D: mesh3D,
       mesh2D: mesh2D
     };
   }
 
   /**
-   * Create column geometry and meshes
+   * PROFESSIONAL WINDOW ASSEMBLY CREATION
+   * Complete window system with frame, glazing, hardware, and thermal integration
    */
-  createColumnGeometry(params) {
-    const { 
-      width = 0.4, 
-      depth = 0.4, 
-      height = 3.0, 
-      material = 'concrete',
-      shape = 'rectangular', // 'rectangular', 'circular'
-      startPoint = null,
-      endPoint = null
-    } = params;
+  createProfessionalWindowAssembly(config) {
+    const {
+      width, height, thickness, material, frameWidth,
+      windowType, glazingLayers, openable, thermalTransmittance,
+      sillHeight, frameType, glazing, hardware, sill, hostWallData
+    } = config;
     
-    // Calculate position
-    let centerPosition = { x: 0, y: height / 2, z: 0 };
+    const windowGroup = new THREE.Group();
     
-    if (startPoint && endPoint) {
-      centerPosition = {
-        x: (startPoint.x + endPoint.x) / 2,
-        y: height / 2,
-        z: (startPoint.z + endPoint.z) / 2
-      };
-    }
+    console.log(`🏗️ Creating professional ${windowType} window assembly: ${width}m x ${height}m`);
     
-    let geometry;
+    // Get materials
+    const frameMaterial = this.materials[material] || this.materials.aluminum;
+    const glassMaterial = this.materials.glass || this.materials.aluminum;
     
-    if (shape === 'circular') {
-      // Circular column
-      const radius = Math.min(width, depth) / 2;
-      geometry = new THREE.CylinderGeometry(radius, radius, height, 16);
-    } else {
-      // Rectangular column (default)
-      geometry = new THREE.BoxGeometry(width, height, depth);
-    }
-    
-    // Get material
-    const mat = this.materials[material] || this.materials.concrete;
-    
-    // Create 3D mesh
-    const mesh3D = new THREE.Mesh(geometry, mat.clone());
-    mesh3D.userData = { objectId: null, type: 'column' };
-    mesh3D.position.set(centerPosition.x, centerPosition.y, centerPosition.z);
-    
-    // Create 2D representation (top-down view)
-    const geometry2D = shape === 'circular' 
-      ? new THREE.CircleGeometry(Math.min(width, depth) / 2, 16)
-      : new THREE.PlaneGeometry(width, depth);
-    const material2D = new THREE.MeshBasicMaterial({ 
-      color: mat.color, 
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.8
+    // 1. Create professional window frame
+    const frame = this.createWindowFrame({
+      width, height, frameWidth, material: frameMaterial,
+      frameType, hostWallData
     });
-    const mesh2D = new THREE.Mesh(geometry2D, material2D);
-    mesh2D.userData = { objectId: null, type: 'column' };
-    mesh2D.position.set(centerPosition.x, 0, centerPosition.z);
+    windowGroup.add(frame);
+    
+    // 2. Create glazing system
+    const glazingSystem = this.createWindowGlazing({
+      width: width - frameWidth * 2,
+      height: height - frameWidth * 2,
+      layers: glazingLayers,
+      material: glassMaterial,
+      glazing, thermalTransmittance
+    });
+    windowGroup.add(glazingSystem);
+    
+    // 3. Create window sill
+    if (sill && sill.height > 0) {
+      const windowSill = this.createWindowSill({
+        width: width + sill.overhang * 2,
+        height: sill.height,
+        depth: (hostWallData?.thickness || frameWidth) + sill.overhang,
+        material: sill.material || 'concrete'
+      });
+      windowSill.position.set(0, -height/2 - sill.height/2, sill.overhang/2);
+      windowGroup.add(windowSill);
+    }
+    
+    // 4. Create window hardware (handles, hinges)
+    if (openable && hardware) {
+      const windowHardware = this.createWindowHardware({
+        windowType, width, height, hardware
+      });
+      if (windowHardware) {
+        windowGroup.add(windowHardware);
+      }
+    }
+    
+    // 5. Create opening panels for operable windows
+    if (openable && windowType !== 'fixed') {
+      const panels = this.createWindowPanels({
+        width, height, thickness, windowType,
+        material: frameMaterial, glazing
+      });
+      if (panels) {
+        windowGroup.add(panels);
+      }
+    }
     
     return {
-      geometry: geometry,
-      mesh3D: mesh3D,
-      mesh2D: mesh2D
+      group: windowGroup,
+      thermalTransmittance,
+      glazingLayers,
+      openable
     };
+  }
+
+  /**
+   * Create professional window frame with proper construction details
+   */
+  createWindowFrame(config) {
+    const { width, height, frameWidth, material, frameType, hostWallData } = config;
+    const frameGroup = new THREE.Group();
+    
+    // Calculate frame depth based on wall thickness
+    const frameDepth = hostWallData?.thickness || frameWidth;
+    
+    console.log(`🖼️ Creating window frame: ${width}m x ${height}m, depth: ${frameDepth.toFixed(2)}m`);
+    
+    // Frame components (jambs, head, sill)
+    const frameComponents = [
+      // Left jamb
+      {
+        width: frameWidth,
+        height: height,
+        depth: frameDepth,
+        position: { x: -(width/2 + frameWidth/2), y: 0, z: 0 }
+      },
+      // Right jamb
+      {
+        width: frameWidth,
+        height: height,
+        depth: frameDepth,
+        position: { x: width/2 + frameWidth/2, y: 0, z: 0 }
+      },
+      // Head (top)
+      {
+        width: width + (frameWidth * 2),
+        height: frameWidth,
+        depth: frameDepth,
+        position: { x: 0, y: height/2 + frameWidth/2, z: 0 }
+      },
+      // Bottom frame (for some window types)
+      {
+        width: width + (frameWidth * 2),
+        height: frameWidth,
+        depth: frameDepth,
+        position: { x: 0, y: -(height/2 + frameWidth/2), z: 0 }
+      }
+    ];
+    
+    // Create frame meshes
+    frameComponents.forEach(component => {
+      const frameGeometry = new THREE.BoxGeometry(
+        component.width,
+        component.height,
+        component.depth
+      );
+      
+      const frameMesh = new THREE.Mesh(frameGeometry, material.clone());
+      frameMesh.position.set(
+        component.position.x,
+        component.position.y,
+        component.position.z
+      );
+      
+      frameGroup.add(frameMesh);
+    });
+    
+    return frameGroup;
+  }
+
+  /**
+   * Create window glazing system with multiple layers
+   */
+  createWindowGlazing(config) {
+    const { width, height, layers, material, glazing, thermalTransmittance } = config;
+    const glazingGroup = new THREE.Group();
+    
+    console.log(`🪟 Creating ${layers}-layer glazing system: ${width.toFixed(2)}m x ${height.toFixed(2)}m`);
+    
+    const glassThickness = 0.004; // 4mm glass
+    const airGap = layers > 1 ? 0.016 : 0; // 16mm air gap for multi-layer
+    const totalDepth = (glassThickness * layers) + (airGap * (layers - 1));
+    
+    // Create glass layers
+    for (let i = 0; i < layers; i++) {
+      const glassGeometry = new THREE.BoxGeometry(width, height, glassThickness);
+      
+      // Create glass material with appropriate transparency
+      const glassMat = new THREE.MeshPhysicalMaterial({
+        color: glazing.type === 'clear' ? 0xffffff : 0x87CEEB,
+        transparent: true,
+        opacity: 0.8,
+        roughness: 0.0,
+        metalness: 0.0,
+        transmission: glazing.lightTransmission || 0.8,
+        ior: 1.5, // Index of refraction for glass
+        reflectivity: 0.1
+      });
+      
+      const glassMesh = new THREE.Mesh(glassGeometry, glassMat);
+      
+      // Position each layer
+      const zOffset = (i - (layers - 1) / 2) * (glassThickness + airGap);
+      glassMesh.position.set(0, 0, zOffset);
+      
+      glazingGroup.add(glassMesh);
+    }
+    
+    return glazingGroup;
+  }
+
+  /**
+   * Create window sill
+   */
+  createWindowSill(config) {
+    const { width, height, depth, material } = config;
+    
+    const sillGeometry = new THREE.BoxGeometry(width, height, depth);
+    const sillMaterial = this.materials[material] || this.materials.concrete;
+    
+    return new THREE.Mesh(sillGeometry, sillMaterial.clone());
+  }
+
+  /**
+   * Create window hardware (handles, hinges, locks)
+   */
+  createWindowHardware(config) {
+    const { windowType, width, height, hardware } = config;
+    const hardwareGroup = new THREE.Group();
+    
+    console.log(`🔧 Creating window hardware for ${windowType} window`);
+    
+    // Handle hardware material
+    const hardwareMaterial = this.materials.steel || this.materials.aluminum;
+    
+    // Create handles if specified
+    if (hardware.handles) {
+      const handleGeometry = new THREE.BoxGeometry(0.02, 0.08, 0.015);
+      const handle = new THREE.Mesh(handleGeometry, hardwareMaterial.clone());
+      
+      // Position handle based on window type
+      switch (windowType) {
+        case 'casement':
+          handle.position.set(width * 0.4, 0, 0.03);
+          break;
+        case 'sliding':
+          handle.position.set(width * 0.25, 0, 0.03);
+          break;
+        case 'awning':
+          handle.position.set(0, -height * 0.3, 0.03);
+          break;
+      }
+      
+      hardwareGroup.add(handle);
+    }
+    
+    // Create hinges for casement and awning windows
+    if (hardware.hinges && (windowType === 'casement' || windowType === 'awning')) {
+      const hingeGeometry = new THREE.BoxGeometry(0.01, 0.06, 0.02);
+      
+      // Create 2-3 hinges depending on window height
+      const hingeCount = height > 1.5 ? 3 : 2;
+      
+      for (let i = 0; i < hingeCount; i++) {
+        const hinge = new THREE.Mesh(hingeGeometry, hardwareMaterial.clone());
+        
+        if (windowType === 'casement') {
+          // Position hinges on left side for casement windows
+          hinge.position.set(-width/2 - 0.01, (height/3) * (i - (hingeCount-1)/2), 0);
+        } else if (windowType === 'awning') {
+          // Position hinges on top for awning windows
+          hinge.position.set((width/3) * (i - (hingeCount-1)/2), height/2 + 0.01, 0);
+          hinge.rotation.z = Math.PI / 2;
+        }
+        
+        hardwareGroup.add(hinge);
+      }
+    }
+    
+    return hardwareGroup.children.length > 0 ? hardwareGroup : null;
+  }
+
+  /**
+   * Create window panels for operable windows
+   */
+  createWindowPanels(config) {
+    const { width, height, thickness, windowType, material, glazing } = config;
+    
+    if (windowType === 'fixed') {
+      return null; // Fixed windows don't have opening panels
+    }
+    
+    const panelGroup = new THREE.Group();
+    
+    console.log(`📐 Creating window panels for ${windowType} window`);
+    
+    // Create panel frame (thinner than main frame)
+    const panelFrameWidth = 0.02;
+    const panelGeometry = new THREE.BoxGeometry(
+      width - 0.1, // Slightly smaller than opening
+      height - 0.1,
+      thickness
+    );
+    
+    const panelMesh = new THREE.Mesh(panelGeometry, material.clone());
+    panelMesh.position.set(0, 0, thickness/2);
+    panelGroup.add(panelMesh);
+    
+    return panelGroup;
+  }
+
+  /**
+   * Create window opening indicators for 2D representation
+   */
+  createWindowOpeningIndicator2D(windowType, width, height) {
+    const indicatorGroup = new THREE.Group();
+    
+    // Different indicators for different window types
+    switch (windowType) {
+      case 'casement':
+        // Show swing arc for casement windows
+        const swingRadius = width * 0.8;
+        const swingGeometry = new THREE.RingGeometry(
+          swingRadius - 0.01, 
+          swingRadius, 
+          0, 
+          Math.PI/4
+        );
+        const swingMaterial = new THREE.MeshBasicMaterial({
+          color: 0x4CAF50,
+          transparent: true,
+          opacity: 0.3
+        });
+        const swingArc = new THREE.Mesh(swingGeometry, swingMaterial);
+        swingArc.rotation.x = -Math.PI / 2;
+        swingArc.position.set(-width/2, 0.001, 0);
+        indicatorGroup.add(swingArc);
+        break;
+        
+      case 'sliding':
+        // Show sliding direction arrows
+        const arrowGeometry = new THREE.PlaneGeometry(0.1, 0.02);
+        const arrowMaterial = new THREE.MeshBasicMaterial({
+          color: 0x2196F3,
+          transparent: true,
+          opacity: 0.6
+        });
+        const arrow1 = new THREE.Mesh(arrowGeometry, arrowMaterial);
+        arrow1.rotation.x = -Math.PI / 2;
+        arrow1.position.set(-width/4, 0.001, 0);
+        const arrow2 = new THREE.Mesh(arrowGeometry, arrowMaterial);
+        arrow2.rotation.x = -Math.PI / 2;
+        arrow2.position.set(width/4, 0.001, 0);
+        indicatorGroup.add(arrow1, arrow2);
+        break;
+        
+      case 'awning':
+        // Show awning opening indicator
+        const awningGeometry = new THREE.PlaneGeometry(width * 0.6, 0.02);
+        const awningMaterial = new THREE.MeshBasicMaterial({
+          color: 0xFF9800,
+          transparent: true,
+          opacity: 0.5
+        });
+        const awningIndicator = new THREE.Mesh(awningGeometry, awningMaterial);
+        awningIndicator.rotation.x = -Math.PI / 2;
+        awningIndicator.position.set(0, 0.001, 0);
+        indicatorGroup.add(awningIndicator);
+        break;
+    }
+    
+    return indicatorGroup.children.length > 0 ? indicatorGroup : null;
   }
 
   /**
@@ -2527,10 +6086,22 @@ class StandaloneCADEngine {
       materialColor = '#8B4513',
       subtype = 'generic',
       name = 'Furniture',
-      position = { x: 0, y: 0, z: 0 }
+      position = { x: 0, y: 0, z: 0 },
+      modelUrl = null,
+      format = null
     } = params;
+
+    console.log('🪑 FURNITURE DEBUG: Creating furniture with params:', {
+      name, subtype, width, height, depth, modelUrl, format, position
+    });
     
-    // Create 3D geometry based on furniture type
+    // If we have a modelUrl, create a placeholder and load the model asynchronously
+    if (modelUrl && format) {
+      console.log('🪑 FURNITURE DEBUG: Loading external model:', { modelUrl, format });
+      return this.createExternalModelGeometry(modelUrl, format, width, height, depth, position, materialColor, name);
+    }
+    
+    // Create 3D geometry based on furniture type (fallback for basic shapes)
     let geometry;
     let color = materialColor;
     
@@ -2613,6 +6184,164 @@ class StandaloneCADEngine {
       mesh3D: mesh3D,
       mesh2D: mesh2D
     };
+  }
+
+  /**
+   * Create external model geometry (FBX, glTF, OBJ)
+   */
+  createExternalModelGeometry(modelUrl, format, width, height, depth, position, materialColor, name) {
+    console.log('🪑 EXTERNAL MODEL DEBUG: Creating external model placeholder:', {
+      modelUrl, format, width, height, depth, position, name
+    });
+    
+    // Create placeholder geometry (will be replaced when model loads)
+    const placeholderGeometry = new THREE.BoxGeometry(width, height, depth);
+    const placeholderMaterial = new THREE.MeshLambertMaterial({ 
+      color: materialColor,
+      transparent: true,
+      opacity: 0.5,
+      wireframe: true
+    });
+    
+    const mesh3D = new THREE.Mesh(placeholderGeometry, placeholderMaterial);
+    mesh3D.userData = { 
+      objectId: null, 
+      type: 'furniture', 
+      name,
+      isPlaceholder: true,
+      modelUrl,
+      format
+    };
+    mesh3D.position.set(position.x, height / 2, position.z);
+    
+    // Create 2D representation
+    const geometry2D = new THREE.PlaneGeometry(width, depth);
+    const material2D = new THREE.MeshBasicMaterial({ 
+      color: materialColor, 
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.7
+    });
+    const mesh2D = new THREE.Mesh(geometry2D, material2D);
+    mesh2D.userData = { objectId: null, type: 'furniture', name };
+    mesh2D.position.set(position.x, 0, position.z);
+    
+    // Start loading the actual model asynchronously
+    this.loadExternalModel(modelUrl, format, mesh3D, position, materialColor)
+      .then((loadedModel) => {
+        console.log('✅ EXTERNAL MODEL DEBUG: Model loaded successfully:', name);
+        // Model is already updated in loadExternalModel
+      })
+      .catch((error) => {
+        console.error('❌ EXTERNAL MODEL DEBUG: Failed to load model:', error);
+        // Keep the placeholder
+      });
+    
+    return {
+      geometry: placeholderGeometry,
+      mesh3D: mesh3D,
+      mesh2D: mesh2D
+    };
+  }
+  
+  /**
+   * Load external model asynchronously
+   */
+  async loadExternalModel(modelUrl, format, placeholderMesh, position, materialColor) {
+    const formatLower = format.toLowerCase();
+    let loader;
+    
+    switch (formatLower) {
+      case 'fbx':
+        loader = new FBXLoader();
+        break;
+      case 'gltf':
+      case 'glb':
+        loader = new GLTFLoader();
+        break;
+      case 'obj':
+        loader = new OBJLoader();
+        break;
+      default:
+        throw new Error(`Unsupported model format: ${format}`);
+    }
+    
+    return new Promise((resolve, reject) => {
+      console.log('📥 EXTERNAL MODEL DEBUG: Starting to load model from:', modelUrl);
+      
+      loader.load(
+        modelUrl,
+        // onLoad
+        (loadedModel) => {
+          console.log('✅ EXTERNAL MODEL DEBUG: Model loaded from URL:', modelUrl);
+          
+          let modelObject;
+          if (formatLower === 'gltf' || formatLower === 'glb') {
+            modelObject = loadedModel.scene;
+          } else {
+            modelObject = loadedModel;
+          }
+          
+          // Apply materials and scaling
+          modelObject.traverse((child) => {
+            if (child.isMesh) {
+              if (!child.material || !child.material.map) {
+                child.material = new THREE.MeshStandardMaterial({
+                  color: materialColor,
+                  roughness: 0.6,
+                  metalness: 0.1
+                });
+              }
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+          
+          // Auto-scale model to reasonable size
+          const box = new THREE.Box3().setFromObject(modelObject);
+          const size = box.getSize(new THREE.Vector3());
+          const maxSize = Math.max(size.x, size.y, size.z);
+          
+          if (maxSize > 5) {
+            const scaleFactor = 2 / maxSize;
+            modelObject.scale.multiplyScalar(scaleFactor);
+          } else if (maxSize < 0.1) {
+            const scaleFactor = 1 / maxSize;
+            modelObject.scale.multiplyScalar(scaleFactor);
+          }
+          
+          // Replace placeholder with loaded model
+          const parent = placeholderMesh.parent;
+          if (parent) {
+            // Copy placeholder properties to loaded model
+            modelObject.position.copy(placeholderMesh.position);
+            modelObject.userData = { ...placeholderMesh.userData, isPlaceholder: false };
+            
+            // Replace placeholder in scene
+            parent.remove(placeholderMesh);
+            parent.add(modelObject);
+            
+            console.log('✅ EXTERNAL MODEL DEBUG: Placeholder replaced with loaded model');
+          }
+          
+          resolve(modelObject);
+        },
+        // onProgress
+        (progress) => {
+          if (progress && progress.loaded !== undefined && progress.total !== undefined && progress.total > 0) {
+            const percentage = (progress.loaded / progress.total * 100);
+            console.log(`📥 EXTERNAL MODEL DEBUG: Loading progress: ${percentage.toFixed(1)}%`);
+          } else {
+            console.log('📥 EXTERNAL MODEL DEBUG: Loading in progress...');
+          }
+        },
+        // onError
+        (error) => {
+          console.error('❌ EXTERNAL MODEL DEBUG: Failed to load model:', error);
+          reject(error);
+        }
+      );
+    });
   }
 
   /**
@@ -2943,11 +6672,12 @@ class StandaloneCADEngine {
    * Get all objects
    */
   getAllObjects() {
-    console.log(`📦 getAllObjects called - objects map size: ${this.objects.size}`);
     const objectArray = Array.from(this.objects.values());
-    console.log(`📦 Raw objects:`, objectArray.map(obj => ({id: obj.id, type: obj.type})));
     const serialized = objectArray.map(obj => this.serializeObject(obj));
-    console.log(`📦 Serialized objects:`, serialized.length);
+    // Only log if there are objects to serialize
+    if (serialized.length > 0) {
+      console.log(`📦 Serialized ${serialized.length} objects`);
+    }
     return serialized;
   }
 
@@ -2999,19 +6729,32 @@ class StandaloneCADEngine {
       // Include mesh3D for 3D viewport rendering
       mesh3D: cadObject.mesh3D,
       mesh2D: cadObject.mesh2D,
+      // CRITICAL: Explicitly include furniture/fixture properties at top level
+      modelUrl: cadObject.params?.modelUrl || cadObject.modelUrl,
+      model_url: cadObject.params?.model_url || cadObject.model_url,
+      format: cadObject.params?.format || cadObject.format,
+      name: cadObject.params?.name || cadObject.name,
       // Add computed properties for compatibility
       position: cadObject.mesh3D ? {
         x: cadObject.mesh3D.position.x,
         y: cadObject.mesh3D.position.y,
         z: cadObject.mesh3D.position.z
       } : { x: 0, y: 0, z: 0 },
-      // Add rotation information for 2D rendering
-      rotation: cadObject.mesh3D ? cadObject.mesh3D.rotation.y : 0
+      // Add rotation as full Euler object for 3D bridge compatibility
+      rotation: cadObject.mesh3D ? {
+        x: cadObject.mesh3D.rotation.x,
+        y: cadObject.mesh3D.rotation.y,
+        z: cadObject.mesh3D.rotation.z
+      } : { x: 0, y: 0, z: 0 }
     };
     
     console.log(`✅ SERIALIZE DEBUG: Serialized object ${cadObject.id}:`, {
       hasParams: !!serialized.params,
-      paramsInSerialized: serialized.params
+      paramsInSerialized: serialized.params,
+      modelUrl: serialized.modelUrl,
+      model_url: serialized.model_url,
+      format: serialized.format,
+      hasModelUrl: !!serialized.modelUrl || !!serialized.model_url
     });
 
     // Include BIM data if available
@@ -4058,6 +7801,12 @@ class StandaloneCADEngine {
   addToXeokitViewer(cadObject) {
     console.log('🎬 XEOKIT DEBUG: addToXeokitViewer called for:', cadObject.type, cadObject.id);
     
+    // Skip furniture and fixtures - they should be rendered by Model3DLoader in React Three.js
+    if (cadObject.type === 'furniture' || cadObject.type === 'fixture') {
+      console.log('🪑 XEOKIT DEBUG: Skipping furniture/fixture for Xeokit - will be handled by Model3DLoader');
+      return;
+    }
+    
     try {
       if (!window.xeokitViewer) {
         console.log('📺 XEOKIT DEBUG: Xeokit viewer not available, skipping 3D visualization');
@@ -4277,9 +8026,67 @@ class StandaloneCADEngine {
       parseInt(result[3], 16) / 255
     ] : [0.42, 0.45, 0.5]; // Default grey
   }
+
+  /**
+   * Create stair geometry
+   * Creates a simplified stair representation
+   */
+  createStairGeometry(params) {
+    console.log('🏗️ Creating stair geometry with params:', params);
+    
+    const stepWidth = params.stepWidth || 1.2;
+    const numberOfSteps = params.numberOfSteps || 16;
+    const treadDepth = params.treadDepth || 0.25;
+    const riserHeight = params.riserHeight || 0.18;
+    const totalRun = numberOfSteps * treadDepth;
+    const totalRise = numberOfSteps * riserHeight;
+    
+    // Create simplified 3D geometry representing the stair volume
+    const geometry3D = new THREE.BoxGeometry(stepWidth, totalRise / 2, totalRun);
+    
+    // Create material
+    const material3D = new THREE.MeshStandardMaterial({
+      color: params.material === 'wood' ? '#8B4513' : '#888888',
+      roughness: 0.8,
+      metalness: 0.1
+    });
+    
+    // Create 3D mesh
+    const mesh3D = new THREE.Mesh(geometry3D, material3D);
+    mesh3D.position.set(0, totalRise / 4, 0); // Position above ground
+    
+    // Create 2D representation (simplified rectangle)
+    const geometry2D = new THREE.PlaneGeometry(stepWidth, totalRun);
+    const material2D = new THREE.MeshBasicMaterial({
+      color: 0x666666,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide
+    });
+    const mesh2D = new THREE.Mesh(geometry2D, material2D);
+    mesh2D.rotation.x = -Math.PI / 2; // Lay flat
+    
+    console.log('🏗️ Stair geometry created with', numberOfSteps, 'steps');
+    
+    return {
+      geometry: geometry3D,
+      mesh3D: mesh3D,
+      mesh2D: mesh2D
+    };
+  }
+
+  /**
+   * Set the Architect3D service reference for endpoint synchronization
+   * @param {Architect3DWallService} architect3DService - Reference to the Architect3D service
+   */
+  setArchitect3DService(architect3DService) {
+    this.architect3DService = architect3DService;
+    console.log('🔗 SYNC SETUP: Architect3D service reference set for endpoint synchronization');
+  }
+
 }
 
-// Export singleton instance
+// Create singleton instance
 const standaloneCADEngine = new StandaloneCADEngine();
 
 // Make available for debugging in browser console

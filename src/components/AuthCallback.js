@@ -14,11 +14,10 @@ const AuthCallback = ({ onAuthSuccess, onAuthError }) => {
         if (user) {
           setStatus('success');
           setMessage('Authentication successful! Redirecting to app...');
-          
-          // Wait a moment to show success message
+          // Redirect immediately to app; parent onAuthSuccess will also run
           setTimeout(() => {
             onAuthSuccess?.(user);
-          }, 2000);
+          }, 500);
         } else {
           // No user found, check for error in URL
           const urlParams = new URLSearchParams(window.location.search);
@@ -34,10 +33,13 @@ const AuthCallback = ({ onAuthSuccess, onAuthError }) => {
             setTimeout(() => {
               if (!user) {
                 setStatus('error');
-                setMessage('Authentication timeout. Please try again.');
+                setMessage('Authentication timeout. Redirecting to sign in...');
                 onAuthError?.('timeout');
+                try {
+                  window.location.href = '/app?auth=1';
+                } catch {}
               }
-            }, 10000); // 10 second timeout
+            }, 4000); // shorten timeout to 4s
           }
         }
       } catch (error) {

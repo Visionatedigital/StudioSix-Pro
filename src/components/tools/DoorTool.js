@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { DoorIcon } from '../icons';
 import standaloneCADEngine from '../../services/StandaloneCADEngine';
+import localModelsService from '../../services/LocalModelsService';
 import {
   SwatchIcon,
   RectangleStackIcon,
-  AdjustmentsVerticalIcon,
   CheckIcon,
   XMarkIcon,
   PlayIcon,
-  ArrowUturnRightIcon,
-  ArrowUturnLeftIcon
+  PhotoIcon,
+  InformationCircleIcon
 } from '@heroicons/react/24/outline';
 
 /**
@@ -33,14 +33,13 @@ const DoorTool = ({
     width: 0.9,
     height: 2.1,
     thickness: 0.05,
-    openingDirection: 'right', // 'left', 'right', 'inward', 'outward'
-    material: 'wood',
     frameWidth: 0.05,
-    offset: 0.0,
-    insertionMode: 'create_standalone', // 'create_standalone' or 'insert_in_wall'
-    hostWallId: null,
-    insertionPosition: 0.5 // Position along wall (0-1)
+    selectedModel: null // Selected 3D model
   });
+
+  // Local models state
+  const [availableModels, setAvailableModels] = useState([]);
+  const [modelsLoading, setModelsLoading] = useState(true);
 
   // Use external params if provided, otherwise use internal state
   const doorParams = externalDoorParams || internalDoorParams;
@@ -51,24 +50,50 @@ const DoorTool = ({
   const [isCreating, setIsCreating] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
 
+  // Load available door models on component mount
+  useEffect(() => {
+    const loadDoorModels = async () => {
+      setModelsLoading(true);
+      try {
+        const models = await localModelsService.getAvailableModels('doors');
+        setAvailableModels(models);
+        
+        // Set Door1.fbx as default model if available, otherwise use first model
+        if (models.length > 0 && !doorParams.selectedModel) {
+          let defaultModel = models.find(model => 
+            model.name === 'Door1' || model.id === 'Door1' || 
+            model.name.toLowerCase().includes('door1') ||
+            model.localUrl?.includes('Door1.fbx')
+          );
+          
+          // Fallback to first model if Door1 not found
+          if (!defaultModel) {
+            defaultModel = models[0];
+          }
+          
+          setDoorParams(prev => ({
+            ...prev,
+            selectedModel: defaultModel,
+            width: defaultModel.dimensions.width,
+            height: defaultModel.dimensions.height,
+            thickness: defaultModel.dimensions.depth
+          }));
+          
+          console.log('🚪 Set default door model:', defaultModel.name);
+        }
+        
+        console.log('🚪 Loaded', models.length, 'local door models');
+      } catch (error) {
+        console.error('❌ Failed to load door models:', error);
+      } finally {
+        setModelsLoading(false);
+      }
+    };
 
-  // Material options for doors
-  const materialOptions = [
-    { value: 'wood', label: 'Wood', color: '#92400e', density: 600 },
-    { value: 'steel', label: 'Steel', color: '#708090', density: 7850 },
-    { value: 'glass', label: 'Glass', color: '#60a5fa', density: 2500 },
-    { value: 'composite', label: 'Composite', color: '#8b7d6b', density: 1200 },
-    { value: 'aluminum', label: 'Aluminum', color: '#9ca3af', density: 2700 },
-    { value: 'pvc', label: 'PVC', color: '#f3f4f6', density: 1400 }
-  ];
+    loadDoorModels();
+  }, []);
 
-  // Opening direction options
-  const openingDirections = [
-    { value: 'right', label: 'Right', icon: <ArrowUturnRightIcon className="w-4 h-4" />, description: 'Opens to the right' },
-    { value: 'left', label: 'Left', icon: <ArrowUturnLeftIcon className="w-4 h-4" />, description: 'Opens to the left' },
-    { value: 'inward', label: 'Inward', icon: '⬇', description: 'Opens inward' },
-    { value: 'outward', label: 'Outward', icon: '⬆', description: 'Opens outward' }
-  ];
+
 
   // Initialize with existing door data if editing
   useEffect(() => {
@@ -77,19 +102,12 @@ const DoorTool = ({
         width: selectedObject.width || 0.9,
         height: selectedObject.height || 2.1,
         thickness: selectedObject.thickness || 0.05,
-        openingDirection: selectedObject.openingDirection || 'right',
-        material: selectedObject.material || 'wood',
         frameWidth: selectedObject.frameWidth || 0.05,
-        offset: selectedObject.offset || 0.0
+        selectedModel: selectedObject.selectedModel || null
       });
     }
   }, [selectedObject]);
 
-  // Update available walls for door placement - memoized to prevent infinite loops
-  const availableWalls = useMemo(() => {
-    if (!isActive) return [];
-    return walls.length > 0 ? walls : cadObjects.filter(obj => obj.type === 'wall' || obj.type === 'Wall');
-  }, [cadObjects, walls, isActive]);
 
   // Parameter validation
   const validateParameters = useCallback(() => {
@@ -115,25 +133,13 @@ const DoorTool = ({
       errors.frameWidth = 'Frame width must be between 0m and 0.2m';
     }
 
-    // Wall insertion validation
-    if (doorParams.insertionMode === 'insert_in_wall') {
-      if (!doorParams.hostWallId) {
-        errors.hostWallId = 'Please select a wall for door insertion';
-      } else {
-        // Check if door fits in the selected wall
-        const selectedWall = availableWalls.find(w => w.id === doorParams.hostWallId);
-        if (selectedWall && selectedWall.length && doorParams.width > selectedWall.length * 0.8) {
-          errors.width = `Door too wide for selected wall (max: ${(selectedWall.length * 0.8).toFixed(1)}m)`;
-        }
-      }
-    }
 
     setValidationErrors(errors);
     const isValid = Object.keys(errors).length === 0;
     setIsValid(isValid);
     
     return isValid;
-  }, [doorParams, availableWalls]);
+  }, [doorParams]);
 
   // Validate when tool becomes active (controlled to prevent loops)
   useEffect(() => {
@@ -148,6 +154,7 @@ const DoorTool = ({
       ...prev,
       [param]: value
     }));
+
     // Validate after parameter change (use setTimeout to avoid immediate re-render issues)
     setTimeout(() => {
       const errors = {};
@@ -182,32 +189,20 @@ const DoorTool = ({
         width: doorParams.width,
         height: doorParams.height,
         thickness: doorParams.thickness,
-        openingDirection: doorParams.openingDirection,
         frameWidth: doorParams.frameWidth,
-        material: doorParams.material,
-        offset: doorParams.offset,
-        insertionMode: doorParams.insertionMode,
-        hostWallId: doorParams.hostWallId,
-        insertionPosition: doorParams.insertionPosition
+        // Add local model information
+        modelUrl: doorParams.selectedModel?.localUrl,
+        modelId: doorParams.selectedModel?.id,
+        modelName: doorParams.selectedModel?.name,
+        format: ['fbx'],
+        isLocal: true,
+        localModel: true
       };
       
-      let objectId;
-      
-      if (doorParams.insertionMode === 'insert_in_wall' && doorParams.hostWallId) {
-        // Create door inserted in wall with undo/redo support
-        console.log('🚪 Creating door inserted in wall:', doorParams.hostWallId);
-        const command = await standaloneCADEngine.createDoorWithHistory({
-          ...createParams,
-          hostWallId: doorParams.hostWallId,
-          insertionPosition: doorParams.insertionPosition
-        });
-        objectId = command.entityId;
-      } else {
-        // Create standalone door with undo/redo support
-        console.log('🚪 Creating standalone door');
-        const command = await standaloneCADEngine.createDoorWithHistory(createParams);
-        objectId = command.entityId;
-      }
+      // Create standalone door with undo/redo support
+      console.log('🚪 Creating standalone door');
+      const command = await standaloneCADEngine.createDoorWithHistory(createParams);
+      const objectId = command.entityId;
       
       if (objectId) {
         console.log('🚪 Door created successfully:', objectId);
@@ -224,13 +219,8 @@ const DoorTool = ({
           width: 0.9,
           height: 2.1,
           thickness: 0.05,
-          openingDirection: 'right',
-          material: 'wood',
           frameWidth: 0.05,
-          offset: 0.0,
-          insertionMode: 'create_standalone',
-          hostWallId: null,
-          insertionPosition: 0.5
+          selectedModel: null
         });
       }
       
@@ -252,10 +242,8 @@ const DoorTool = ({
         width: doorParams.width,
         height: doorParams.height,
         thickness: doorParams.thickness,
-        openingDirection: doorParams.openingDirection,
         frameWidth: doorParams.frameWidth,
-        material: doorParams.material,
-        offset: doorParams.offset
+        selectedModel: doorParams.selectedModel
       };
       
       // Update object using standalone CAD engine
@@ -283,8 +271,6 @@ const DoorTool = ({
   if (!isActive) return null;
 
   const isEditing = selectedObject && (selectedObject.type === 'Door' || selectedObject.type === 'door');
-  const selectedMaterial = materialOptions.find(m => m.value === doorParams.material);
-  const selectedDirection = openingDirections.find(d => d.value === doorParams.openingDirection);
 
   return (
     <div className="door-tool-panel w-full h-full">
@@ -329,152 +315,177 @@ const DoorTool = ({
       {/* Parameters */}
       <div className="p-4 space-y-4">
         
-        {/* Insertion Mode Selection */}
+
+        {/* Model Selection Section */}
         <div>
           <h4 className={`text-sm font-medium mb-3 flex items-center ${
             theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
           }`}>
-            Insertion Mode
+            <SwatchIcon className="w-4 h-4 mr-2" />
+            3D Model ({availableModels.length} available)
           </h4>
           
-          <div className="space-y-2">
-            <div className="flex space-x-2">
-              <button
-                onClick={() => handleParameterChange('insertionMode', 'create_standalone')}
-                className={`flex-1 p-2 text-xs rounded transition-colors ${
-                  doorParams.insertionMode === 'create_standalone'
-                    ? theme === 'dark'
-                      ? 'bg-studiosix-600 text-white'
-                      : 'bg-studiosix-500 text-white'
-                    : theme === 'dark'
-                      ? 'bg-slate-800/50 text-gray-300 hover:bg-slate-700/50'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Standalone Door
-              </button>
-              <button
-                onClick={() => handleParameterChange('insertionMode', 'insert_in_wall')}
-                disabled={availableWalls.length === 0}
-                className={`flex-1 p-2 text-xs rounded transition-colors ${
-                  doorParams.insertionMode === 'insert_in_wall'
-                    ? theme === 'dark'
-                      ? 'bg-studiosix-600 text-white'
-                      : 'bg-studiosix-500 text-white'
-                    : availableWalls.length === 0
-                      ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
-                      : theme === 'dark'
-                        ? 'bg-slate-800/50 text-gray-300 hover:bg-slate-700/50'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Insert in Wall
-              </button>
+          {modelsLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <div className="animate-spin rounded-full h-6 w-6 border-2 border-studiosix-600 border-t-transparent"></div>
+              <span className={`ml-3 text-sm ${
+                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+              }`}>Loading door models...</span>
             </div>
-            
-            {doorParams.insertionMode === 'insert_in_wall' && availableWalls.length === 0 && (
-              <p className={`text-xs ${
-                theme === 'dark' ? 'text-yellow-400' : 'text-yellow-600'
-              }`}>
-                No walls available. Create walls first to use this mode.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Wall Selection (only when insert_in_wall mode) */}
-        {doorParams.insertionMode === 'insert_in_wall' && availableWalls.length > 0 && (
-          <div>
-            <h4 className={`text-sm font-medium mb-3 flex items-center ${
-              theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-            }`}>
-              Wall Selection
-            </h4>
-            
+          ) : availableModels.length > 0 ? (
             <div className="space-y-3">
-              <select
-                value={doorParams.hostWallId || ''}
-                onChange={(e) => handleParameterChange('hostWallId', e.target.value || null)}
-                className={`w-full px-2 py-2 text-sm rounded border transition-colors ${
-                  theme === 'dark'
-                    ? 'bg-slate-800/50 border-gray-600 text-white focus:border-studiosix-500'
-                    : 'bg-white border-gray-300 text-gray-900 focus:border-studiosix-500'
-                } focus:outline-none focus:ring-1 focus:ring-studiosix-500`}
-              >
-                <option value="">Select wall for door insertion</option>
-                {availableWalls.map((wall) => (
-                  <option key={wall.id} value={wall.id}>
-                    Wall {wall.id.split('_')[1] || wall.id} 
-                    {wall.length ? ` (${wall.length.toFixed(1)}m long)` : ''}
-                  </option>
+              {/* Model Selection Grid */}
+              <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
+                {availableModels.map((model) => (
+                  <div
+                    key={model.id}
+                    onClick={() => {
+                      handleParameterChange('selectedModel', model);
+                      // Update dimensions to match model
+                      handleParameterChange('width', model.dimensions.width);
+                      handleParameterChange('height', model.dimensions.height);
+                      handleParameterChange('thickness', model.dimensions.depth);
+                    }}
+                    className={`
+                      relative cursor-pointer rounded-lg border-2 transition-all duration-200
+                      ${doorParams.selectedModel?.id === model.id
+                        ? 'border-studiosix-500 bg-studiosix-500/10'
+                        : theme === 'dark'
+                          ? 'border-gray-600 hover:border-gray-500 bg-slate-800/50'
+                          : 'border-gray-300 hover:border-gray-400 bg-gray-50'
+                      }
+                    `}
+                  >
+                    {/* Thumbnail */}
+                    <div className="aspect-square rounded-t-lg bg-gray-200 overflow-hidden relative">
+                      <img
+                        src={model.thumbnailUrl}
+                        alt={model.name}
+                        className="w-full h-full object-cover"
+                        onLoad={(e) => {
+                          // Hide fallback when image loads successfully
+                          const fallback = e.target.nextElementSibling;
+                          if (fallback) fallback.style.display = 'none';
+                        }}
+                        onError={(e) => {
+                          // Hide image and show fallback when image fails to load
+                          e.target.style.display = 'none';
+                          const fallback = e.target.nextElementSibling;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                      <div className="absolute inset-0 w-full h-full flex items-center justify-center bg-gray-300">
+                        <DoorIcon className="w-6 h-6 text-gray-500" />
+                      </div>
+                    </div>
+
+                    {/* Model Info */}
+                    <div className="p-2">
+                      <h4 className={`font-medium text-xs truncate ${
+                        theme === 'dark' ? 'text-white' : 'text-gray-900'
+                      }`}>
+                        {model.name}
+                      </h4>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className={`text-xs ${
+                          theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                        }`}>
+                          {model.material || 'Wood'}
+                        </span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                          theme === 'dark' ? 'bg-slate-700/50' : 'bg-gray-100'
+                        }`}>
+                          {model.category}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Selection indicator */}
+                    {doorParams.selectedModel?.id === model.id && (
+                      <div className="absolute top-2 right-2 w-6 h-6 bg-studiosix-500 rounded-full flex items-center justify-center">
+                        <CheckIcon className="w-4 h-4 text-white" />
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </select>
-              {validationErrors.hostWallId && (
-                <p className="text-xs text-red-400 mt-1">{validationErrors.hostWallId}</p>
-              )}
+              </div>
               
-              {/* Insertion Position Slider */}
-              {doorParams.hostWallId && (
-                <div>
-                  <label className={`block text-xs mb-2 ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                  }`}>
-                    Position along wall: {(doorParams.insertionPosition * 100).toFixed(0)}%
-                  </label>
-                  <input
-                    type="range"
-                    min="0.1"
-                    max="0.9"
-                    step="0.05"
-                    value={doorParams.insertionPosition}
-                    onChange={(e) => handleParameterChange('insertionPosition', parseFloat(e.target.value))}
-                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
-                  />
-                  <div className="flex justify-between text-xs mt-1">
-                    <span className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}>Start</span>
-                    <span className={theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}>End</span>
+              {/* Selected Model Details */}
+              {doorParams.selectedModel && (
+                <div className={`p-2 rounded-lg ${
+                  theme === 'dark' 
+                    ? 'bg-slate-800/50 border border-gray-600' 
+                    : 'bg-gray-50 border border-gray-300'
+                }`}>
+                  <div className="flex items-center space-x-2 mb-1">
+                    <InformationCircleIcon className="w-3 h-3 text-studiosix-500" />
+                    <h4 className={`font-medium text-sm ${
+                      theme === 'dark' ? 'text-white' : 'text-gray-900'
+                    }`}>Selected Model</h4>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1 text-xs">
+                    <div>
+                      <span className={`${
+                        theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                      }`}>Name:</span>
+                      <p className={`${
+                        theme === 'dark' ? 'text-white' : 'text-gray-900'
+                      }`}>{doorParams.selectedModel.name}</p>
+                    </div>
+                    <div>
+                      <span className={`${
+                        theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                      }`}>Category:</span>
+                      <p className={`${
+                        theme === 'dark' ? 'text-white' : 'text-gray-900'
+                      }`}>{doorParams.selectedModel.category}</p>
+                    </div>
+                    {doorParams.selectedModel.dimensions && (
+                      <>
+                        <div>
+                          <span className={`${
+                            theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                          }`}>Width:</span>
+                          <p className={`${
+                            theme === 'dark' ? 'text-white' : 'text-gray-900'
+                          }`}>{doorParams.selectedModel.dimensions.width}m</p>
+                        </div>
+                        <div>
+                          <span className={`${
+                            theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                          }`}>Height:</span>
+                          <p className={`${
+                            theme === 'dark' ? 'text-white' : 'text-gray-900'
+                          }`}>{doorParams.selectedModel.dimensions.height}m</p>
+                        </div>
+                      </>
+                    )}
+                    {doorParams.selectedModel.description && (
+                      <div className="col-span-2 mt-1">
+                        <span className={`${
+                          theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                        }`}>Description:</span>
+                        <p className={`text-xs ${
+                          theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
+                        }`}>{doorParams.selectedModel.description}</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
-              
-              {/* Wall info display */}
-              {doorParams.hostWallId && (
-                <div className={`p-2 rounded border ${
-                  theme === 'dark' ? 'border-green-700/50 bg-green-800/20' : 'border-green-500/50 bg-green-50'
-                }`}>
-                  {(() => {
-                    const selectedWall = availableWalls.find(w => w.id === doorParams.hostWallId);
-                    if (!selectedWall) return null;
-                    
-                    return (
-                      <div className={`text-xs space-y-1 ${
-                        theme === 'dark' ? 'text-green-400' : 'text-green-700'
-                      }`}>
-                        <p>Selected wall: {selectedWall.length?.toFixed(1) || 'Unknown'}m long</p>
-                        {selectedWall.length && (
-                          <p>Door position: {(doorParams.insertionPosition * selectedWall.length).toFixed(1)}m from start</p>
-                        )}
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
             </div>
-          </div>
-        )}
-
-        {/* Wall Selection Info for standalone mode */}
-        {doorParams.insertionMode === 'create_standalone' && availableWalls.length > 0 && (
-          <div className={`p-2 rounded border ${
-            theme === 'dark' ? 'border-blue-700/50 bg-blue-800/20' : 'border-blue-500/50 bg-blue-50'
-          }`}>
-            <p className={`text-xs ${
-              theme === 'dark' ? 'text-blue-400' : 'text-blue-700'
+          ) : (
+            <div className={`p-3 rounded border text-center text-sm ${
+              theme === 'dark' 
+                ? 'bg-red-900/20 border-red-700/50 text-red-400' 
+                : 'bg-red-50 border-red-300 text-red-600'
             }`}>
-              Standalone mode: Door will be created independently (not inserted in wall)
-            </p>
-          </div>
-        )}
+              <PhotoIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <p>No door models found</p>
+              <p className="text-xs mt-1">Add .fbx files to public/models/doors/</p>
+            </div>
+          )}
+        </div>
 
         {/* Dimensions Section */}
         <div>
@@ -612,86 +623,7 @@ const DoorTool = ({
           </div>
         </div>
 
-        {/* Opening Direction Section */}
-        <div>
-          <h4 className={`text-sm font-medium mb-3 flex items-center ${
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-          }`}>
-            <AdjustmentsVerticalIcon className="w-4 h-4 mr-2" />
-            Opening Direction
-          </h4>
-          
-          <div className="grid grid-cols-2 gap-2">
-            {openingDirections.map((direction) => (
-              <button
-                key={direction.value}
-                onClick={() => handleParameterChange('openingDirection', direction.value)}
-                className={`p-3 text-xs rounded transition-colors ${
-                  doorParams.openingDirection === direction.value
-                    ? theme === 'dark'
-                      ? 'bg-studiosix-600 text-white'
-                      : 'bg-studiosix-500 text-white'
-                    : theme === 'dark'
-                      ? 'bg-slate-800/50 text-gray-300 hover:bg-slate-700/50'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-                title={direction.description}
-              >
-                <div className="flex items-center justify-center mb-1">
-                  {typeof direction.icon === 'string' ? direction.icon : direction.icon}
-                </div>
-                {direction.label}
-              </button>
-            ))}
-          </div>
-        </div>
 
-        {/* Material Section */}
-        <div>
-          <h4 className={`text-sm font-medium mb-3 flex items-center ${
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-          }`}>
-            <SwatchIcon className="w-4 h-4 mr-2" />
-            Material
-          </h4>
-          
-          <div className="space-y-2">
-            <select
-              value={doorParams.material}
-              onChange={(e) => handleParameterChange('material', e.target.value)}
-              className={`w-full px-2 py-2 text-sm rounded border transition-colors ${
-                theme === 'dark'
-                  ? 'bg-slate-800/50 border-gray-600 text-white focus:border-studiosix-500'
-                  : 'bg-white border-gray-300 text-gray-900 focus:border-studiosix-500'
-              } focus:outline-none focus:ring-1 focus:ring-studiosix-500`}
-            >
-              {materialOptions.map((material) => (
-                <option key={material.value} value={material.value}>
-                  {material.label}
-                </option>
-              ))}
-            </select>
-            
-            {/* Material Preview */}
-            {selectedMaterial && (
-              <div className={`p-2 rounded border ${
-                theme === 'dark' ? 'border-gray-700/50 bg-slate-800/30' : 'border-gray-300/50 bg-gray-50'
-              }`}>
-                <div className="flex items-center space-x-2">
-                  <div
-                    className="w-4 h-4 rounded border"
-                    style={{ backgroundColor: selectedMaterial.color }}
-                  />
-                  <span className={`text-xs ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                  }`}>
-                    Density: {selectedMaterial.density} kg/m³
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
       </div>
 
       {/* Actions */}

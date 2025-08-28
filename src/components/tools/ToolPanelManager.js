@@ -1,6 +1,6 @@
 import React from 'react';
 import DraggableToolPanel from './DraggableToolPanel';
-import { WallTool, SlabTool, DoorTool, WindowTool, RoofTool, StairTool } from '../tools';
+import { WallTool, SlabTool, RampTool, DoorTool, WindowTool, RoofTool, StairTool, ColumnTool } from '../tools';
 
 /**
  * Centralized tool panel manager that wraps all tools with dragging functionality
@@ -21,6 +21,10 @@ const ToolPanelManager = ({
   onCreateSlab,
   onUpdateSlab,
   onCancelSlabTool,
+  // Ramp tool handlers
+  onCreateRamp,
+  onUpdateRamp,
+  onCancelRampTool,
   // Door tool handlers
   doorParams,
   onDoorParamsChange,
@@ -39,15 +43,21 @@ const ToolPanelManager = ({
   onCreateStair,
   onUpdateStair,
   onCancelStairTool,
+  // Column tool handlers
+  onCreateColumn,
+  onUpdateColumn,
+  onCancelColumnTool,
 }) => {
   // Tool configuration - defines size and properties for each tool
   const toolConfig = {
     wall: { width: 320, height: 500 },
     slab: { width: 320, height: 500 },
+    ramp: { width: 340, height: 600 },
     door: { width: 340, height: 550 },
     window: { width: 360, height: 600 },
     roof: { width: 380, height: 650 },
-    stair: { width: 400, height: 700 }
+    stair: { width: 400, height: 700 },
+    column: { width: 360, height: 580 }
   };
 
   const baseClassName = "rounded-lg shadow-2xl border transition-all duration-300 backdrop-blur-md";
@@ -94,6 +104,26 @@ const ToolPanelManager = ({
           onCancel={onCancelSlabTool}
           theme={theme}
           freecadObjects={freecadObjects || []}
+        />
+      </DraggableToolPanel>
+
+      {/* Ramp Tool */}
+      <DraggableToolPanel
+        isActive={selectedTool === 'ramp' || (selectedObject && selectedObject.type === 'ramp')}
+        width={toolConfig.ramp.width}
+        height={toolConfig.ramp.height}
+        className={`ramp-tool-panel ${baseClassName} ${themeClassName}`}
+        style={{ overflowY: 'auto' }}
+      >
+        <RampTool
+          isActive={selectedTool === 'ramp' || (selectedObject && selectedObject.type === 'ramp')}
+          selectedObject={selectedObject}
+          onObjectCreated={onCreateRamp}
+          onObjectUpdated={onUpdateRamp}
+          onCancel={onCancelRampTool}
+          theme={theme}
+          cadObjects={freecadObjects || []}
+          viewportDimensions={containerBounds}
         />
       </DraggableToolPanel>
 
@@ -172,6 +202,26 @@ const ToolPanelManager = ({
           onCancel={onCancelStairTool}
           theme={theme}
           freecadObjects={freecadObjects || []}
+        />
+      </DraggableToolPanel>
+
+      {/* Column Tool */}
+      <DraggableToolPanel
+        isActive={selectedTool === 'column'}
+        width={toolConfig.column.width}
+        height={toolConfig.column.height}
+        className={`column-tool-panel ${baseClassName} ${themeClassName}`}
+        style={{ overflowY: 'auto' }}
+        containerBounds={containerBounds}
+      >
+        <ColumnTool
+          isActive={selectedTool === 'column'}
+          selectedObject={selectedObject}
+          onObjectCreated={onCreateColumn}
+          onObjectUpdated={onUpdateColumn}
+          onCancel={onCancelColumnTool}
+          theme={theme}
+          cadObjects={freecadObjects || []}
         />
       </DraggableToolPanel>
     </>

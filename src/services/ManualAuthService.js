@@ -1,7 +1,10 @@
 /**
  * Manual Authentication Service
  * Bypasses Supabase email confirmation by managing user verification locally
+ * Now integrates with subscription system
  */
+
+import userDatabaseService from './UserDatabaseService';
 
 class ManualAuthService {
   constructor() {
@@ -101,6 +104,14 @@ class ManualAuthService {
 
     // Set as current user
     this.setCurrentUser(userData);
+
+    // Initialize subscription profile in database
+    try {
+      console.log('📊 Initializing subscription profile for manual user...');
+      await userDatabaseService.getUserProfile(userData.id);
+    } catch (error) {
+      console.warn('⚠️ Could not initialize subscription profile:', error);
+    }
 
     return {
       success: true,

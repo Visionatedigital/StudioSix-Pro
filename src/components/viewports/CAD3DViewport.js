@@ -9,6 +9,7 @@ import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import standaloneCADEngine from '../../services/StandaloneCADEngine';
 import Model3DLoader from '../Model3DLoader';
+import DragTransformControls from '../DragTransformControls';
 
 /**
  * Standalone CAD Object Component - Renders objects from StandaloneCADEngine
@@ -25,7 +26,12 @@ const FreeCADObject = ({ object, selectedObjects = new Set(), hoveredObject, onO
     'HAS modelUrl': !!(object.modelUrl || object.model_url),
     'modelUrl': object.modelUrl,
     'model_url': object.model_url,
-    'HAS mesh3D': !!object.mesh3D
+    'format': object.format,
+    'HAS mesh3D': !!object.mesh3D,
+    'HAS params': !!object.params,
+    'params.modelUrl': object.params?.modelUrl,
+    'params.model_url': object.params?.model_url,
+    'allKeys': Object.keys(object)
   });
 
   // For furniture and fixture objects with 3D models, use Model3DLoader
@@ -231,7 +237,12 @@ const Scene3DContent = ({
   onObjectClick, 
   viewportTheme, 
   controlsRef,
-  onGroundClick
+  onGroundClick,
+  selectedObjectId,
+  transformMode,
+  onTransformStart,
+  onTransformEnd,
+  onTransform
 }) => {
   const [objects, setObjects] = useState([]);
   const [selectedObjects, setSelectedObjects] = useState(new Set());
@@ -370,6 +381,17 @@ const Scene3DContent = ({
           viewportTheme={viewportTheme}
         />
       ))}
+      
+      {/* Drag Transform Controls */}
+      {selectedObjectId && (selectedTool === 'pointer' || selectedTool === 'scale' || selectedTool === 'resize') && (
+        <DragTransformControls
+          selectedObjectId={selectedObjectId}
+          transformMode={transformMode}
+          onTransformStart={onTransformStart}
+          onTransformEnd={onTransformEnd}
+          onTransform={onTransform}
+        />
+      )}
 
     </>
   );
@@ -388,6 +410,73 @@ const CAD3DViewport = ({
   style = {}
 }) => {
   const controlsRef = useRef();
+  const [selectedObjectId, setSelectedObjectId] = useState(null);
+  const [transformMode, setTransformMode] = useState('translate'); // 'translate' or 'scale'
+  
+  // Enhanced object click handler for selection and dragging
+  const handleObjectClick = useCallback((objectId, objectData) => {
+    console.log(`🖱️ Object clicked: ${objectId}`);
+    
+    // Set selection
+    setSelectedObjectId(objectId);
+    
+    // Change transform mode based on tool
+    if (selectedTool === 'scale' || selectedTool === 'resize') {
+      setTransformMode('scale');
+    } else {
+      setTransformMode('translate');
+    }
+    
+    // Call original handler
+    onObjectClick?.(objectId, objectData);
+  }, [selectedTool, onObjectClick]);
+  
+  // Transform event handlers
+  const handleTransformStart = useCallback((objectId, mode) => {
+    console.log(`🎯 Transform started: ${mode} for ${objectId}`);
+    // Could disable orbit controls here to prevent conflicts
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
+    }
+  }, []);
+  
+  const handleTransformEnd = useCallback((objectId, mode) => {
+    console.log(`🎯 Transform ended: ${mode} for ${objectId}`);
+    // Re-enable orbit controls
+    if (controlsRef.current) {
+      controlsRef.current.enabled = true;
+    }
+  }, []);
+  
+  const handleTransform = useCallback((objectId, type, value) => {
+    console.log(`🎯 Transform update: ${type}`, value);
+    // Could add real-time feedback here
+  }, []);
+  
+  // Keyboard shortcuts for transform mode
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      if (selectedObjectId) {
+        switch (event.key.toLowerCase()) {
+          case 'g': // Grab/Move
+            event.preventDefault();
+            setTransformMode('translate');
+            break;
+          case 's': // Scale
+            event.preventDefault();
+            setTransformMode('scale');
+            break;
+          case 'escape':
+            event.preventDefault();
+            setSelectedObjectId(null);
+            break;
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedObjectId]);
   
   // Navigation tool handlers
   const handleZoomFit = useCallback(() => {
@@ -480,10 +569,15 @@ const CAD3DViewport = ({
       >
         <Scene3DContent 
           selectedTool={selectedTool}
-          onObjectClick={onObjectClick}
+          onObjectClick={handleObjectClick}
           viewportTheme={theme}
           controlsRef={controlsRef}
           onGroundClick={onGroundClick}
+          selectedObjectId={selectedObjectId}
+          transformMode={transformMode}
+          onTransformStart={handleTransformStart}
+          onTransformEnd={handleTransformEnd}
+          onTransform={handleTransform}
         />
       </Canvas>
       
@@ -523,6 +617,21 @@ const CAD3DViewport = ({
           </svg>
         </button>
       </div>
+      
+      {/* Transform Status Display */}
+      {selectedObjectId && (
+        <div className="absolute bottom-4 left-4 bg-black/70 text-white px-3 py-2 rounded-lg text-sm">
+          <div className="flex items-center space-x-2">
+            <span className="font-medium">{selectedObjectId}</span>
+            <span className="text-gray-300">•</span>
+            <span className="capitalize">{transformMode}</span>
+            <span className="text-gray-300">•</span>
+            <span className="text-xs text-gray-400">
+              {transformMode === 'translate' ? 'G to move, S to scale, ESC to deselect' : 'G to move, S to scale, ESC to deselect'}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

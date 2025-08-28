@@ -7,22 +7,34 @@ const ViewportCaptureFrame = ({ isVisible, onCapture, onCancel, viewportRef }) =
   const [frameSize, setFrameSize] = useState({ width: 384, height: 256 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  
+
   const [resizeHandle, setResizeHandle] = useState(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [initialFrameState, setInitialFrameState] = useState({ x: 0, y: 0, width: 0, height: 0 });
   const [lastCaptured, setLastCaptured] = useState(null);
   const [captureSuccess, setCaptureSuccess] = useState(false);
   const frameRef = useRef(null);
+  const hasInitialized = useRef(false);
 
-  // Initialize frame position to center when component becomes visible
+  // Initialize frame position to center ONLY when component first becomes visible
   useEffect(() => {
-    if (isVisible && viewportRef?.current) {
+    if (isVisible && viewportRef?.current && !hasInitialized.current && !isResizing && !isDragging) {
       const viewportRect = viewportRef.current.getBoundingClientRect();
-      setFramePosition({
+      const newPosition = {
         x: (viewportRect.width - frameSize.width) / 2,
         y: (viewportRect.height - frameSize.height) / 2
-      });
+      };
+
+      setFramePosition(newPosition);
+      hasInitialized.current = true;
     }
-  }, [isVisible, frameSize.width, frameSize.height, viewportRef]);
+    
+    // Reset initialization flag when component becomes invisible
+    if (!isVisible) {
+      hasInitialized.current = false;
+    }
+  }, [isVisible, viewportRef]); // Removed frameSize from dependencies to prevent re-centering during resize
 
   // Mouse event handlers
   const handleMouseDown = useCallback((e, action, handle = null) => {
@@ -33,17 +45,28 @@ const ViewportCaptureFrame = ({ isVisible, onCapture, onCancel, viewportRef }) =
     }
     
     if (action === 'drag') {
+
       setIsDragging(true);
       setDragStart({
         x: e.clientX - framePosition.x,
         y: e.clientY - framePosition.y
       });
     } else if (action === 'resize') {
+
       setIsResizing(true);
       setResizeHandle(handle);
       setDragStart({ x: e.clientX, y: e.clientY });
+      // Store initial frame state for accurate resize calculations
+      const initialState = {
+        x: framePosition.x,
+        y: framePosition.y,
+        width: frameSize.width,
+        height: frameSize.height
+      };
+
+      setInitialFrameState(initialState);
     }
-  }, [framePosition]);
+  }, [framePosition, frameSize]);
 
   const handleMouseMove = useCallback((e) => {
     if (isDragging) {
@@ -54,47 +77,66 @@ const ViewportCaptureFrame = ({ isVisible, onCapture, onCancel, viewportRef }) =
       const maxX = window.innerWidth - frameSize.width;
       const maxY = window.innerHeight - frameSize.height;
       
-      setFramePosition({
+      const finalPosition = {
         x: Math.max(0, Math.min(maxX, newX)),
         y: Math.max(0, Math.min(maxY, newY))
-      });
+      };
+      
+
+      
+      setFramePosition(finalPosition);
     } else if (isResizing && resizeHandle) {
       const deltaX = e.clientX - dragStart.x;
       const deltaY = e.clientY - dragStart.y;
       
-      let newWidth = frameSize.width;
-      let newHeight = frameSize.height;
-      let newX = framePosition.x;
-      let newY = framePosition.y;
+      let newWidth = initialFrameState.width;
+      let newHeight = initialFrameState.height;
+      let newX = initialFrameState.x;
+      let newY = initialFrameState.y;
       
-      // Handle different resize directions
+      // Handle different resize directions with smooth calculations from initial state
       if (resizeHandle.includes('right')) {
-        newWidth = Math.max(200, frameSize.width + deltaX);
+        newWidth = Math.max(200, initialFrameState.width + deltaX);
       }
       if (resizeHandle.includes('left')) {
-        newWidth = Math.max(200, frameSize.width - deltaX);
-        newX = framePosition.x + deltaX;
+        const widthChange = -deltaX;
+        newWidth = Math.max(200, initialFrameState.width + widthChange);
+        newX = initialFrameState.x + deltaX;
       }
       if (resizeHandle.includes('bottom')) {
-        newHeight = Math.max(150, frameSize.height + deltaY);
+        newHeight = Math.max(150, initialFrameState.height + deltaY);
       }
       if (resizeHandle.includes('top')) {
-        newHeight = Math.max(150, frameSize.height - deltaY);
-        newY = framePosition.y + deltaY;
+        const heightChange = -deltaY;
+        newHeight = Math.max(150, initialFrameState.height + heightChange);
+        newY = initialFrameState.y + deltaY;
       }
       
-      // Keep frame within viewport bounds
+      // Keep frame within viewport bounds with smart constraint handling
       const maxX = window.innerWidth - newWidth;
       const maxY = window.innerHeight - newHeight;
       
-      setFrameSize({ width: newWidth, height: newHeight });
-      setFramePosition({
-        x: Math.max(0, Math.min(maxX, newX)),
-        y: Math.max(0, Math.min(maxY, newY))
-      });
-      setDragStart({ x: e.clientX, y: e.clientY });
+      // Apply bounds constraints while maintaining proportions
+      const constrainedX = Math.max(0, Math.min(maxX, newX));
+      const constrainedY = Math.max(0, Math.min(maxY, newY));
+      
+      // If position was constrained, adjust the size to maintain cursor relationship
+      let finalWidth = newWidth;
+      let finalHeight = newHeight;
+      
+      if (constrainedX !== newX && resizeHandle.includes('left')) {
+        finalWidth = initialFrameState.width + (initialFrameState.x - constrainedX);
+        finalWidth = Math.max(200, finalWidth);
+      }
+      if (constrainedY !== newY && resizeHandle.includes('top')) {
+        finalHeight = initialFrameState.height + (initialFrameState.y - constrainedY);
+        finalHeight = Math.max(150, finalHeight);
+      }
+      
+      setFrameSize({ width: finalWidth, height: finalHeight });
+      setFramePosition({ x: constrainedX, y: constrainedY });
     }
-  }, [isDragging, isResizing, resizeHandle, dragStart, frameSize, framePosition]);
+  }, [isDragging, isResizing, resizeHandle, dragStart, frameSize, framePosition, initialFrameState]);
 
   const handleMouseUp = useCallback(() => {
     setIsDragging(false);
@@ -238,15 +280,16 @@ const ViewportCaptureFrame = ({ isVisible, onCapture, onCancel, viewportRef }) =
       0, 0, captureWidth, captureHeight
     );
 
-    // Convert to data URL
-    const dataUrl = cropCanvas.toDataURL('image/png', 0.9);
+    // Convert to data URL with moderate quality to reduce initial size
+    const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.8);
     console.log('✅ Capture successful, data URL length:', dataUrl.length);
     console.log('🖼️ Captured image preview (first 200 chars):', dataUrl.substring(0, 200));
+    console.log('🖼️ Image size:', (dataUrl.length * 0.75 / 1024).toFixed(1), 'KB');
     
     // Debug: Also capture full canvas for comparison
-    const fullCanvasDataUrl = canvas.toDataURL('image/png', 0.9);
+    const fullCanvasDataUrl = canvas.toDataURL('image/jpeg', 0.8);
     console.log('🖼️ Full canvas capture length:', fullCanvasDataUrl.length);
-    console.log('🖼️ Full canvas preview (first 200 chars):', fullCanvasDataUrl.substring(0, 200));
+    console.log('🖼️ Full canvas size:', (fullCanvasDataUrl.length * 0.75 / 1024).toFixed(1), 'KB');
     
     // Store for preview
     setLastCaptured(dataUrl);
@@ -295,7 +338,7 @@ const ViewportCaptureFrame = ({ isVisible, onCapture, onCancel, viewportRef }) =
     ctx.font = '14px system-ui, -apple-system, sans-serif';
     ctx.fillText('Preview not available', frameSize.width / 2, frameSize.height / 2 + 35);
 
-    const dataUrl = fallbackCanvas.toDataURL('image/png');
+    const dataUrl = fallbackCanvas.toDataURL('image/jpeg', 0.8);
     setLastCaptured(dataUrl);
     onCapture(dataUrl);
   }, [frameSize, onCapture]);
@@ -333,50 +376,50 @@ const ViewportCaptureFrame = ({ isVisible, onCapture, onCancel, viewportRef }) =
           {/* Resize handles */}
           {/* Top-left */}
           <div 
-            className="absolute -top-2 -left-2 w-6 h-6 border-l-4 border-t-4 border-white rounded-tl-lg cursor-nw-resize hover:border-purple-400 transition-colors"
+            className="resize-handles absolute -top-2 -left-2 w-6 h-6 border-l-4 border-t-4 border-white rounded-tl-lg cursor-nw-resize hover:border-purple-400 transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'top-left')}
           ></div>
           
           {/* Top-right */}
           <div 
-            className="absolute -top-2 -right-2 w-6 h-6 border-r-4 border-t-4 border-white rounded-tr-lg cursor-ne-resize hover:border-purple-400 transition-colors"
+            className="resize-handles absolute -top-2 -right-2 w-6 h-6 border-r-4 border-t-4 border-white rounded-tr-lg cursor-ne-resize hover:border-purple-400 transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'top-right')}
           ></div>
           
           {/* Bottom-left */}
           <div 
-            className="absolute -bottom-2 -left-2 w-6 h-6 border-l-4 border-b-4 border-white rounded-bl-lg cursor-sw-resize hover:border-purple-400 transition-colors"
+            className="resize-handles absolute -bottom-2 -left-2 w-6 h-6 border-l-4 border-b-4 border-white rounded-bl-lg cursor-sw-resize hover:border-purple-400 transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'bottom-left')}
           ></div>
           
           {/* Bottom-right */}
           <div 
-            className="absolute -bottom-2 -right-2 w-6 h-6 border-r-4 border-b-4 border-white rounded-br-lg cursor-se-resize hover:border-purple-400 transition-colors"
+            className="resize-handles absolute -bottom-2 -right-2 w-6 h-6 border-r-4 border-b-4 border-white rounded-br-lg cursor-se-resize hover:border-purple-400 transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'bottom-right')}
           ></div>
           
           {/* Edge resize handles */}
           {/* Top edge */}
           <div 
-            className="absolute -top-1 left-1/2 transform -translate-x-1/2 w-8 h-2 cursor-n-resize hover:bg-white/20 rounded transition-colors"
+            className="resize-handles absolute -top-1 left-1/2 transform -translate-x-1/2 w-8 h-2 cursor-n-resize hover:bg-white/20 rounded transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'top')}
           ></div>
           
           {/* Right edge */}
           <div 
-            className="absolute -right-1 top-1/2 transform -translate-y-1/2 w-2 h-8 cursor-e-resize hover:bg-white/20 rounded transition-colors"
+            className="resize-handles absolute -right-1 top-1/2 transform -translate-y-1/2 w-2 h-8 cursor-e-resize hover:bg-white/20 rounded transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'right')}
           ></div>
           
           {/* Bottom edge */}
           <div 
-            className="absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-8 h-2 cursor-s-resize hover:bg-white/20 rounded transition-colors"
+            className="resize-handles absolute -bottom-1 left-1/2 transform -translate-x-1/2 w-8 h-2 cursor-s-resize hover:bg-white/20 rounded transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'bottom')}
           ></div>
           
           {/* Left edge */}
           <div 
-            className="absolute -left-1 top-1/2 transform -translate-y-1/2 w-2 h-8 cursor-w-resize hover:bg-white/20 rounded transition-colors"
+            className="resize-handles absolute -left-1 top-1/2 transform -translate-y-1/2 w-2 h-8 cursor-w-resize hover:bg-white/20 rounded transition-colors"
             onMouseDown={(e) => handleMouseDown(e, 'resize', 'left')}
           ></div>
           

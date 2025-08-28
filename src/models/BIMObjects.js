@@ -1048,4 +1048,345 @@ class Window extends BaseBIMObject {
   }
 }
 
-export { BaseBIMObject, Wall, Door, Window }; 
+/**
+ * Column Class - IFCCOLUMN implementation
+ * 
+ * Represents structural columns with standardized properties following IFC standards.
+ * Supports rectangular and circular cross-sections, inclination angles, and various materials.
+ */
+class Column extends BaseBIMObject {
+  constructor(config = {}) {
+    super({
+      ...config,
+      ifcType: 'IFCCOLUMN' // IFC type for columns
+    });
+
+    // Column-specific dimensions
+    this.dimensions = this.validateColumnDimensions(config.dimensions) || this.getDefaultColumnDimensions();
+    
+    // Shape and geometry properties
+    this.shape = config.shape || 'rect'; // 'rect' or 'circle'
+    this.crossSection = this.validateCrossSection(config.crossSection) || this.getDefaultCrossSection();
+    
+    // Inclination properties
+    this.inclinationAngle = this.clamp(config.inclinationAngle || 0, 0, 45); // Degrees
+    this.inclinationAxis = config.inclinationAxis || 'x'; // 'x', 'y', or 'z'
+    this.rotation = config.rotation || 0; // Rotation around vertical axis
+    
+    // Structural properties
+    this.structural = this.validateStructuralProperties(config.structural) || this.getDefaultColumnStructural();
+    
+    // Column type classification
+    this.columnType = config.columnType || 'structural';
+    this.function = config.function || 'load_bearing';
+    this.loadCapacity = config.loadCapacity || 0; // kN
+    
+    // Base and top connections
+    this.baseConnection = config.baseConnection || 'fixed';
+    this.topConnection = config.topConnection || 'pinned';
+    
+    // Transform matrix for positioning and orientation
+    this.transform = this.calculateTransformMatrix();
+  }
+
+  /**
+   * Validate column dimensions
+   */
+  validateColumnDimensions(dimensions) {
+    if (!dimensions || typeof dimensions !== 'object') return null;
+    
+    return {
+      width: Math.max(dimensions.width || 0.4, 0.1), // Minimum 10cm
+      depth: Math.max(dimensions.depth || 0.4, 0.1), // Minimum 10cm
+      height: Math.max(dimensions.height || 3.0, 0.5), // Minimum 50cm
+      radius: Math.max(dimensions.radius || 0.2, 0.05) // For circular columns, minimum 5cm
+    };
+  }
+
+  /**
+   * Get default column dimensions
+   */
+  getDefaultColumnDimensions() {
+    return {
+      width: 0.4,  // 40cm
+      depth: 0.4,  // 40cm
+      height: 3.0, // 3m
+      radius: 0.2  // 20cm radius for circular
+    };
+  }
+
+  /**
+   * Validate cross-section properties
+   */
+  validateCrossSection(crossSection) {
+    if (!crossSection || typeof crossSection !== 'object') return null;
+    
+    return {
+      area: Math.max(crossSection.area || 0, 0),
+      momentOfInertiaX: Math.max(crossSection.momentOfInertiaX || 0, 0),
+      momentOfInertiaY: Math.max(crossSection.momentOfInertiaY || 0, 0),
+      sectionModulus: Math.max(crossSection.sectionModulus || 0, 0)
+    };
+  }
+
+  /**
+   * Get default cross-section properties
+   */
+  getDefaultCrossSection() {
+    if (this.shape === 'circle') {
+      const r = this.dimensions.radius;
+      const area = Math.PI * r * r;
+      const momentOfInertia = Math.PI * Math.pow(r, 4) / 4;
+      
+      return {
+        area: area,
+        momentOfInertiaX: momentOfInertia,
+        momentOfInertiaY: momentOfInertia,
+        sectionModulus: momentOfInertia / r
+      };
+    } else {
+      const w = this.dimensions.width;
+      const d = this.dimensions.depth;
+      const area = w * d;
+      
+      return {
+        area: area,
+        momentOfInertiaX: w * Math.pow(d, 3) / 12,
+        momentOfInertiaY: d * Math.pow(w, 3) / 12,
+        sectionModulus: w * Math.pow(d, 2) / 6
+      };
+    }
+  }
+
+  /**
+   * Get default structural properties for columns
+   */
+  getDefaultColumnStructural() {
+    return {
+      loadBearing: true,
+      compressionStrength: 25.0, // MPa (typical for concrete)
+      elasticModulus: 30000, // MPa
+      reinforcement: {
+        type: 'none',
+        ratio: 0,
+        bars: []
+      },
+      buckling: {
+        effectiveLength: this.dimensions.height,
+        slendernessRatio: 0,
+        bucklingCapacity: 0
+      }
+    };
+  }
+
+  /**
+   * Calculate transform matrix for column positioning and orientation
+   */
+  calculateTransformMatrix() {
+    // Start with identity matrix
+    let transform = {
+      position: { ...this.position },
+      rotation: {
+        x: this.inclinationAxis === 'x' ? this.inclinationAngle : 0,
+        y: this.inclinationAxis === 'y' ? this.inclinationAngle : 0,
+        z: this.rotation
+      },
+      scale: { x: 1, y: 1, z: 1 }
+    };
+    
+    return transform;
+  }
+
+  /**
+   * Update transform matrix when properties change
+   */
+  updateTransform() {
+    this.transform = this.calculateTransformMatrix();
+    this.modified = new Date().toISOString();
+  }
+
+  /**
+   * Calculate volume
+   */
+  calculateVolume() {
+    if (this.shape === 'circle') {
+      return Math.PI * Math.pow(this.dimensions.radius, 2) * this.dimensions.height;
+    } else {
+      return this.dimensions.width * this.dimensions.depth * this.dimensions.height;
+    }
+  }
+
+  /**
+   * Calculate weight
+   */
+  calculateWeight() {
+    const volume = this.calculateVolume();
+    const density = this.material.density || 2400; // kg/m³
+    return volume * density; // kg
+  }
+
+  /**
+   * Calculate footprint area for 2D views
+   */
+  calculateFootprint() {
+    if (this.shape === 'circle') {
+      return Math.PI * Math.pow(this.dimensions.radius, 2);
+    } else {
+      return this.dimensions.width * this.dimensions.depth;
+    }
+  }
+
+  /**
+   * Get 2D footprint polygon for rendering
+   */
+  getFootprintPolygon() {
+    const centerX = this.position.x;
+    const centerZ = this.position.z;
+    
+    if (this.shape === 'circle') {
+      // Generate circle points
+      const points = [];
+      const segments = 16;
+      const radius = this.dimensions.radius;
+      
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        points.push({
+          x: centerX + Math.cos(angle) * radius,
+          z: centerZ + Math.sin(angle) * radius
+        });
+      }
+      
+      return points;
+    } else {
+      // Rectangle points
+      const halfWidth = this.dimensions.width / 2;
+      const halfDepth = this.dimensions.depth / 2;
+      
+      return [
+        { x: centerX - halfWidth, z: centerZ - halfDepth },
+        { x: centerX + halfWidth, z: centerZ - halfDepth },
+        { x: centerX + halfWidth, z: centerZ + halfDepth },
+        { x: centerX - halfWidth, z: centerZ + halfDepth }
+      ];
+    }
+  }
+
+  /**
+   * Calculate bounding box (AABB)
+   */
+  calculateBoundingBox() {
+    const footprint = this.getFootprintPolygon();
+    
+    let minX = Infinity, maxX = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    
+    footprint.forEach(point => {
+      minX = Math.min(minX, point.x);
+      maxX = Math.max(maxX, point.x);
+      minZ = Math.min(minZ, point.z);
+      maxZ = Math.max(maxZ, point.z);
+    });
+    
+    // Account for inclination affecting height and horizontal extent
+    const inclinationOffset = this.dimensions.height * Math.sin(this.inclinationAngle * Math.PI / 180);
+    
+    return {
+      min: {
+        x: minX - inclinationOffset,
+        y: this.position.y,
+        z: minZ - inclinationOffset
+      },
+      max: {
+        x: maxX + inclinationOffset,
+        y: this.position.y + this.dimensions.height * Math.cos(this.inclinationAngle * Math.PI / 180),
+        z: maxZ + inclinationOffset
+      }
+    };
+  }
+
+  /**
+   * Generate 3D geometry data for rendering
+   */
+  generateGeometry() {
+    const geometry = {
+      type: this.shape === 'circle' ? 'cylinder' : 'box',
+      dimensions: { ...this.dimensions },
+      position: { ...this.position },
+      rotation: { ...this.transform.rotation },
+      material: this.material.name || 'concrete'
+    };
+    
+    return geometry;
+  }
+
+  /**
+   * Convert to IFC export format
+   */
+  toIFCJSON() {
+    return {
+      ifcType: 'IFCCOLUMN',
+      ifcGUID: this.ifcGUID,
+      name: this.name,
+      description: this.description,
+      objectType: 'Column',
+      predefinedType: 'COLUMN',
+      
+      // Geometric representation
+      geometry: this.generateGeometry(),
+      position: this.position,
+      orientation: this.orientation,
+      
+      // Column-specific properties
+      shape: this.shape,
+      dimensions: this.dimensions,
+      crossSection: this.crossSection,
+      inclination: {
+        angle: this.inclinationAngle,
+        axis: this.inclinationAxis
+      },
+      
+      // Material and structural properties
+      material: this.material,
+      structural: this.structural,
+      
+      // Calculated properties
+      volume: this.calculateVolume(),
+      weight: this.calculateWeight(),
+      footprint: this.calculateFootprint()
+    };
+  }
+
+  /**
+   * Export column data
+   */
+  toExport() {
+    return {
+      ...super.toExport(),
+      
+      // Column-specific properties
+      shape: this.shape,
+      dimensions: this.dimensions,
+      crossSection: this.crossSection,
+      inclinationAngle: this.inclinationAngle,
+      inclinationAxis: this.inclinationAxis,
+      rotation: this.rotation,
+      columnType: this.columnType,
+      function: this.function,
+      loadCapacity: this.loadCapacity,
+      baseConnection: this.baseConnection,
+      topConnection: this.topConnection,
+      structural: this.structural,
+      transform: this.transform,
+      
+      // Calculated properties
+      geometry: this.generateGeometry(),
+      volume: this.calculateVolume(),
+      weight: this.calculateWeight(),
+      footprint: this.calculateFootprint(),
+      boundingBox: this.calculateBoundingBox()
+    };
+  }
+}
+
+export { BaseBIMObject, Wall, Door, Window, Column }; 

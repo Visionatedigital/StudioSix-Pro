@@ -274,19 +274,22 @@ const SlabPropertyPanel = ({
             <div>
               <span className="text-blue-600 dark:text-blue-400">Area:</span>
               <span className="ml-1 text-blue-800 dark:text-blue-200">
-                {(properties.width * properties.depth).toFixed(2)} m²
+                {(typeof properties.width === 'number' && typeof properties.depth === 'number') 
+                  ? (properties.width * properties.depth).toFixed(2) : '0.00'} m²
               </span>
             </div>
             <div>
               <span className="text-blue-600 dark:text-blue-400">Volume:</span>
               <span className="ml-1 text-blue-800 dark:text-blue-200">
-                {(properties.width * properties.depth * properties.thickness).toFixed(3)} m³
+                {(typeof properties.width === 'number' && typeof properties.depth === 'number' && typeof properties.thickness === 'number') 
+                  ? (properties.width * properties.depth * properties.thickness).toFixed(3) : '0.000'} m³
               </span>
             </div>
             <div>
               <span className="text-blue-600 dark:text-blue-400">Weight:</span>
               <span className="ml-1 text-blue-800 dark:text-blue-200">
-                {((properties.width * properties.depth * properties.thickness) * currentMaterial.density).toFixed(1)} kg
+                {(typeof properties.width === 'number' && typeof properties.depth === 'number' && typeof properties.thickness === 'number' && typeof currentMaterial.density === 'number') 
+                  ? ((properties.width * properties.depth * properties.thickness) * currentMaterial.density).toFixed(1) : '0.0'} kg
               </span>
             </div>
           </div>

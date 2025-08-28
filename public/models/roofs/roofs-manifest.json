@@ -1,0 +1,255 @@
+{
+  "version": "1.0.0",
+  "type": "roofs",
+  "description": "Local roof models catalog for StudioSix Pro",
+  "lastUpdated": "2024-01-01",
+  "models": [
+    {
+      "id": "gable-roof-1",
+      "name": "Classic Gable Roof",
+      "description": "Traditional gabled roof with medium pitch",
+      "type": "gable",
+      "material": "asphalt_shingles",
+      "category": "residential",
+      "dimensions": {
+        "width": 12.0,
+        "length": 16.0,
+        "height": 4.0,
+        "pitch": 30,
+        "overhang": 0.6
+      },
+      "files": {
+        "model": "gable-roof-1.fbx",
+        "thumbnail": "gable-roof-1.jpg"
+      },
+      "properties": {
+        "hasGutters": true,
+        "material": "asphalt_shingles",
+        "style": "classic",
+        "waterproof": true
+      },
+      "tags": ["gable", "residential", "asphalt", "traditional"]
+    },
+    {
+      "id": "hip-roof-1",
+      "name": "Hip Roof Type 1",
+      "description": "Four-sided hip roof design",
+      "type": "hip",
+      "material": "clay_tiles",
+      "category": "residential",
+      "dimensions": {
+        "width": 14.0,
+        "length": 18.0,
+        "height": 5.0,
+        "pitch": 35,
+        "overhang": 0.8
+      },
+      "files": {
+        "model": "hip-roof-1.fbx",
+        "thumbnail": "hip-roof-1.jpg"
+      },
+      "properties": {
+        "hasGutters": true,
+        "material": "clay_tiles",
+        "style": "mediterranean",
+        "waterproof": true
+      },
+      "tags": ["hip", "residential", "clay", "mediterranean"]
+    },
+    {
+      "id": "flat-roof-1",
+      "name": "Modern Flat Roof",
+      "description": "Contemporary flat roof with parapet",
+      "type": "flat",
+      "material": "membrane",
+      "category": "commercial",
+      "dimensions": {
+        "width": 20.0,
+        "length": 30.0,
+        "height": 0.3,
+        "pitch": 2,
+        "overhang": 0.0
+      },
+      "files": {
+        "model": "flat-roof-1.fbx",
+        "thumbnail": "flat-roof-1.jpg"
+      },
+      "properties": {
+        "hasGutters": false,
+        "material": "membrane",
+        "style": "modern",
+        "waterproof": true
+      },
+      "tags": ["flat", "commercial", "membrane", "modern"]
+    },
+    {
+      "id": "shed-roof-1",
+      "name": "Shed Roof Design",
+      "description": "Single-slope shed roof",
+      "type": "shed",
+      "material": "metal",
+      "category": "industrial",
+      "dimensions": {
+        "width": 10.0,
+        "length": 20.0,
+        "height": 3.0,
+        "pitch": 15,
+        "overhang": 0.4
+      },
+      "files": {
+        "model": "shed-roof-1.fbx",
+        "thumbnail": "shed-roof-1.jpg"
+      },
+      "properties": {
+        "hasGutters": true,
+        "material": "metal",
+        "style": "industrial",
+        "waterproof": true
+      },
+      "tags": ["shed", "industrial", "metal", "simple"]
+    },
+    {
+      "id": "mansard-roof-1",
+      "name": "Mansard Roof Classic",
+      "description": "Traditional mansard roof with dormers",
+      "type": "mansard",
+      "material": "slate",
+      "category": "historic",
+      "dimensions": {
+        "width": 15.0,
+        "length": 20.0,
+        "height": 6.0,
+        "pitch": 60,
+        "overhang": 0.5
+      },
+      "files": {
+        "model": "mansard-roof-1.fbx",
+        "thumbnail": "mansard-roof-1.jpg"
+      },
+      "properties": {
+        "hasGutters": true,
+        "material": "slate",
+        "style": "historic",
+        "waterproof": true
+      },
+      "tags": ["mansard", "historic", "slate", "dormer"]
+    },
+    {
+      "id": "gambrel-roof-1",
+      "name": "Gambrel Barn Roof",
+      "description": "Traditional barn-style gambrel roof",
+      "type": "gambrel",
+      "material": "wood_shingles",
+      "category": "agricultural",
+      "dimensions": {
+        "width": 16.0,
+        "length": 24.0,
+        "height": 8.0,
+        "pitch": 45,
+        "overhang": 1.0
+      },
+      "files": {
+        "model": "gambrel-roof-1.fbx",
+        "thumbnail": "gambrel-roof-1.jpg"
+      },
+      "properties": {
+        "hasGutters": false,
+        "material": "wood_shingles",
+        "style": "rustic",
+        "waterproof": true
+      },
+      "tags": ["gambrel", "agricultural", "wood", "barn"]
+    }
+  ],
+  "categories": [
+    {
+      "id": "residential",
+      "name": "Residential Roofs",
+      "description": "Roof designs for homes and residential buildings"
+    },
+    {
+      "id": "commercial",
+      "name": "Commercial Roofs",
+      "description": "Roof solutions for commercial and office buildings"
+    },
+    {
+      "id": "industrial",
+      "name": "Industrial Roofs",
+      "description": "Heavy-duty roofing for industrial facilities"
+    },
+    {
+      "id": "historic",
+      "name": "Historic Roofs",
+      "description": "Traditional and heritage roof styles"
+    },
+    {
+      "id": "agricultural",
+      "name": "Agricultural Roofs",
+      "description": "Roof designs for barns and farm buildings"
+    }
+  ],
+  "materials": [
+    {
+      "id": "asphalt_shingles",
+      "name": "Asphalt Shingles",
+      "properties": {
+        "density": 12,
+        "color": "#555555",
+        "finish": "textured"
+      }
+    },
+    {
+      "id": "clay_tiles",
+      "name": "Clay Tiles",
+      "properties": {
+        "density": 45,
+        "color": "#CC6633",
+        "finish": "glazed"
+      }
+    },
+    {
+      "id": "membrane",
+      "name": "Membrane Roofing",
+      "properties": {
+        "density": 3,
+        "color": "#DDDDDD",
+        "finish": "smooth"
+      }
+    },
+    {
+      "id": "metal",
+      "name": "Metal Roofing",
+      "properties": {
+        "density": 8,
+        "color": "#888888",
+        "finish": "corrugated"
+      }
+    },
+    {
+      "id": "slate",
+      "name": "Slate Tiles",
+      "properties": {
+        "density": 60,
+        "color": "#334455",
+        "finish": "natural"
+      }
+    },
+    {
+      "id": "wood_shingles",
+      "name": "Wood Shingles",
+      "properties": {
+        "density": 8,
+        "color": "#996633",
+        "finish": "weathered"
+      }
+    }
+  ]
+}
+
+
+
+
+
+
+
+

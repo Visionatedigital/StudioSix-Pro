@@ -46,6 +46,16 @@ const Model3DLoader = ({
     rotation,
     scale
   });
+  
+  // Enhanced debugging for FBX loading
+  console.log('🔍 Model3DLoader DEBUG:', {
+    modelUrl: modelUrl,
+    format: format,
+    formatLower: formatLower,
+    loadError: loadError,
+    isLoading: isLoading,
+    willUseFallback: !modelUrl || loadError
+  });
 
   /**
    * OBJ Model Loader Component
@@ -132,6 +142,7 @@ const Model3DLoader = ({
     const [error, setError] = useState(null);
 
     useEffect(() => {
+      console.log('🚀 FBXModel: Starting FBX load for URL:', url);
       const loader = new FBXLoader();
       
       loader.load(
@@ -179,6 +190,12 @@ const Model3DLoader = ({
         // onError
         (error) => {
           console.error('❌ Failed to load FBX model:', error);
+          console.error('❌ FBX Error details:', {
+            url: url,
+            error: error,
+            errorMessage: error.message,
+            errorType: error.type || 'unknown'
+          });
           setLoadError(true);
           setIsLoading(false);
           setError(error);
@@ -301,7 +318,13 @@ const Model3DLoader = ({
   const ModelContent = () => {
     // If model URL is not available or there's an error, show fallback
     if (!modelUrl || loadError) {
-      console.log('📦 Using fallback box for model:', { modelUrl, loadError });
+      console.log('📦 Using fallback box for model:', { 
+        modelUrl, 
+        loadError, 
+        hasModelUrl: !!modelUrl,
+        modelUrlType: typeof modelUrl,
+        modelUrlValue: modelUrl 
+      });
       return <FallbackBox />;
     }
 

@@ -10,17 +10,50 @@ class SupabaseProjectsService {
   }
 
   /**
-   * Check if Supabase is available
+   * Check if Supabase is available and table exists
    */
-  isAvailable() {
-    return !!supabase;
+  async isAvailable() {
+    if (!supabase) {
+      console.warn('⚠️ Supabase client not initialized');
+      return false;
+    }
+
+    // For manual auth users, bypass Supabase authentication and just check table access
+    try {
+      // console.log('🔍 Testing user_projects table access...');
+      
+      // Use service role or admin mode to test table existence
+      // This bypasses RLS for the availability check
+      const { data, error } = await supabase
+        .from('user_projects')
+        .select('count')
+        .limit(1);
+      
+      if (error) {
+        if (error.code === 'PGRST116') {
+          // Table doesn't exist
+          console.warn('⚠️ user_projects table does not exist. Please run the Supabase setup SQL.');
+          console.warn('📖 See SUPABASE_SETUP.md for instructions');
+          return false;
+        } else {
+          console.warn('⚠️ Supabase query error during availability check:', error);
+          return false;
+        }
+      }
+      
+      // console.log('✅ Supabase user_projects table is accessible');
+      return true;
+    } catch (err) {
+      console.warn('⚠️ Supabase connection test failed:', err.message);
+      return false;
+    }
   }
 
   /**
    * Create the projects table (run this once)
    */
   async createProjectsTable() {
-    if (!this.isAvailable()) {
+    if (!await this.isAvailable()) {
       throw new Error('Supabase not available');
     }
 
@@ -58,45 +91,64 @@ class SupabaseProjectsService {
   }
 
   /**
-   * Save a project for a specific user
+   * Save a project for a specific user (supports manual auth)
    */
   async saveProject(userId, project) {
-    if (!this.isAvailable()) {
+    if (!await this.isAvailable()) {
       console.warn('⚠️ Supabase not available, skipping project save');
       return { success: false, error: 'Supabase not available' };
     }
 
     try {
+      console.log('💾 Attempting to save project to Supabase:', project.name);
+      
+      // Create minimal project data first to test
       const projectData = {
         user_id: userId,
         project_id: project.id,
-        name: project.name,
-        description: project.description,
-        type: project.type,
-        template: project.template,
-        project_data: project.projectData,
-        last_modified: new Date().toISOString(),
-        last_opened: project.lastOpened || new Date().toISOString(),
-        progress: project.progress || 0,
-        version: project.version || '1.0.0',
-        local_path: project.localPath,
-        thumbnail_path: project.thumbnailPath,
-        file_path: project.filePath,
-        format: project.format,
+        name: project.name || 'Untitled Project',
+        description: project.description || '',
+        type: project.type || 'Project',
         saved: true,
-        has_unsaved_changes: project.hasUnsavedChanges || false
+        format: project.format || 'six.bim'
       };
 
+      console.log('💾 Project data to save:', projectData);
+
+      // Try simple insert first without upsert
       const { data, error } = await supabase
         .from(this.tableName)
-        .upsert(projectData, {
-          onConflict: 'user_id,project_id'
-        })
-        .select()
-        .single();
+        .insert([projectData])
+        .select();
 
       if (error) {
         console.error('❌ Failed to save project:', error);
+        console.error('❌ Error details:', {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          hint: error.hint
+        });
+        
+        // If it's a conflict error, try update instead
+        if (error.code === '23505') {
+          console.log('🔄 Conflict detected, trying update instead...');
+          const { data: updateData, error: updateError } = await supabase
+            .from(this.tableName)
+            .update(projectData)
+            .eq('user_id', userId)
+            .eq('project_id', project.id)
+            .select();
+            
+          if (updateError) {
+            console.error('❌ Update also failed:', updateError);
+            return { success: false, error: updateError.message };
+          }
+          
+          console.log('✅ Project updated successfully');
+          return { success: true, data: updateData[0] };
+        }
+        
         return { success: false, error: error.message };
       }
 
@@ -112,23 +164,46 @@ class SupabaseProjectsService {
    * Get all projects for a specific user
    */
   async getUserProjects(userId) {
-    if (!this.isAvailable()) {
+    if (!await this.isAvailable()) {
       console.warn('⚠️ Supabase not available, returning empty projects');
       return { success: false, error: 'Supabase not available', projects: [] };
     }
 
     try {
-      const { data, error } = await supabase
+      console.log('🔍 Fetching projects for user:', userId);
+      
+      // First try a simpler query to test basic access
+      const { data: testData, error: testError } = await supabase
         .from(this.tableName)
         .select('*')
         .eq('user_id', userId)
-        .eq('saved', true)
+        .limit(5);
+
+      if (testError) {
+        console.error('❌ Basic query failed:', testError);
+        return { success: false, error: testError.message, projects: [] };
+      }
+
+      console.log('✅ Basic query succeeded, found records:', testData?.length || 0);
+
+      // Now try the full query without saved filter first
+      const { data: allData, error: allError } = await supabase
+        .from(this.tableName)
+        .select('*')
+        .eq('user_id', userId)
         .order('last_modified', { ascending: false });
 
-      if (error) {
-        console.error('❌ Failed to fetch user projects:', error);
-        return { success: false, error: error.message, projects: [] };
+      if (allError) {
+        console.error('❌ Query without saved filter failed:', allError);
+        return { success: false, error: allError.message, projects: [] };
       }
+
+      console.log('✅ Query without saved filter succeeded, found records:', allData?.length || 0);
+
+      // Filter saved projects in JavaScript instead of SQL to avoid type issues
+      const data = allData.filter(project => project.saved === true);
+      
+      console.log('✅ Final filtered data:', data?.length || 0, 'saved projects');
 
       // Convert Supabase format back to project format
       const projects = data.map(this.convertFromSupabaseFormat);
@@ -145,7 +220,7 @@ class SupabaseProjectsService {
    * Update a project's metadata
    */
   async updateProject(userId, projectId, updates) {
-    if (!this.isAvailable()) {
+    if (!await this.isAvailable()) {
       return { success: false, error: 'Supabase not available' };
     }
 
@@ -180,7 +255,7 @@ class SupabaseProjectsService {
    * Delete a project
    */
   async deleteProject(userId, projectId) {
-    if (!this.isAvailable()) {
+    if (!await this.isAvailable()) {
       return { success: false, error: 'Supabase not available' };
     }
 
@@ -243,7 +318,7 @@ class SupabaseProjectsService {
    * Clear all projects for a user (useful for testing)
    */
   async clearUserProjects(userId) {
-    if (!this.isAvailable()) {
+    if (!await this.isAvailable()) {
       return { success: false, error: 'Supabase not available' };
     }
 

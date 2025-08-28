@@ -1,0 +1,140 @@
+{
+  "version": "1.0.0",
+  "type": "staircases",
+  "description": "Local staircase models catalog for StudioSix Pro",
+  "lastUpdated": "2024-01-01",
+  "models": [
+    {
+      "id": "concrete-stair-1",
+      "name": "Concrete Staircase Type 1",
+      "description": "Standard concrete staircase design",
+      "type": "straight",
+      "material": "concrete",
+      "category": "basic",
+      "dimensions": {
+        "width": 1.2,
+        "totalRun": 3.6,
+        "totalRise": 2.8,
+        "numberOfSteps": 14,
+        "treadDepth": 0.26,
+        "riserHeight": 0.2
+      },
+      "files": {
+        "model": "Concrete Stair1_fbx.fbx",
+        "thumbnail": "concrete-stair-1.jpg"
+      },
+      "properties": {
+        "hasHandrail": false,
+        "material": "concrete",
+        "style": "basic"
+      },
+      "tags": ["concrete", "basic", "straight", "commercial"]
+    },
+    {
+      "id": "concrete-stair-2",
+      "name": "Concrete Staircase Type 2",
+      "description": "Enhanced concrete staircase with details",
+      "type": "straight",
+      "material": "concrete",
+      "category": "modern",
+      "dimensions": {
+        "width": 1.3,
+        "totalRun": 4.0,
+        "totalRise": 3.0,
+        "numberOfSteps": 15,
+        "treadDepth": 0.27,
+        "riserHeight": 0.2
+      },
+      "files": {
+        "model": "Concrete Stair2_fbx.fbx",
+        "thumbnail": "concrete-stair-2.jpg"
+      },
+      "properties": {
+        "hasHandrail": false,
+        "material": "concrete",
+        "style": "modern"
+      },
+      "tags": ["concrete", "modern", "straight", "commercial"]
+    },
+    {
+      "id": "concrete-stair-3",
+      "name": "Concrete Staircase Type 3",
+      "description": "Wide concrete staircase design",
+      "type": "straight",
+      "material": "concrete",
+      "category": "modern",
+      "dimensions": {
+        "width": 1.5,
+        "totalRun": 4.2,
+        "totalRise": 3.2,
+        "numberOfSteps": 16,
+        "treadDepth": 0.26,
+        "riserHeight": 0.2
+      },
+      "files": {
+        "model": "Concrete Stair_3_fbx.fbx",
+        "thumbnail": "concrete-stair-3.jpg"
+      },
+      "properties": {
+        "hasHandrail": false,
+        "material": "concrete",
+        "style": "modern"
+      },
+      "tags": ["concrete", "modern", "straight", "wide"]
+    },
+    {
+      "id": "concrete-stair-4",
+      "name": "Concrete Staircase Type 4",
+      "description": "Compact concrete staircase",
+      "type": "straight",
+      "material": "concrete",
+      "category": "compact",
+      "dimensions": {
+        "width": 1.0,
+        "totalRun": 3.2,
+        "totalRise": 2.6,
+        "numberOfSteps": 13,
+        "treadDepth": 0.25,
+        "riserHeight": 0.2
+      },
+      "files": {
+        "model": "Concrete Stair_4_fbx.fbx",
+        "thumbnail": "concrete-stair-4.jpg"
+      },
+      "properties": {
+        "hasHandrail": false,
+        "material": "concrete",
+        "style": "compact"
+      },
+      "tags": ["concrete", "compact", "straight", "narrow"]
+    }
+  ],
+  "categories": [
+    {
+      "id": "basic",
+      "name": "Basic Staircases",
+      "description": "Simple, functional staircase designs"
+    },
+    {
+      "id": "modern",
+      "name": "Modern Staircases",
+      "description": "Contemporary staircase designs"
+    },
+    {
+      "id": "compact",
+      "name": "Compact Staircases",
+      "description": "Space-saving staircase solutions"
+    }
+  ],
+  "materials": [
+    {
+      "id": "concrete",
+      "name": "Concrete",
+      "properties": {
+        "density": 2400,
+        "color": "#888888",
+        "finish": "smooth"
+      }
+    }
+  ]
+}

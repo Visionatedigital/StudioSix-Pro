@@ -1,0 +1,488 @@
+/**
+ * CommandExecutionWindow Styles
+ * Cursor-inspired dark theme with collapsible command boxes
+ */
+
+.command-execution-window {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  font-family: 'SF Mono', Consolas, 'Monaco', monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  max-width: 600px;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #333;
+}
+
+/* Header Section */
+.execution-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #333;
+  background: #252526;
+}
+
+.execution-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.execution-title h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.close-button {
+  background: none;
+  border: none;
+  color: #8c8c8c;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.close-button:hover {
+  background: #3c3c3c;
+  color: #ffffff;
+}
+
+.execution-description {
+  color: #8c8c8c;
+  font-size: 12px;
+  margin-bottom: 12px;
+  line-height: 1.5;
+}
+
+.execution-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress-bar {
+  height: 4px;
+  background: #3c3c3c;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #007acc, #0099ff);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #8c8c8c;
+  text-align: right;
+}
+
+/* Steps Section */
+.execution-steps {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.execution-step {
+  border-bottom: 1px solid #333;
+  transition: all 0.2s;
+}
+
+.execution-step.executing {
+  background: rgba(0, 122, 204, 0.05);
+  border-left: 3px solid #007acc;
+}
+
+.execution-step.completed {
+  background: rgba(0, 120, 70, 0.05);
+  border-left: 3px solid #007850;
+}
+
+.execution-step.failed {
+  background: rgba(240, 60, 60, 0.05);
+  border-left: 3px solid #f03c3c;
+}
+
+.step-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.step-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.step-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.step-icon {
+  font-size: 14px;
+  width: 16px;
+  text-align: center;
+}
+
+.step-number {
+  font-size: 11px;
+  color: #8c8c8c;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.step-title {
+  font-size: 13px;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.step-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-text {
+  font-size: 11px;
+  color: #8c8c8c;
+}
+
+.estimated-time {
+  font-size: 10px;
+  color: #6c6c6c;
+  font-style: italic;
+}
+
+.expand-icon {
+  color: #8c8c8c;
+  font-size: 12px;
+  transition: transform 0.2s;
+}
+
+.execution-step.expanded .expand-icon {
+  transform: rotate(90deg);
+}
+
+/* Step Content */
+.step-content {
+  padding: 0 20px 16px 20px;
+  border-top: 1px solid #333;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 300px;
+  }
+}
+
+.step-description {
+  color: #8c8c8c;
+  font-size: 12px;
+  margin: 12px 0;
+  line-height: 1.5;
+}
+
+/* Command Box */
+.command-box {
+  background: #2d2d30;
+  border: 1px solid #404040;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.command-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #3c3c3d;
+  border-bottom: 1px solid #404040;
+  font-size: 11px;
+}
+
+.command-type {
+  background: #007acc;
+  color: white;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.command-action {
+  color: #4fc1ff;
+  font-weight: 500;
+}
+
+.execution-spinner {
+  color: #007acc;
+  animation: spin 1s linear infinite;
+  margin-left: auto;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.command-params {
+  padding: 12px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #404040;
+}
+
+.command-params pre {
+  margin: 0;
+  font-size: 11px;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.command-result {
+  padding: 8px 12px;
+  font-size: 11px;
+}
+
+.result-success {
+  color: #4caf50;
+}
+
+.result-error {
+  color: #f44336;
+}
+
+/* Footer Section */
+.execution-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #333;
+  background: #252526;
+}
+
+.completion-message {
+  color: #4caf50;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+}
+
+.error-message {
+  color: #f44336;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* Scrollbar Styling */
+.execution-steps::-webkit-scrollbar {
+  width: 8px;
+}
+
+.execution-steps::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+.execution-steps::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 4px;
+}
+
+.execution-steps::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .command-execution-window {
+    max-width: 90vw;
+    max-height: 70vh;
+    font-size: 12px;
+  }
+  
+  .execution-header,
+  .step-header,
+  .step-content {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}
+
+/* Animation for step status changes */
+.execution-step {
+  transition: all 0.3s ease;
+}
+
+.execution-step.executing .step-icon {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Inline Execution Window Styles - StudioxSix Branding */
+.inline-execution-window {
+  background: rgba(30, 41, 59, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(148, 163, 184, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  width: 100%;
+  transition: all 0.3s ease;
+}
+
+.inline-execution-window:hover {
+  box-shadow: 0 6px 25px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(148, 163, 184, 0.15);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.inline-execution-window .execution-step {
+  border-bottom: none;
+  background: transparent;
+}
+
+.inline-execution-window .execution-step.executing {
+  background: rgba(59, 130, 246, 0.08);
+  border-left: 3px solid #3b82f6;
+}
+
+.inline-execution-window .execution-step.completed {
+  background: rgba(34, 197, 94, 0.08);
+  border-left: 3px solid #22c55e;
+}
+
+.inline-execution-window .execution-step.failed {
+  background: rgba(239, 68, 68, 0.08);
+  border-left: 3px solid #ef4444;
+}
+
+.inline-execution-window .step-content {
+  padding: 0 16px 12px 16px;
+}
+
+.inline-execution-window .step-header {
+  padding: 12px 16px;
+}
+
+.inline-execution-window .step-title {
+  color: #f1f5f9;
+  font-weight: 600;
+}
+
+.inline-execution-window .step-icon {
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
+}
+
+.inline-execution-window .command-box {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.inline-execution-window .command-header {
+  background: rgba(30, 41, 59, 0.9);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.inline-execution-window .command-type {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: white;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.inline-execution-window .command-action {
+  color: #60a5fa;
+  font-weight: 500;
+}
+
+.inline-execution-window .command-params {
+  background: rgba(15, 23, 42, 0.6);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.inline-execution-window .command-params pre {
+  color: #cbd5e1;
+  font-size: 11px;
+}
+
+.inline-execution-window .result-success {
+  color: #4ade80;
+  font-weight: 500;
+}
+
+.inline-execution-window .result-error {
+  color: #f87171;
+  font-weight: 500;
+}
+
+.inline-execution-window .execution-spinner {
+  color: #3b82f6;
+}
+
+.inline-execution-window .step-number {
+  color: #94a3b8;
+  font-size: 10px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.inline-execution-window .status-text {
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.inline-execution-window .estimated-time {
+  color: #64748b;
+  font-size: 10px;
+  font-style: italic;
+}
+
+.inline-execution-window .expand-icon {
+  color: #94a3b8;
+  transition: all 0.2s ease;
+}
+
+.inline-execution-window .step-header:hover .expand-icon {
+  color: #cbd5e1;
+}

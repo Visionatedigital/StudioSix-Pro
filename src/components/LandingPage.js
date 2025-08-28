@@ -213,20 +213,20 @@ const LandingHeader = ({ onEmailCapture }) => {
             <a href="#testimonials" className="text-gray-300 hover:text-white transition-colors">
               Testimonials
             </a>
-            <a href="#pricing" className="text-gray-300 hover:text-white transition-colors">
+            <a href="/pricing" className="text-gray-300 hover:text-white transition-colors">
               Pricing
             </a>
           </nav>
 
           {/* CTA Buttons */}
           <div className="flex items-center space-x-4">
-            <button 
-              disabled
-              className="text-gray-500 cursor-not-allowed opacity-50"
-              title="Coming soon - sign in temporarily disabled"
+            <a
+              href="/app?auth=1"
+              className="text-white hover:text-studiosix-300 transition-colors"
+              title="Sign in to StudioSix Pro"
             >
               Sign In
-            </button>
+            </a>
             <button 
               onClick={() => onEmailCapture('I want to try StudioSix Pro for free')}
               className="bg-studiosix-500 hover:bg-studiosix-600 text-white px-4 py-2 rounded-lg transition-all duration-200 transform hover:scale-105"

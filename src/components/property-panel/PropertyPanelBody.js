@@ -1,14 +1,46 @@
 import React from 'react';
 import PropertyField from './PropertyField';
 
-const PropertyPanelBody = ({ properties, onChange, theme = 'dark', isLoading = false }) => {
+const PropertyPanelBody = ({ properties = {}, onChange, theme = 'dark', isLoading = false }) => {
+  // Ensure properties is a valid object
+  if (!properties || typeof properties !== 'object') {
+    console.warn('PropertyPanelBody: Invalid properties provided:', properties);
+    return (
+      <div className={`property-panel-body p-8 text-center ${
+        theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+      }`}>
+        <p className="text-sm">Invalid properties data</p>
+      </div>
+    );
+  }
+
   // Group properties by category if they have one
   const groupedProperties = Object.entries(properties).reduce((acc, [key, value]) => {
-    const category = value.category || 'General';
+    // Skip undefined or null values
+    if (value === undefined || value === null) {
+      return acc;
+    }
+    
+    // Convert primitive values to property objects
+    let propertyObj;
+    if (typeof value === 'object' && value.hasOwnProperty('value')) {
+      // Already a proper property object
+      propertyObj = value;
+    } else {
+      // Convert primitive to property object
+      propertyObj = {
+        value: value,
+        type: typeof value === 'number' ? 'number' : 'string',
+        category: 'General',
+        readonly: false
+      };
+    }
+    
+    const category = propertyObj.category || 'General';
     if (!acc[category]) {
       acc[category] = {};
     }
-    acc[category][key] = value;
+    acc[category][key] = propertyObj;
     return acc;
   }, {});
 

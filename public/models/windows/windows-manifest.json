@@ -1,0 +1,58 @@
+{
+  "windows": {
+    "version": "1.0.0",
+    "lastUpdated": "2024-01-15",
+    "models": [
+      {
+        "id": "window_001",
+        "name": "Standard Single Window",
+        "fileName": "window_001.fbx",
+        "category": "residential",
+        "subcategory": "single",
+        "dimensions": {
+          "width": 1.2,
+          "height": 1.5,
+          "depth": 0.15
+        },
+        "description": "Standard residential single window",
+        "tags": ["residential", "single", "standard"]
+      },
+      {
+        "id": "window_002",
+        "name": "Bay Window",
+        "fileName": "window_002.fbx",
+        "category": "residential",
+        "subcategory": "bay",
+        "dimensions": {
+          "width": 2.4,
+          "height": 1.5,
+          "depth": 0.6
+        },
+        "description": "Residential bay window",
+        "tags": ["residential", "bay", "decorative"]
+      },
+      {
+        "id": "window_003",
+        "name": "Floor to Ceiling Window",
+        "fileName": "window_003.fbx",
+        "category": "commercial",
+        "subcategory": "floor_to_ceiling",
+        "dimensions": {
+          "width": 1.5,
+          "height": 2.7,
+          "depth": 0.1
+        },
+        "description": "Commercial floor to ceiling window",
+        "tags": ["commercial", "floor_to_ceiling", "modern"]
+      }
+    ]
+  }
+}
+
+
+
+
+
+
+
+

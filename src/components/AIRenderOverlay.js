@@ -9,12 +9,14 @@ import {
   ExclamationCircleIcon
 } from '@heroicons/react/24/outline';
 import aiRenderService from '../services/aiRenderService';
+import aiSettingsService from '../services/AISettingsService';
 
 const AIRenderOverlay = ({ isOpen, onClose, viewportRef, viewMode, capturedImage, onRecapture, onRenderingStateChange, onRenderingActiveChange, onProgressUpdate, onRenderComplete }) => {
+  const renderSettings = aiSettingsService.getRenderSettings();
   const [prompt, setPrompt] = useState('');
-  const [aspectRatio, setAspectRatio] = useState('16:9');
-  const [quality, setQuality] = useState('high');
-  const [style, setStyle] = useState('photorealistic');
+  const [aspectRatio, setAspectRatio] = useState(renderSettings.resolution === '1024x1024' ? '1:1' : '16:9');
+  const [quality, setQuality] = useState(renderSettings.quality);
+  const [style, setStyle] = useState(renderSettings.preset);
   const [isGenerating, setIsGenerating] = useState(false);
   const [viewportImage, setViewportImage] = useState(null);
   
@@ -84,19 +86,37 @@ const AIRenderOverlay = ({ isOpen, onClose, viewportRef, viewMode, capturedImage
     setShowComparison(false);
     
     try {
-      console.log('🎨 Starting AI rendering with ChatGPT...', {
+      // Check usage limits before making request
+      try {
+        aiSettingsService.trackUsage('render');
+      } catch (usageError) {
+        alert(`Usage limit exceeded: ${usageError.message}`);
+        setIsGenerating(false);
+        if (onRenderingStateChange) onRenderingStateChange(false);
+        if (onRenderingActiveChange) onRenderingActiveChange(false);
+        return;
+      }
+
+      // Get current render settings
+      const currentSettings = aiSettingsService.getRenderSettings();
+      
+      console.log('🎨 Starting AI rendering...', {
         prompt,
-        aspectRatio,
-        quality,
-        style,
+        provider: currentSettings.provider,
+        model: currentSettings.model,
+        quality: currentSettings.quality,
+        resolution: currentSettings.resolution,
         imageLength: imageToRender.length
       });
 
-      // Start the rendering process
+      // Start the rendering process with current settings
       const result = await aiRenderService.renderImage(prompt, imageToRender, {
-        aspectRatio,
-        quality,
-        style,
+        aspectRatio: currentSettings.resolution.includes('x') ? 
+          currentSettings.resolution.replace('x', ':') : aspectRatio,
+        quality: currentSettings.quality,
+        style: currentSettings.preset,
+        steps: currentSettings.steps,
+        guidance: currentSettings.guidance,
         maxAttempts: 120, // 10 minutes at 5-second intervals
         pollInterval: 5000,
         onProgress: (status, attempt) => {

@@ -3,11 +3,13 @@ import { WallIcon } from '../icons';
 import {
   SwatchIcon,
   RectangleStackIcon,
-  AdjustmentsVerticalIcon,
   CheckIcon,
   XMarkIcon,
   PlayIcon,
-  EyeIcon
+  EyeIcon,
+  CubeIcon,
+  ArrowsPointingOutIcon,
+  MagnifyingGlassPlusIcon
 } from '@heroicons/react/24/outline';
 
 /**
@@ -39,7 +41,6 @@ const WallTool = ({
     length: 3.0,
     height: 2.7,
     width: 0.2,
-    alignment: 'center', // 'left', 'center', 'right'
     material: 'concrete',
     thickness: 0.2 // alias for width
   });
@@ -49,6 +50,11 @@ const WallTool = ({
   // Use external params if provided, otherwise use internal state
   const wallParams = externalWallParams || internalWallParams;
   const setWallParams = onWallParamsChange || setInternalWallParams;
+
+  // Enhanced state for architect3d features
+  const [wallType, setWallType] = useState('straight');
+  const [snapToAxis, setSnapToAxis] = useState(true);
+  const [showCorners, setShowCorners] = useState(true);
 
   // Validation and interaction state
   const [isValid, setIsValid] = useState(true);
@@ -66,11 +72,10 @@ const WallTool = ({
     { value: 'drywall', label: 'Drywall', color: '#f5f5dc', density: 800 }
   ];
 
-  // Alignment options
-  const alignmentOptions = [
-    { value: 'left', label: 'Left', icon: '⬅️' },
-    { value: 'center', label: 'Center', icon: '↔️' },
-    { value: 'right', label: 'Right', icon: '➡️' }
+  // Wall type options (from architect3d)
+  const wallTypeOptions = [
+    { value: 'straight', label: 'Straight Wall', icon: '▬', description: 'Standard linear walls' },
+    { value: 'curved', label: 'Curved Wall', icon: '◠', description: 'Bezier curved walls' }
   ];
 
   // Initialize with existing wall data if editing
@@ -87,7 +92,6 @@ const WallTool = ({
         length: params.length || selectedObject.length || 3.0,
         height: params.height || selectedObject.height || 2.7,
         width: params.thickness || params.width || selectedObject.thickness || selectedObject.width || 0.2,
-        alignment: params.alignment || selectedObject.alignment || 'center',
         material: params.material || selectedObject.material || 'concrete',
         thickness: params.thickness || params.width || selectedObject.thickness || selectedObject.width || 0.2,
       };
@@ -182,11 +186,14 @@ const WallTool = ({
         length: Number(wallParams.length),
         height: Number(wallParams.height),
         thickness: Number(wallParams.thickness), // Use thickness consistently
-        alignment: wallParams.alignment,
         material: wallParams.material,
         materialColor: material?.color || '#6b7280', // Professional grey fallback
         density: material?.density || 2400,
-        type: 'wall'
+        type: 'wall',
+        // Enhanced architect3d features
+        wallType: wallType,
+        snapToAxis: snapToAxis,
+        bezierControlPoints: wallType === 'curved' ? true : false
       };
       
       console.log('🔧 WALL TOOL: Prepared update parameters:', updateParams);
@@ -371,45 +378,92 @@ const WallTool = ({
         </div>
 
 
-        {/* Alignment Section */}
+
+        {/* Wall Type & Geometry Section */}
         <div>
           <h4 className={`text-sm font-medium mb-3 flex items-center ${
             theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
           }`}>
-            <AdjustmentsVerticalIcon className="w-4 h-4 mr-2" />
-            Alignment & Position
+            <CubeIcon className="w-4 h-4 mr-2" />
+            Wall Type & Geometry
           </h4>
           
           <div className="space-y-3">
-            {/* Alignment */}
+            {/* Wall Type */}
             <div>
               <label className={`block text-xs mb-2 ${
                 theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
               }`}>
-                Wall Alignment
+                Wall Geometry
               </label>
-              <div className="flex space-x-1">
-                {alignmentOptions.map((option) => (
+              <div className="grid grid-cols-2 gap-2">
+                {wallTypeOptions.map((option) => (
                   <button
                     key={option.value}
-                    onClick={() => handleParameterChange('alignment', option.value)}
-                    className={`flex-1 p-2 text-xs rounded transition-colors ${
-                      wallParams.alignment === option.value
+                    onClick={() => setWallType(option.value)}
+                    className={`p-3 text-xs rounded transition-colors border ${
+                      wallType === option.value
                         ? theme === 'dark'
-                          ? 'bg-studiosix-600 text-white'
-                          : 'bg-studiosix-500 text-white'
+                          ? 'bg-studiosix-600 border-studiosix-500 text-white'
+                          : 'bg-studiosix-500 border-studiosix-400 text-white'
                         : theme === 'dark'
-                          ? 'bg-slate-800/50 text-gray-300 hover:bg-slate-700/50'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                          ? 'bg-slate-800/50 border-gray-600 text-gray-300 hover:bg-slate-700/50'
+                          : 'bg-gray-100 border-gray-300 text-gray-700 hover:bg-gray-200'
                     }`}
+                    title={option.description}
                   >
-                    <span className="block text-sm mb-1">{option.icon}</span>
+                    <span className="block text-lg mb-1">{option.icon}</span>
                     {option.label}
                   </button>
                 ))}
               </div>
             </div>
-            
+
+
+            {/* Advanced Options */}
+            <div className="space-y-2">
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className={`text-xs ${
+                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                  }`}>
+                    Snap to Axis
+                  </label>
+                  <input
+                    type="checkbox"
+                    checked={snapToAxis}
+                    onChange={(e) => setSnapToAxis(e.target.checked)}
+                    className={`w-4 h-4 rounded border-2 ${
+                      theme === 'dark' ? 'border-gray-600' : 'border-gray-300'
+                    } text-studiosix-600 focus:ring-studiosix-500`}
+                  />
+                </div>
+                {snapToAxis && (
+                  <p className={`text-xs mt-1 ${
+                    theme === 'dark' ? 'text-green-400' : 'text-green-600'
+                  }`}>
+                    ✓ Gentle 90°/180° auto-snapping active
+                  </p>
+                )}
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <label className={`text-xs ${
+                  theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
+                }`}>
+                  Show Corners
+                </label>
+                <input
+                  type="checkbox"
+                  checked={showCorners}
+                  onChange={(e) => setShowCorners(e.target.checked)}
+                  className={`w-4 h-4 rounded border-2 ${
+                    theme === 'dark' ? 'border-gray-600' : 'border-gray-300'
+                  } text-studiosix-600 focus:ring-studiosix-500`}
+                />
+              </div>
+              
+            </div>
           </div>
         </div>
 
@@ -449,11 +503,6 @@ const WallTool = ({
                     className="w-4 h-4 rounded border"
                     style={{ backgroundColor: selectedMaterial.color }}
                   />
-                  <span className={`text-xs ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                  }`}>
-                    Density: {selectedMaterial.density} kg/m³
-                  </span>
                 </div>
               </div>
             )}
@@ -482,7 +531,7 @@ const WallTool = ({
           ) : (
             <>
               <CheckIcon className="w-4 h-4" />
-              <span className="text-sm">Edit Wall</span>
+              <span className="text-sm">{wallType === 'curved' ? 'Edit Curved Wall' : 'Edit Wall'}</span>
             </>
           )}
         </button>

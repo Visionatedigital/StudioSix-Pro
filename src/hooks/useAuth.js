@@ -2,6 +2,7 @@ import { useState, useEffect, useContext, createContext } from 'react';
 import { auth, isAuthConfigured } from '../config/supabase';
 import resendEmailService from '../services/ResendEmailService';
 import manualAuthService from '../services/ManualAuthService';
+import userDatabaseService from '../services/UserDatabaseService';
 
 // Create auth context
 const AuthContext = createContext({});
@@ -59,6 +60,28 @@ const ConfirmationStorage = {
   }
 };
 
+// Helper function to initialize subscription data for authenticated users
+const initializeUserSubscription = async (user) => {
+  if (!user || !user.id) return;
+  
+  try {
+    console.log('📊 Initializing subscription data for user:', user.email || user.id);
+    const profile = await userDatabaseService.getUserProfile(user.id);
+    
+    if (profile) {
+      console.log('✅ Subscription profile initialized:', {
+        tier: profile.subscription_tier,
+        usage: {
+          tokens: profile.usage_ai_tokens_this_month,
+          renders: profile.usage_image_renders_this_month
+        }
+      });
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not initialize subscription data:', error);
+  }
+};
+
 // Auth provider component
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -87,6 +110,11 @@ export const AuthProvider = ({ children }) => {
         setSession(session);
         setUser(user);
         
+        // Initialize subscription data if user is authenticated
+        if (user) {
+          await initializeUserSubscription(user);
+        }
+        
         console.log('🔐 Initial auth state:', { user: user?.email, session: !!session, manual: false });
       } catch (error) {
         console.error('Failed to get initial session:', error);
@@ -108,6 +136,18 @@ export const AuthProvider = ({ children }) => {
         if (!manualUser) {
           setSession(session);
           setUser(session?.user ?? null);
+          
+          // Initialize subscription data for new authenticated users
+          if (session?.user && event === 'SIGNED_IN') {
+            await initializeUserSubscription(session.user);
+          }
+          
+          // Emit auth state change event for other services
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('auth-state-change', {
+              detail: { user: session?.user ?? null, event }
+            }));
+          }
         }
         
         setLoading(false);
@@ -137,6 +177,17 @@ export const AuthProvider = ({ children }) => {
         if (result.success) {
           setUser(result.data.user);
           setSession(result.data.session);
+          
+          // Initialize subscription data
+          await initializeUserSubscription(result.data.user);
+          
+          // Emit auth state change event
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('auth-state-change', {
+              detail: { user: result.data.user, event: 'SIGNED_IN' }
+            }));
+          }
+          
           console.log('✅ Manual sign in successful:', email);
           return { success: true, data: result.data };
         }
@@ -168,6 +219,17 @@ export const AuthProvider = ({ children }) => {
           if (manualResult.success) {
             setUser(manualResult.data.user);
             setSession(manualResult.data.session);
+            
+            // Initialize subscription data
+            await initializeUserSubscription(manualResult.data.user);
+            
+            // Emit auth state change event
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('auth-state-change', {
+                detail: { user: manualResult.data.user, event: 'SIGNED_IN' }
+              }));
+            }
+            
             console.log('✅ Manual sign in successful after auto-verification:', email);
             return { success: true, data: manualResult.data };
           }
@@ -316,6 +378,17 @@ export const AuthProvider = ({ children }) => {
       if (manualResult.success) {
         setUser(manualResult.data.user);
         setSession(manualResult.data.session);
+        
+        // Initialize subscription data for new user
+        await initializeUserSubscription(manualResult.data.user);
+        
+        // Emit auth state change event
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('auth-state-change', {
+            detail: { user: manualResult.data.user, event: 'SIGNED_IN' }
+          }));
+        }
+        
         console.log('✅ Manual authentication successful after verification');
         return { success: true, data: manualResult.data, autoSignIn: true };
       }
@@ -417,6 +490,13 @@ export const AuthProvider = ({ children }) => {
       // Clear local state
       setUser(null);
       setSession(null);
+      
+      // Emit auth state change event
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('auth-state-change', {
+          detail: { user: null, event: 'SIGNED_OUT' }
+        }));
+      }
       
       console.log('✅ User signed out (both manual and Supabase)');
       return { success: true };

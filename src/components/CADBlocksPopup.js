@@ -7,251 +7,21 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Box, Environment } from '@react-three/drei';
-import ModelCacheService from '../services/ModelCacheService';
+import { OrbitControls, Box } from '@react-three/drei';
+import realSupabaseService from '../services/RealSupabaseService';
 import {
   XMarkIcon,
   HomeIcon,
   LightBulbIcon,
-  ChevronRightIcon,
-  ChevronLeftIcon,
   EyeIcon,
   CubeIcon,
-  MapIcon,
-  PlusIcon,
   MagnifyingGlassIcon,
   CloudArrowDownIcon,
   ExclamationTriangleIcon,
   ArrowPathIcon
 } from '@heroicons/react/24/outline';
 
-// Model Cache Service instance
-const modelCacheService = new ModelCacheService();
-
-// API base URL for our Supabase endpoints
-const API_BASE_URL = 'http://localhost:3001/api';
-
-// Demo mode fallback when API is not available
-const DEMO_MODE = false; // Use real model cache service
-
-// Enhanced demo data with real scraped model thumbnails
-const DEMO_CATEGORIES = [
-  { category: 'vehicles', model_count: 4 },
-  { category: 'characters', model_count: 1 },
-  { category: 'nature', model_count: 1 },
-  { category: 'furniture', model_count: 2 },
-  { category: 'electronics', model_count: 1 }
-];
-
-const DEMO_MODELS = [
-  {
-    id: 'scraped-1',
-    name: 'Bugatti Chiron 2017 Sports Car',
-    description: 'Luxury sports car 3D model with detailed exterior and interior',
-    category: 'vehicles',
-    subcategory: 'cars',
-    tags: ['bugatti', 'sports car', 'luxury', 'automotive', 'vehicle'],
-    model_url: 'https://free3d.com/3d-model/bugatti-chiron-2017-model-31847.html',
-    thumbnail_url: 'https://images.unsplash.com/photo-1583121274602-3e2820c69888?w=300&h=300&fit=crop',
-    format: ['obj', 'blend', 'fbx'],
-    file_size_mb: 3.2,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 12847,
-    source: 'Free3D (Scraped)',
-    author_name: 'Free3D Community',
-    rating: 4.7,
-    download_count: 850
-  },
-  {
-    id: 'scraped-2',
-    name: 'Male Base Mesh',
-    description: 'Low poly human male base mesh for character development',
-    category: 'characters',
-    subcategory: 'humans',
-    tags: ['human', 'male', 'character', 'base mesh', 'low poly'],
-    model_url: 'https://free3d.com/3d-model/male-base-mesh-6682.html',
-    thumbnail_url: 'https://images.unsplash.com/photo-1594736797933-d0e501ba2fe6?w=300&h=300&fit=crop',
-    format: ['obj', 'blend'],
-    file_size_mb: 1.8,
-    has_textures: false,
-    is_rigged: false,
-    polygon_count: 6542,
-    source: 'Free3D (Scraped)',
-    author_name: 'Free3D Community',
-    rating: 4.3,
-    download_count: 1200
-  },
-  {
-    id: 'scraped-3',
-    name: 'Realistic Trees Scene',
-    description: 'Pack of 3 realistic tree models for outdoor scenes',
-    category: 'nature',
-    subcategory: 'trees',
-    tags: ['tree', 'nature', 'realistic', 'outdoor', 'landscape', 'plant'],
-    model_url: 'https://free3d.com/3d-model/realistic-tree-pack-3-trees-95419.html',
-    thumbnail_url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=300&h=300&fit=crop',
-    format: ['3ds', 'obj', 'blend'],
-    file_size_mb: 5.6,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 18394,
-    source: 'Free3D (Scraped)',
-    author_name: 'Free3D Community',
-    rating: 4.8,
-    download_count: 945
-  },
-  {
-    id: 'demo-1',
-    name: 'Modern Office Chair',
-    description: 'Ergonomic office chair with adjustable height and lumbar support',
-    category: 'furniture',
-    subcategory: 'chairs',
-    tags: ['office', 'chair', 'ergonomic', 'modern'],
-    model_url: null, // No direct model file - use placeholder geometry
-    thumbnail_url: 'https://images.unsplash.com/photo-1586023492125-27b2c045efd7?w=300&h=300&fit=crop',
-    format: ['obj'],
-    file_size_mb: 2.1,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 8420,
-    source: 'Stock Demo',
-    author_name: 'DesignStudio',
-    rating: 4.5,
-    download_count: 1250
-  },
-  {
-    id: 'demo-2', 
-    name: 'Damaged Helmet (GLTF)',
-    description: 'Battle-worn sci-fi helmet with PBR materials - GLTF format test',
-    category: 'fixture',
-    subcategory: 'decorative',
-    tags: ['helmet', 'sci-fi', 'pbr', 'gltf', 'test'],
-    model_url: null, // No direct model file - use placeholder geometry
-    thumbnail_url: 'https://images.unsplash.com/photo-1578662996442-48f60103fc96?w=300&h=300&fit=crop',
-    format: ['gltf'],
-    file_size_mb: 1.2,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 14046,
-    source: 'Three.js Examples',
-    author_name: 'Three.js Team',
-    rating: 4.9,
-    download_count: 2100
-  },
-  {
-    id: 'demo-3',
-    name: 'Minimalist Sofa',
-    description: 'Clean lines modern sofa in neutral fabric',
-    category: 'furniture', 
-    subcategory: 'sofas',
-    tags: ['sofa', 'modern', 'minimalist', 'living room'],
-    model_url: 'https://example.com/models/sofa.obj',
-    thumbnail_url: 'https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=300&h=300&fit=crop',
-    format: ['obj', 'mtl', 'fbx'],
-    file_size_mb: 4.2,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 15800,
-    source: 'Free3D',
-    author_name: 'ModernInteriors',
-    rating: 4.3,
-    download_count: 670
-  },
-  {
-    id: 'demo-4',
-    name: 'Industrial Pendant Light',
-    description: 'Vintage industrial style pendant light with metal finish',
-    category: 'electronics',
-    subcategory: 'lighting',
-    tags: ['lighting', 'pendant', 'industrial', 'metal'],
-    model_url: 'https://example.com/models/pendant-light.obj',
-    thumbnail_url: 'https://images.unsplash.com/photo-1524484485831-a92ffc0de03f?w=300&h=300&fit=crop',
-    format: ['obj', 'mtl'],
-    file_size_mb: 1.5,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 4200,
-    source: 'Free3D',
-    author_name: 'LightDesigns',
-    rating: 4.7,
-    download_count: 420
-  },
-  {
-    id: 'demo-5',
-    name: 'Oak Tree',
-    description: 'Realistic oak tree with detailed bark and foliage',
-    category: 'nature',
-    subcategory: 'trees',
-    tags: ['tree', 'oak', 'nature', 'landscape'],
-    model_url: 'https://example.com/models/oak-tree.obj',
-    thumbnail_url: 'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=300&h=300&fit=crop',
-    format: ['obj', 'fbx', 'blend'],
-    file_size_mb: 8.9,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 45000,
-    source: 'Free3D',
-    author_name: 'NatureModels',
-    rating: 4.9,
-    download_count: 1840
-  },
-  {
-    id: 'demo-6',
-    name: 'Executive Desk',
-    description: 'Large executive desk with drawers and cable management',
-    category: 'furniture',
-    subcategory: 'desks',
-    tags: ['desk', 'office', 'executive', 'drawers'],
-    model_url: 'https://example.com/models/executive-desk.obj',
-    thumbnail_url: 'https://images.unsplash.com/photo-1541558869434-2840d308329a?w=300&h=300&fit=crop',
-    format: ['obj', 'mtl', 'fbx'],
-    file_size_mb: 5.3,
-    has_textures: true,
-    is_rigged: false,
-    polygon_count: 18900,
-    source: 'Free3D',
-    author_name: 'OfficeDesigns',
-    rating: 4.4,
-    download_count: 760
-  }
-];
-
-// Category icon mapping enhanced for scraped categories
-const CATEGORY_ICONS = {
-  // Main categories from our scraper
-  furniture: '🪑',
-  vehicles: '🚗',
-  architecture: '🏢',
-  characters: '👤',
-  nature: '🌳',
-  electronics: '💻',
-  weapons: '⚔️',
-  sports: '⚽',
-  abstract: '🎨',
-  other: '📦',
-
-  // Furniture subcategories
-  interior: '🏠',
-  exterior: '🌳',
-  
-  // Specific furniture types
-  sofas: '🛋️',
-  chairs: '🪑',
-  tables: '🍽️',
-  desks: '🖥️',
-  beds: '🛏️',
-  storage: '📦',
-  lighting: '💡',
-  
-  // Other categories
-  cars: '🚗',
-  trucks: '🚛',
-  buildings: '🏢',
-  houses: '🏠',
-  trees: '🌲',
-  plants: '🌿'
-};
+// Simple Supabase service for direct bucket access
 
 /**
  * ENHANCED: Model Preview Component with real thumbnails
@@ -259,35 +29,88 @@ const CATEGORY_ICONS = {
 const ModelPreview = ({ model, viewMode }) => {
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [currentThumbnailUrl, setCurrentThumbnailUrl] = useState('');
+
+  // Get the best thumbnail URL with fallback logic
+  const thumbnailUrl = model?.thumbnail_url || model?.thumbnailUrl || model?.directThumbnailUrl;
+  
+  // Update current URL when model changes
+  useEffect(() => {
+    console.log(`🔄 ModelPreview: URL change detected:`, {
+      model: model?.displayName || model?.name || 'Unknown',
+      newThumbnailUrl: thumbnailUrl,
+      currentThumbnailUrl: currentThumbnailUrl,
+      willUpdate: thumbnailUrl && thumbnailUrl !== currentThumbnailUrl
+    });
+    
+    if (thumbnailUrl && thumbnailUrl !== currentThumbnailUrl) {
+      console.log(`🔄 ModelPreview: Updating thumbnail URL for ${model?.displayName || 'model'}:`, {
+        from: currentThumbnailUrl,
+        to: thumbnailUrl
+      });
+      setCurrentThumbnailUrl(thumbnailUrl);
+      setImageLoaded(false);
+      setImageError(false);
+    }
+  }, [thumbnailUrl, currentThumbnailUrl, model]);
 
   if (!model) return null;
 
-  if (viewMode === '2d' || model.thumbnail_url) {
+  if (viewMode === '2d' || thumbnailUrl) {
     // Show thumbnail if available
     return (
       <div className="w-full h-full bg-gray-100 flex items-center justify-center relative overflow-hidden">
-        {model.thumbnail_url && !imageError ? (
+        {currentThumbnailUrl && !imageError ? (
           <img
-            src={model.thumbnail_url}
+            src={currentThumbnailUrl}
             alt={model.name}
             className={`max-w-full max-h-full object-contain transition-opacity duration-300 ${
               imageLoaded ? 'opacity-100' : 'opacity-0'
             }`}
-            onLoad={() => setImageLoaded(true)}
-            onError={() => setImageError(true)}
+            onLoad={() => {
+              console.log(`✅ ModelPreview: Thumbnail loaded successfully!`, {
+                model: model.displayName || model.name,
+                url: currentThumbnailUrl,
+                urlLength: currentThumbnailUrl?.length
+              });
+              setImageLoaded(true);
+            }}
+            onError={(e) => {
+              console.error(`❌ ModelPreview: Thumbnail failed to load!`, {
+                model: model.displayName || model.name,
+                url: currentThumbnailUrl,
+                urlLength: currentThumbnailUrl?.length,
+                error: e.target.error,
+                networkState: e.target.networkState,
+                readyState: e.target.readyState
+              });
+              
+              // Try fallback URL if available
+              if (model.directThumbnailUrl && currentThumbnailUrl !== model.directThumbnailUrl) {
+                console.log(`🔄 ModelPreview: Trying fallback URL:`, {
+                  originalUrl: currentThumbnailUrl,
+                  fallbackUrl: model.directThumbnailUrl
+                });
+                setCurrentThumbnailUrl(model.directThumbnailUrl);
+              } else {
+                console.log(`❌ ModelPreview: No fallback available, showing placeholder`);
+                setImageError(true);
+              }
+            }}
           />
         ) : (
           <div className="text-center text-gray-500">
             <CubeIcon className="w-16 h-16 mx-auto mb-2 text-gray-400" />
             <p className="text-sm">No preview available</p>
-            <p className="text-xs text-gray-400">{model.format?.join(', ') || 'Unknown format'}</p>
+            <p className="text-xs text-gray-400">{Array.isArray(model.format) ? model.format.join(', ') : (model.format || 'Unknown format')}</p>
           </div>
         )}
         
         {/* Loading overlay */}
-        {model.thumbnail_url && !imageLoaded && !imageError && (
+        {currentThumbnailUrl && !imageLoaded && !imageError && (
           <div className="absolute inset-0 flex items-center justify-center bg-gray-100">
             <ArrowPathIcon className="w-8 h-8 text-gray-400 animate-spin" />
+            <div className="ml-2 text-sm text-gray-600">Loading preview...</div>
           </div>
         )}
         
@@ -355,162 +178,112 @@ const CADBlocksPopup = ({
   const popupRef = useRef(null);
 
   /**
-   * ENHANCED: Fetch categories from model cache service
+   * Simple: Fetch categories from Supabase bucket
    */
   const fetchCategories = async () => {
     try {
-      if (DEMO_MODE) {
-        // Use demo data
-        const filteredCategories = DEMO_CATEGORIES.filter(cat => {
-          if (toolType === 'furniture') {
-            return cat.category === 'furniture' || cat.category === 'nature';
-          } else if (toolType === 'fixtures') {
-            return cat.category === 'electronics' || cat.category === 'architecture';
-          }
-          return false;
-        });
-        
-        setCategories(filteredCategories);
-        return;
-      }
-
-      // Use model cache service
-      const result = await modelCacheService.getCategories();
+      setLoading(true);
+      setError(null);
       
-      if (result.success) {
-        // Filter categories based on tool type
-        const filteredCategories = result.data.filter(cat => {
-          if (toolType === 'furniture') {
-            return cat.category === 'furniture' || cat.category === 'nature';
-          } else if (toolType === 'fixtures') {
-            return cat.category === 'electronics' || cat.category === 'architecture';
-          }
-          return false;
-        });
-        
-        setCategories(filteredCategories);
-      }
-    } catch (err) {
-      console.error('Failed to fetch categories:', err);
+      console.log('📂 CADBlocksPopup: Loading categories from Supabase...');
       
-      // Fallback to demo data on error
-      console.log('🔄 Falling back to demo data...');
-      const filteredCategories = DEMO_CATEGORIES.filter(cat => {
-        if (toolType === 'furniture') {
-          return cat.category === 'furniture' || cat.category === 'nature';
-        } else if (toolType === 'fixtures') {
-          return cat.category === 'electronics' || cat.category === 'architecture';
-        }
-        return false;
+      const categories = await realSupabaseService.getCategories();
+      setCategories(categories);
+      
+      console.log('✅ CADBlocksPopup: Loaded categories:', {
+        count: categories.length,
+        categories: categories.map(c => ({
+          name: c.name,
+          displayName: c.displayName,
+          model_count: c.model_count
+        }))
       });
-      
-      setCategories(filteredCategories);
-    }
-  };
-
-  /**
-   * ENHANCED: Fetch models from model cache service
-   */
-  const fetchModels = async (category = '', search = '', page = 1) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      if (DEMO_MODE) {
-        // Simulate API delay
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Filter demo models
-        let filteredModels = DEMO_MODELS;
-        
-        // Apply category filter
-        if (category) {
-          filteredModels = filteredModels.filter(model => model.category === category);
-        }
-        
-        // Apply search filter
-        if (search) {
-          const searchLower = search.toLowerCase();
-          filteredModels = filteredModels.filter(model =>
-            model.name.toLowerCase().includes(searchLower) ||
-            model.description.toLowerCase().includes(searchLower) ||
-            model.tags.some(tag => tag.toLowerCase().includes(searchLower))
-          );
-        }
-        
-        // Apply pagination
-        const startIndex = (page - 1) * modelsPerPage;
-        const endIndex = startIndex + modelsPerPage;
-        const paginatedModels = filteredModels.slice(startIndex, endIndex);
-        
-        setModels(paginatedModels);
-        setTotalPages(Math.ceil(filteredModels.length / modelsPerPage));
-        
-        // Auto-select first model if available
-        if (paginatedModels.length > 0 && !selectedModel) {
-          setSelectedModel(paginatedModels[0]);
-        }
-        
-        setLoading(false);
-        return;
-      }
-
-      // Use model cache service
-      const result = await modelCacheService.getAvailableModels({
-        category,
-        search,
-        page,
-        limit: modelsPerPage
-      });
-      
-      if (result.success) {
-        setModels(result.data);
-        setTotalPages(result.pagination.totalPages);
-        
-        // Auto-select first model if available
-        if (result.data.length > 0 && !selectedModel) {
-          setSelectedModel(result.data[0]);
-        }
-      } else {
-        setError('Failed to load models');
-      }
     } catch (err) {
-      console.error('Failed to fetch models:', err);
-      
-      // Fallback to demo data on error
-      console.log('🔄 Falling back to demo data...');
-      let filteredModels = DEMO_MODELS;
-      
-      if (category) {
-        filteredModels = filteredModels.filter(model => model.category === category);
-      }
-      
-      if (search) {
-        const searchLower = search.toLowerCase();
-        filteredModels = filteredModels.filter(model =>
-          model.name.toLowerCase().includes(searchLower) ||
-          model.description.toLowerCase().includes(searchLower) ||
-          model.tags.some(tag => tag.toLowerCase().includes(searchLower))
-        );
-      }
-      
-      const startIndex = (page - 1) * modelsPerPage;
-      const endIndex = startIndex + modelsPerPage;
-      const paginatedModels = filteredModels.slice(startIndex, endIndex);
-      
-      setModels(paginatedModels);
-      setTotalPages(Math.ceil(filteredModels.length / modelsPerPage));
-      
-      if (paginatedModels.length > 0 && !selectedModel) {
-        setSelectedModel(paginatedModels[0]);
-      }
+      console.error('❌ CADBlocksPopup: Failed to fetch categories:', err);
+      setError('Failed to load categories');
+      setCategories([]);
     } finally {
       setLoading(false);
     }
   };
 
   /**
-   * ENHANCED: Download and import model to 3D viewport using cache service
+   * Simple: Fetch models from Supabase bucket
+   */
+  const fetchModels = async (category = '', search = '', page = 1) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log(`📋 CADBlocksPopup: Loading models for category: "${category}" (page ${page}, search: "${search}")`);
+      
+      let allModels;
+      
+      if (category) {
+        // Get models for specific category
+        console.log(`🔍 CADBlocksPopup: Fetching models for specific category: "${category}"`);
+        allModels = await realSupabaseService.getCategoryModels(category);
+        console.log(`📦 CADBlocksPopup: Received ${allModels.length} models for category "${category}"`);
+      } else {
+        // Get all models
+        console.log(`🔍 CADBlocksPopup: Fetching ALL models`);
+        allModels = await realSupabaseService.getAllModels();
+        console.log(`📦 CADBlocksPopup: Received ${allModels.length} total models`);
+      }
+      
+      // Apply search filter
+      let filteredModels = allModels;
+      if (search) {
+        console.log(`🔍 CADBlocksPopup: Applying search filter: "${search}"`);
+        const searchLower = search.toLowerCase();
+        filteredModels = allModels.filter(model =>
+          model.name?.toLowerCase().includes(searchLower) ||
+          model.displayName?.toLowerCase().includes(searchLower) ||
+          model.category?.toLowerCase().includes(searchLower)
+        );
+        console.log(`🔍 CADBlocksPopup: Search filtered ${allModels.length} → ${filteredModels.length} models`);
+      }
+      
+      // Apply pagination
+      const startIndex = (page - 1) * modelsPerPage;
+      const endIndex = startIndex + modelsPerPage;
+      const paginatedModels = filteredModels.slice(startIndex, endIndex);
+      
+      console.log(`📄 CADBlocksPopup: Pagination: ${startIndex}-${endIndex} of ${filteredModels.length} = ${paginatedModels.length} models`);
+      
+      setModels(paginatedModels);
+      setTotalPages(Math.ceil(filteredModels.length / modelsPerPage));
+      
+      // Auto-select first model if available
+      if (paginatedModels.length > 0 && !selectedModel) {
+        setSelectedModel(paginatedModels[0]);
+        console.log(`🎯 CADBlocksPopup: Auto-selected first model: ${paginatedModels[0].displayName}`);
+      }
+      
+      console.log(`✅ CADBlocksPopup: Final result - ${paginatedModels.length} models displayed (${filteredModels.length} total)`);
+      
+      // Debug first few models
+      paginatedModels.slice(0, 3).forEach((model, index) => {
+        console.log(`🖼️ CADBlocksPopup: Model ${index + 1}:`, {
+          name: model.name,
+          displayName: model.displayName,
+          thumbnail_url: model.thumbnail_url,
+          thumbnailUrl: model.thumbnailUrl,
+          directThumbnailUrl: model.directThumbnailUrl
+        });
+      });
+      
+    } catch (err) {
+      console.error('❌ CADBlocksPopup: Failed to fetch models:', err);
+      setError('Failed to load models');
+      setModels([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Simple: Import model to 3D viewport
    */
   const handleImport = async () => {
     if (!selectedModel || !onImportBlock) return;
@@ -519,78 +292,43 @@ const CADBlocksPopup = ({
       setLoading(true);
       setError(null);
       
-      console.log('📦 Importing model:', selectedModel.name, selectedModel.category);
+      console.log('📦 Importing model:', selectedModel.displayName);
       
-      // Import model using cache service
-      const importResult = await modelCacheService.importModel(selectedModel);
-      
-      if (!importResult.success) {
-        throw new Error(importResult.error);
-      }
-      
-      // Enhanced model data for 3D viewport import
-      const enhancedModel = {
-        // Core identification
+      // Prepare model data for 3D viewport
+      const modelData = {
         id: selectedModel.id,
         name: selectedModel.name,
-        description: selectedModel.description,
+        displayName: selectedModel.displayName,
         category: selectedModel.category,
-        subcategory: selectedModel.subcategory,
-        
-        // Actual 3D model URLs from cache service
-        modelUrl: importResult.modelPath,
-        model_url: importResult.modelPath,
-        thumbnail_url: importResult.thumbnailPath,
-        
-        // Cache status
-        cached: importResult.cached,
-        
-        // 3D Model Properties
         format: selectedModel.format,
+        modelUrl: selectedModel.modelUrl,
+        model_url: selectedModel.modelUrl, // Compatibility
+        thumbnailUrl: selectedModel.thumbnailUrl,
+        thumbnail_url: selectedModel.thumbnailUrl, // Compatibility
         has_textures: selectedModel.has_textures,
-        is_rigged: selectedModel.is_rigged,
         polygon_count: selectedModel.polygon_count,
-        
-        // Metadata for display
-        source: selectedModel.source,
-        author_name: selectedModel.author_name,
-        tags: selectedModel.tags,
-        
-        // Convert to CAD block format for compatibility
+        cached: false,
+        type: 'model',
         preview: {
-          width: 1.0, // Default size - user can scale
+          width: 1.0,
           height: 1.0,
           depth: 1.0,
-          color: selectedModel.category === 'furniture' ? '#8B4513' : '#4A90E2'
+          color: '#8B4513'
         }
       };
       
-      console.log('🎨 Model imported:', {
-        name: enhancedModel.name,
-        format: enhancedModel.format,
-        modelPath: enhancedModel.modelUrl,
-        cached: enhancedModel.cached,
-        polygons: enhancedModel.polygon_count,
-        hasTextures: enhancedModel.has_textures
+      console.log('🎨 Model data:', {
+        name: modelData.displayName,
+        modelUrl: modelData.modelUrl,
+        thumbnailUrl: modelData.thumbnailUrl
       });
       
-      // Import to viewport with enhanced model data
-      await onImportBlock(enhancedModel, toolType);
+      // Import to viewport
+      await onImportBlock(modelData, toolType);
       
-      // Success feedback
-      const cacheStatus = importResult.cached ? 'from cache' : 'downloaded and cached';
-      console.log(`✅ Model imported successfully ${cacheStatus}: ${selectedModel.name}`);
+      console.log(`✅ Model imported successfully: ${selectedModel.displayName}`);
       
-      // Show success message
-      if (window.alert) {
-        const fileSize = selectedModel.file_size_mb ? ` (${selectedModel.file_size_mb} MB)` : '';
-        window.alert(
-          `✅ "${selectedModel.name}" imported successfully!\n\n` +
-          `Status: ${cacheStatus}${fileSize}\n` +
-          `The model is now available in your 3D viewport.`
-        );
-      }
-      
+      // Close popup automatically - model is now placed in viewport
       onClose();
     } catch (err) {
       console.error('❌ Failed to import model:', err);
@@ -613,6 +351,15 @@ const CADBlocksPopup = ({
    * Handle category selection
    */
   const handleCategorySelect = (category) => {
+    // Handle special refresh action
+    if (category === 'refresh') {
+      console.log('🔄 Refreshing cache...');
+      realSupabaseService.clearCache();
+      fetchCategories();
+      fetchModels(currentCategory, searchTerm, currentPage);
+      return;
+    }
+    
     setCurrentCategory(category);
     setCurrentPage(1);
     setSelectedModel(null);
@@ -629,10 +376,14 @@ const CADBlocksPopup = ({
 
   // Load initial data when popup opens
   useEffect(() => {
+    console.log(`🔄 CADBlocksPopup: useEffect triggered - isOpen: ${isOpen}, toolType: ${toolType}`);
+    
     if (isOpen) {
+      console.log(`🚀 CADBlocksPopup: Opening popup, loading initial data...`);
       fetchCategories();
       fetchModels('', '', 1);
     } else {
+      console.log(`🚀 CADBlocksPopup: Closing popup, resetting state...`);
       // Reset state when closing
       setModels([]);
       setCategories([]);
@@ -681,8 +432,8 @@ const CADBlocksPopup = ({
           {/* API Status Indicator */}
           <div className="flex items-center space-x-3">
             <div className="flex items-center space-x-1 text-xs">
-              <div className={`w-2 h-2 rounded-full ${DEMO_MODE ? 'bg-yellow-400' : 'bg-green-400'} animate-pulse`}></div>
-              <span>{DEMO_MODE ? 'Demo Mode' : 'Scraped Models'}</span>
+              <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
+              <span>Supabase Models</span>
           </div>
           <button
             onClick={onClose}
@@ -702,7 +453,7 @@ const CADBlocksPopup = ({
                 <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search scraped models..."
+                  placeholder="Search StudioSix Library..."
                   value={searchTerm}
                   onChange={(e) => handleSearch(e.target.value)}
                   className="w-full pl-10 pr-4 py-2 bg-slate-800 border border-slate-600 text-white placeholder-slate-400 rounded-lg focus:outline-none focus:ring-2 focus:ring-studiosix-500 focus:border-studiosix-500"
@@ -725,15 +476,15 @@ const CADBlocksPopup = ({
                     </button>
                 {categories.map((cat) => (
                         <button
-                    key={cat.category}
-                    onClick={() => handleCategorySelect(cat.category)}
+                    key={cat.name}
+                    onClick={() => handleCategorySelect(cat.name)}
                     className={`px-3 py-1 text-xs rounded-full transition-colors ${
-                      currentCategory === cat.category 
+                      currentCategory === cat.name
                         ? 'bg-studiosix-500 text-white' 
                         : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                     }`}
                   >
-                    {CATEGORY_ICONS[cat.category]} {cat.category} ({cat.model_count})
+                    {cat.icon} {cat.displayName} ({cat.model_count})
                         </button>
                       ))}
               </div>
@@ -766,7 +517,7 @@ const CADBlocksPopup = ({
                     <div className="space-y-2">
                   {models.map((model) => (
                         <button
-                      key={model.id}
+                          key={model.id || model.name}
                       onClick={() => setSelectedModel(model)}
                       className={`flex items-start space-x-3 w-full p-3 text-left rounded-lg transition-colors border ${
                         selectedModel?.id === model.id
@@ -778,25 +529,48 @@ const CADBlocksPopup = ({
                       <div className={`w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 ${
                         selectedModel?.id === model.id ? 'ring-2 ring-studiosix-400' : ''
                       }`}>
-                        {model.thumbnail_url ? (
+                        {(model.thumbnail_url || model.thumbnailUrl || model.directThumbnailUrl) ? (
                           <img
-                            src={model.thumbnail_url}
-                            alt={model.name}
+                            src={model.thumbnail_url || model.thumbnailUrl || model.directThumbnailUrl}
+                            alt={model.displayName || model.name}
                             className="w-full h-full object-cover"
+                            onLoad={() => {
+                              console.log(`✅ ModelsList: Thumbnail loaded successfully!`, {
+                                model: model.displayName || model.name,
+                                src: model.thumbnail_url || model.thumbnailUrl || model.directThumbnailUrl
+                              });
+                            }}
                             onError={(e) => {
-                              e.target.style.display = 'none';
-                              e.target.nextSibling.style.display = 'flex';
+                              console.error(`❌ ModelsList: Thumbnail failed to load!`, {
+                                model: model.displayName || model.name,
+                                src: e.target.src,
+                                error: e.target.error,
+                                directThumbnailUrl: model.directThumbnailUrl
+                              });
+                              
+                              // Try fallback URL
+                              if (model.directThumbnailUrl && e.target.src !== model.directThumbnailUrl) {
+                                console.log(`🔄 ModelsList: Trying fallback URL:`, {
+                                  originalSrc: e.target.src,
+                                  fallbackUrl: model.directThumbnailUrl
+                                });
+                                e.target.src = model.directThumbnailUrl;
+                              } else {
+                                console.log(`❌ ModelsList: No fallback available, hiding image`);
+                                e.target.style.display = 'none';
+                                e.target.nextSibling.style.display = 'flex';
+                              }
                             }}
                           />
                         ) : null}
-                        <div className="w-full h-full bg-slate-700 flex items-center justify-center" style={{display: model.thumbnail_url ? 'none' : 'flex'}}>
+                        <div className="w-full h-full bg-slate-700 flex items-center justify-center" style={{display: (model.thumbnail_url || model.thumbnailUrl || model.directThumbnailUrl) ? 'none' : 'flex'}}>
                           <CubeIcon className="w-6 h-6 text-slate-400" />
                         </div>
                       </div>
                       
                       {/* Model info */}
                       <div className="flex-1 min-w-0">
-                        <div className="font-medium text-white truncate">{model.name}</div>
+                        <div className="font-medium text-white truncate">{model.displayName || model.name}</div>
                         <div className="text-xs text-slate-400 mt-1">
                           {model.category && <span className="capitalize">{model.category}</span>}
                           {model.subcategory && <span> • {model.subcategory}</span>}
@@ -804,7 +578,7 @@ const CADBlocksPopup = ({
                         <div className="flex items-center space-x-2 mt-1">
                           {model.has_textures && <span className="text-xs bg-blue-500/20 text-blue-300 px-1 rounded">Textured</span>}
                           {model.is_rigged && <span className="text-xs bg-green-500/20 text-green-300 px-1 rounded">Rigged</span>}
-                          {model.format && <span className="text-xs text-slate-500">{model.format.slice(0, 2).join(', ')}</span>}
+                          {model.format && <span className="text-xs text-slate-500">{Array.isArray(model.format) ? model.format[0].toUpperCase() : model.format.toUpperCase()}</span>}
                           </div>
                           </div>
                         </button>
@@ -930,7 +704,7 @@ const CADBlocksPopup = ({
                 <div className="p-4 border-t border-slate-700">
                   <div className="flex items-center justify-between">
                     <div className="text-sm text-slate-400">
-                      <div>Format: {selectedModel.format?.join(', ') || 'Unknown'}</div>
+                      <div>Format: {Array.isArray(selectedModel.format) ? selectedModel.format.join(', ') : (selectedModel.format || 'Unknown')}</div>
                       {selectedModel.file_size_mb && (
                         <div>Size: {typeof selectedModel.file_size_mb === 'number' ? selectedModel.file_size_mb.toFixed(1) : selectedModel.file_size_mb} MB</div>
                       )}
@@ -943,7 +717,7 @@ const CADBlocksPopup = ({
                 <div className="text-center">
                   <CubeIcon className="w-12 h-12 mx-auto mb-3 text-slate-600" />
                   <p className="text-lg mb-1">Select a model to preview</p>
-                  <p className="text-sm text-slate-400">Browse scraped models from Free3D and other sources</p>
+                  <p className="text-sm text-slate-400">Browse from over 1000 models in our StudioSix Library</p>
                 </div>
               </div>
             )}

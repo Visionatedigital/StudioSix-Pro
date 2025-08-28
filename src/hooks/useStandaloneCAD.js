@@ -98,15 +98,36 @@ export const useStandaloneCAD = () => {
 
   // Tool-specific creation methods
   const createSlab = useCallback((params) => {
+    console.log('🛤️ CAD ENGINE DEBUG: createSlab called with params:', params);
+    
     const { width = 5, depth = 5, thickness = 0.2, material = 'concrete', position = { x: 0, y: 0, z: 0 } } = params;
     
-    return createObject('slab', position, {
+    console.log('🛤️ CAD ENGINE DEBUG: Destructured params:', { width, depth, thickness, material, position });
+    console.log('🛤️ CAD ENGINE DEBUG: createObject function available:', typeof createObject);
+    
+    // For ramps, pass through all ramp-specific parameters
+    const objectParams = {
       width,
       depth,
       thickness,
       material,
-      shape: params.shape || 'rectangular'
-    });
+      shape: params.shape || 'rectangular',
+      ...(params.isRamp && {
+        type: 'ramp',
+        isRamp: true,
+        height: params.height,
+        slopeDirection: params.slopeDirection,
+        grade: params.grade
+      })
+    };
+    
+    console.log('🛤️ CAD ENGINE DEBUG: Final object params:', objectParams);
+    console.log('🛤️ CAD ENGINE DEBUG: About to call createObject with type:', params.isRamp ? 'ramp' : 'slab');
+    
+    const result = createObject(params.isRamp ? 'ramp' : 'slab', position, objectParams);
+    console.log('🛤️ CAD ENGINE DEBUG: createObject returned:', result);
+    
+    return result;
   }, [createObject]);
 
   const createWall = useCallback((startPoint, endPoint, params = {}) => {

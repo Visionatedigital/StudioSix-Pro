@@ -12,6 +12,14 @@ import InteractiveChatMessage from './chat/InteractiveChatMessage';
 import aiCommandExecutor from '../services/AICommandExecutor';
 import standaloneCADEngine from '../services/StandaloneCADEngine';
 import aiService from '../services/AIService';
+import AgentManager from '../services/AgentManager';
+import aiSettingsService from '../services/AISettingsService';
+import subscriptionService from '../services/SubscriptionService';
+import tokenUsageService from '../services/TokenUsageService';
+import CommandExecutionWindow from './CommandExecutionWindow';
+import InlineExecutionWindow from './InlineExecutionWindow';
+import AnimatedMessage from './AnimatedMessage';
+import CompletionSummary from './CompletionSummary';
 
 const NativeAIChat = ({ 
   // App state integration
@@ -25,7 +33,10 @@ const NativeAIChat = ({
   onViewModeChange,
   onThemeChange,
   onFloorChange,
-  theme = 'dark'
+  theme = 'dark',
+  // Initial prompt from project creation
+  initialPrompt = null,
+  onInitialPromptProcessed = null
 }) => {
   // Chat state
   const [messages, setMessages] = useState([]);
@@ -33,11 +44,17 @@ const NativeAIChat = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [showContext, setShowContext] = useState(false);
   
-  // Original UI state
-  const [mode, setMode] = useState('agent');
-  const [selectedModel, setSelectedModel] = useState('gpt-4');
+  // AI settings state
+  const [chatSettings, setChatSettings] = useState(aiSettingsService.getChatSettings());
+  const [mode, setMode] = useState(chatSettings.systemPrompt);
+  const [selectedModel, setSelectedModel] = useState(chatSettings.model);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState({ openai: false, claude: false });
+  
+  // Subscription state
+  const [subscriptionStatus, setSubscriptionStatus] = useState(null);
+  const [usageWarnings, setUsageWarnings] = useState([]);
+  const [isNearLimit, setIsNearLimit] = useState(false);
   
   // Voice transcription state
   const [isListening, setIsListening] = useState(false);
@@ -45,14 +62,66 @@ const NativeAIChat = ({
   const [speechRecognitionAvailable, setSpeechRecognitionAvailable] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState('');
   
+  // Sequential execution state
+  const [agentManager, setAgentManager] = useState(null);
+  const [currentExecutionPlan, setCurrentExecutionPlan] = useState(null);
+  const [showExecutionWindow, setShowExecutionWindow] = useState(false);
+  const [executionMode, setExecutionMode] = useState('auto'); // 'auto', 'sequential', 'traditional'
+  
+  // Autonomous agent state
+  const [isAutonomousEnabled, setIsAutonomousEnabled] = useState(false);
+  const [activeAutonomousRun, setActiveAutonomousRun] = useState(null);
+  const [autonomousSocket, setAutonomousSocket] = useState(null);
+  const [pendingApproval, setPendingApproval] = useState(null);
+  
   // Refs
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const chatContainerRef = useRef(null);
   const fileInputRef = useRef(null);
 
-  // Initialize speech recognition availability only
+  // Initialize AgentManager and speech recognition
   useEffect(() => {
+    // Initialize AgentManager with CAD engine
+    const manager = new AgentManager(standaloneCADEngine);
+    
+    // Set up callbacks for execution progress
+    manager.onStepUpdate = (step, plan) => {
+      console.log('🔧 AgentManager: Step update:', step.title, step.status);
+      setCurrentExecutionPlan(plan);
+    };
+    
+    manager.onPlanComplete = (plan) => {
+      console.log('🎉 AgentManager: Plan completed:', plan.title);
+      setTimeout(() => {
+        setShowExecutionWindow(false);
+        setCurrentExecutionPlan(null);
+      }, 3000); // Show completion for 3 seconds
+    };
+    
+    setAgentManager(manager);
+    
+    // Listen for AI settings changes
+    const unsubscribeSettings = aiSettingsService.onSettingsChange((settings) => {
+      const newChatSettings = settings.aiChat;
+      setChatSettings(newChatSettings);
+      setMode(newChatSettings.systemPrompt);
+      setSelectedModel(newChatSettings.model);
+    });
+    
+    // Listen for subscription changes and update usage status
+    const unsubscribeSubscription = subscriptionService.onSubscriptionChange(() => {
+      updateSubscriptionStatus();
+    });
+    
+    // Listen for token usage changes
+    const unsubscribeUsage = tokenUsageService.onUsageChange(() => {
+      updateSubscriptionStatus();
+    });
+    
+    // Initial subscription status load
+    updateSubscriptionStatus();
+    
     // Check speech recognition availability
     const speechAvailable = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
     setSpeechRecognitionAvailable(speechAvailable);
@@ -69,18 +138,192 @@ const NativeAIChat = ({
         }
       } catch (error) {
         // Silently handle connection errors to prevent uncaught exceptions
-        console.warn('⚠️ AI connection test failed:', error.message);
+        console.info('ℹ️ AI proxy not available - running in offline mode');
         setConnectionStatus({
           openai: false,
           claude: false,
           available: false,
-          errors: { connection: error.message }
+          errors: { connection: 'AI proxy server not running' }
         });
       }
     };
     
     // Run async without blocking component mount
-    testAIConnections();
+    testAIConnections().catch(error => {
+      console.info('ℹ️ AI connection test skipped:', error.message);
+    });
+    
+    // Cleanup listeners on unmount
+    return () => {
+      unsubscribeSettings();
+      unsubscribeSubscription();
+      unsubscribeUsage();
+    };
+  }, []);
+
+  // Get current context for display (moved above to avoid TDZ issues)
+  const currentContext = useMemo(() => {
+    const objects = standaloneCADEngine.getAllObjects();
+    return {
+      selectedTool,
+      selectedObjects: Array.from(selectedObjects),
+      objectCount: objects.length,
+      viewMode,
+      currentFloor,
+      hasSelection: selectedObjects.size > 0
+    };
+  }, [selectedTool, selectedObjects, viewMode, currentFloor]);
+
+  // Handle sending messages (moved above effects that reference it)
+  const handleSendMessage = useCallback(async () => {
+    const message = inputValue.trim();
+    if (!message || isProcessing) return;
+
+    // Add user message
+    const userMessage = {
+      id: `user_${Date.now()}`,
+      type: 'user',
+      message: message,
+      timestamp: new Date().toISOString()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setInputValue('');
+    setIsProcessing(true);
+
+    // Check if we should use autonomous execution (when enabled)
+    if (isAutonomousEnabled && !activeAutonomousRun) {
+      setIsProcessing(false);
+      return handleAutonomousExecution(message);
+    }
+
+    // Check if we should use sequential execution
+    if (shouldUseSequentialExecution(message)) {
+      setIsProcessing(false);
+      return handleSequentialExecution(message);
+    }
+
+    try {
+      // Check usage limits before making request
+      try {
+        aiSettingsService.trackUsage('chat');
+      } catch (usageError) {
+        throw new Error(`Usage limit exceeded: ${usageError.message}`);
+      }
+
+      // Get enhanced context for AI processing
+      const enhancedContext = {
+        ...currentContext,
+        viewport: aiCommandExecutor.getViewportContext(),
+        recentMessages: messages.slice(-5), // Last 5 messages for context
+        objects: standaloneCADEngine.getAllObjects(),
+        uploadedFiles: uploadedFiles
+      };
+
+      // Process files for AI context if any are uploaded
+      let processedFiles = [];
+      if (uploadedFiles.length > 0) {
+        processedFiles = await aiService.processUploadedFiles(uploadedFiles);
+      }
+
+      // Use current settings for the AI request
+      const currentSettings = aiSettingsService.getChatSettings();
+      const systemPrompt = currentSettings.systemPrompt === 'custom' ? currentSettings.customSystemPrompt : currentSettings.systemPrompt;
+
+      // First, get AI response using the selected model and mode from settings
+      const aiResponse = await aiService.sendMessage(
+        message, 
+        currentSettings.model, 
+        systemPrompt, 
+        {
+          ...enhancedContext,
+          processedFiles,
+          temperature: currentSettings.temperature,
+          maxTokens: currentSettings.maxTokens
+        }
+      );
+
+      // Then process the message through the command executor for actions
+      let commandResponse = null;
+      try {
+        commandResponse = await aiCommandExecutor.processMessage(message, enhancedContext);
+      } catch (cmdError) {
+        console.warn('⚠️ Command executor warning:', cmdError.message);
+        // Continue with AI response even if command processing fails
+      }
+
+      // Combine AI response with any command actions
+      const combinedResponse = {
+        id: `ai_${Date.now()}`,
+        type: 'ai',
+        message: aiResponse.message,
+        timestamp: new Date().toISOString(),
+        success: true,
+        actions: commandResponse?.actions || [],
+        model: aiResponse.model,
+        provider: aiResponse.provider
+      };
+
+      setMessages(prev => [...prev, combinedResponse]);
+
+      // Clear uploaded files after successful message
+      if (uploadedFiles.length > 0) {
+        setUploadedFiles([]);
+      }
+
+    } catch (error) {
+      console.error('❌ Chat error:', error);
+      const errorMessage = {
+        id: `error_${Date.now()}`,
+        type: 'ai',
+        message: `❌ ${error.message}`,
+        timestamp: new Date().toISOString(),
+        success: false
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [inputValue, isProcessing, currentContext, messages, uploadedFiles, isAutonomousEnabled, activeAutonomousRun]);
+
+  // Handle initial prompt from project creation
+  useEffect(() => {
+    if (initialPrompt && !isProcessing) {
+      console.log('🚀 NativeAIChat: Processing initial prompt from project creation:', initialPrompt);
+      
+      // Set the prompt in the input field
+      setInputValue(initialPrompt);
+      
+      // Add a brief delay to ensure the component is fully initialized
+      const timer = setTimeout(() => {
+        handleSendMessage();
+        // Notify parent that we've processed the initial prompt
+        if (onInitialPromptProcessed) {
+          onInitialPromptProcessed();
+        }
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [initialPrompt, isProcessing, onInitialPromptProcessed, handleSendMessage]);
+
+  // Update subscription status and usage warnings
+  const updateSubscriptionStatus = useCallback(() => {
+    try {
+      const status = aiService.getSubscriptionStatus();
+      const warnings = tokenUsageService.getUsageWarnings();
+      
+      setSubscriptionStatus(status);
+      setUsageWarnings(warnings);
+      
+      // Check if user is near limits (75%+)
+      const nearLimit = status.usage.aiTokens.percentage > 75 || 
+                       status.usage.imageRenders.percentage > 75;
+      setIsNearLimit(nearLimit);
+      
+    } catch (error) {
+      console.error('Failed to update subscription status:', error);
+    }
   }, []);
 
   // Removed automatic system notifications for cleaner conversational experience
@@ -161,107 +404,371 @@ const NativeAIChat = ({
   // CAD engine integration for AI commands (without automatic notifications)
   // AI can still execute commands and get feedback, but won't spam the chat with status updates
 
-  // Get current context for display
-  const currentContext = useMemo(() => {
-    const objects = standaloneCADEngine.getAllObjects();
-    return {
-      selectedTool,
-      selectedObjects: Array.from(selectedObjects),
-      objectCount: objects.length,
-      viewMode,
-      currentFloor,
-      hasSelection: selectedObjects.size > 0
-    };
-  }, [selectedTool, selectedObjects, viewMode, currentFloor]);
+  // (currentContext defined above)
 
-  // Handle sending messages
-  const handleSendMessage = useCallback(async () => {
-    const message = inputValue.trim();
-    if (!message || isProcessing) return;
+  // Check if message should use sequential execution
+  const shouldUseSequentialExecution = useCallback((message) => {
+    if (executionMode === 'traditional') return false;
+    if (executionMode === 'sequential') return true;
+    
+    // Auto-detect based on message content
+    const sequentialKeywords = [
+      'create a room', 'build a room', 'make a room',
+      'create a building', 'build a house', 'make a house',
+      'create a', 'build a', 'make a',
+      'by', 'x', '×', 'meter', 'metre', 'm '
+    ];
+    
+    const normalizedMessage = message.toLowerCase();
+    return sequentialKeywords.some(keyword => normalizedMessage.includes(keyword));
+  }, [executionMode]);
 
-    // Add user message
-    const userMessage = {
-      id: `user_${Date.now()}`,
-      type: 'user',
-      message: message,
-      timestamp: new Date().toISOString()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-    setInputValue('');
-    setIsProcessing(true);
-
+  // Handle sequential execution
+  const handleSequentialExecution = useCallback(async (message) => {
+    console.log('🚀 Using intelligent sequential execution for:', message);
+    
     try {
-      // Get enhanced context for AI processing
+      // Parse request into execution plan using intelligent NLP
+      const plan = await agentManager.parseRequest(message, {
+        selectedTool,
+        selectedObjects: Array.from(selectedObjects),
+        viewMode,
+        currentFloor
+      });
+      
+      setCurrentExecutionPlan(plan);
+      
+      // Add initial AI response explaining the plan
+      const planResponse = {
+        id: `ai_${Date.now()}`,
+        type: 'ai',
+        message: `${plan.description}\n\nI'll execute this in ${plan.totalSteps} steps:`,
+        timestamp: new Date().toISOString(),
+        success: true,
+        isSequentialExecution: true,
+        confidence: plan.confidence
+      };
+      
+      setMessages(prev => [...prev, planResponse]);
+      
+      // Start the plan
+      agentManager.executePlan(plan);
+      
+      // Execute first step after a short delay
+      setTimeout(() => {
+        executeNextStepSequentially(plan, 0);
+      }, 1000);
+      
+    } catch (error) {
+      console.error('❌ Sequential execution failed:', error);
+      
+      // Fallback to basic response
+      const errorResponse = {
+        id: `ai_${Date.now()}`,
+        type: 'ai',
+        message: `I encountered an issue understanding your request. Let me create a basic structure instead.`,
+        timestamp: new Date().toISOString(),
+        success: false
+      };
+      
+      setMessages(prev => [...prev, errorResponse]);
+    }
+  }, [agentManager, selectedTool, selectedObjects, viewMode, currentFloor]);
+
+  // Execute steps one by one with intermediate messages
+  const executeNextStepSequentially = useCallback(async (plan, stepIndex) => {
+    if (stepIndex >= plan.steps.length) {
+      // All steps completed - show detailed summary
+      const completionSummary = agentManager.generateCompletionSummary(plan);
+      
+      const completionMessage = {
+        id: `ai_${Date.now()}`,
+        type: 'ai_completion',
+        sentences: completionSummary,
+        timestamp: new Date().toISOString(),
+        success: true
+      };
+      setMessages(prev => [...prev, completionMessage]);
+      return;
+    }
+
+    const step = plan.steps[stepIndex];
+    const roomType = agentManager.extractRoomType(currentExecutionPlan?.title || 'room');
+    
+    // Get detailed step description
+    const stepDescriptions = agentManager.getStepDescription(step, stepIndex, roomType);
+    
+    // Add AI message with animated detailed explanation
+    const stepMessage = {
+      id: `ai_${Date.now()}`,
+      type: 'ai_animated',
+      sentences: stepDescriptions,
+      timestamp: new Date().toISOString(),
+      success: true
+    };
+    
+    setMessages(prev => [...prev, stepMessage]);
+    
+    // Wait for animation to complete before showing execution window
+    setTimeout(() => {
+      // Add inline execution window for this step
+      const executionMessage = {
+        id: `execution_${Date.now()}`,
+        type: 'execution',
+        step: { ...step, status: 'executing' },
+        timestamp: new Date().toISOString()
+      };
+      
+      setMessages(prev => [...prev, executionMessage]);
+      
+      // Start executing the actual step
+      executeStepWithTiming(executionMessage, plan, stepIndex);
+    }, stepDescriptions.length * 800 + 200); // Reduced buffer from 500ms to 200ms
+  }, [agentManager, currentExecutionPlan]);
+
+  // Separate function to handle step execution with timing
+  const executeStepWithTiming = useCallback(async (executionMessage, plan, stepIndex) => {
+    // Execute the step
+    try {
+      const executedStep = await agentManager.executeNextStep();
+      
+      if (executedStep) {
+        // Update the execution window in messages
+        setMessages(prev => prev.map(msg => 
+          msg.id === executionMessage.id 
+            ? { ...msg, step: { ...executedStep, status: executedStep.status } }
+            : msg
+        ));
+        
+        // Continue to next step after a brief pause
+        setTimeout(() => {
+          executeNextStepSequentially(plan, stepIndex + 1);
+        }, 800);
+      }
+    } catch (error) {
+      console.error('Step execution failed:', error);
+      const step = plan.steps[stepIndex];
+      // Update execution window to show error
+      setMessages(prev => prev.map(msg => 
+        msg.id === executionMessage.id 
+          ? { ...msg, step: { ...step, status: 'failed', error: error.message } }
+          : msg
+      ));
+    }
+  }, [agentManager]);
+
+  // (previous handleSendMessage moved above)
+
+  // Handle autonomous agent execution
+  const handleAutonomousExecution = useCallback(async (message) => {
+    console.log('🤖 Using autonomous agent execution for:', message);
+    
+    try {
+      // Enhanced context for autonomous agent
       const enhancedContext = {
         ...currentContext,
         viewport: aiCommandExecutor.getViewportContext(),
-        recentMessages: messages.slice(-5), // Last 5 messages for context
+        recentMessages: messages.slice(-5),
         objects: standaloneCADEngine.getAllObjects(),
-        uploadedFiles: uploadedFiles
+        selectedObjects: Array.from(selectedObjects),
+        viewMode,
+        currentFloor
       };
 
-      // Process files for AI context if any are uploaded
-      let processedFiles = [];
-      if (uploadedFiles.length > 0) {
-        processedFiles = await aiService.processUploadedFiles(uploadedFiles);
+      // Call autonomous agent API (backend server)
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+      const response = await fetch(`${backendUrl}/api/agent/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          goal: message,
+          context: enhancedContext,
+          overrides: {
+            maxSteps: 8,
+            approvalMode: 'destructive',
+            enableCritic: true,
+            enableLearning: true
+          },
+          userId: 'current-user' // Would be actual user ID in production
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Agent API error: ${response.status}`);
       }
 
-      // First, get AI response using the selected model and mode
-      const aiResponse = await aiService.sendMessage(
-        message, 
-        selectedModel, 
-        mode, 
-        {
-          ...enhancedContext,
-          processedFiles
-        }
-      );
-
-      // Then process the message through the command executor for actions
-      let commandResponse = null;
-      try {
-        commandResponse = await aiCommandExecutor.processMessage(message, enhancedContext);
-      } catch (cmdError) {
-        console.warn('⚠️ Command executor warning:', cmdError.message);
-        // Continue with AI response even if command processing fails
+      const result = await response.json();
+      
+      if (result.ok) {
+        setActiveAutonomousRun(result.runId);
+        
+        // Connect to WebSocket for real-time updates
+        setupAutonomousWebSocket(result.runId);
+        
+        // Add initial response
+        const autonomousMessage = {
+          id: `autonomous_${Date.now()}`,
+          type: 'ai',
+          message: `🤖 **Autonomous Agent Started**\n\nI'll work on "${message}" autonomously with plan→act→observe→reflect capability. You'll see real-time progress and can approve destructive actions.`,
+          timestamp: new Date().toISOString(),
+          success: true,
+          isAutonomous: true,
+          runId: result.runId
+        };
+        
+        setMessages(prev => [...prev, autonomousMessage]);
       }
-
-      // Combine AI response with any command actions
-      const combinedResponse = {
-        id: `ai_${Date.now()}`,
-        type: 'ai',
-        message: aiResponse.message,
-        timestamp: new Date().toISOString(),
-        success: true,
-        actions: commandResponse?.actions || [],
-        model: aiResponse.model,
-        provider: aiResponse.provider
-      };
-
-      setMessages(prev => [...prev, combinedResponse]);
-
-      // Clear uploaded files after successful message
-      if (uploadedFiles.length > 0) {
-        setUploadedFiles([]);
-      }
-
+      
     } catch (error) {
-      console.error('❌ Chat error:', error);
+      console.error('❌ Autonomous execution failed:', error);
       
       const errorMessage = {
         id: `error_${Date.now()}`,
         type: 'ai',
-        message: `❌ I encountered an error: ${error.message}. Please try again or switch to a different AI model.`,
+        message: `❌ Autonomous agent failed to start: ${error.message}`,
         timestamp: new Date().toISOString(),
         success: false
       };
       
       setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsProcessing(false);
     }
-  }, [inputValue, isProcessing, currentContext, messages, selectedModel, mode, uploadedFiles]);
+  }, [currentContext, messages, selectedObjects, viewMode, currentFloor]);
+
+  // Setup WebSocket for autonomous agent progress
+  const setupAutonomousWebSocket = useCallback((runId) => {
+    try {
+      const wsUrl = `ws://localhost:8081/ws/agent?runId=${runId}`;
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('📡 Connected to autonomous agent WebSocket');
+        setAutonomousSocket(ws);
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleAutonomousEvent(data);
+        } catch (error) {
+          console.error('Failed to parse WebSocket message:', error);
+        }
+      };
+      
+      ws.onclose = () => {
+        console.log('📡 Disconnected from autonomous agent WebSocket');
+        setAutonomousSocket(null);
+      };
+      
+      ws.onerror = (error) => {
+        console.error('📡 WebSocket error:', error);
+      };
+      
+    } catch (error) {
+      console.error('Failed to setup WebSocket:', error);
+    }
+  }, []);
+
+  // Handle autonomous agent events from WebSocket
+  const handleAutonomousEvent = useCallback((event) => {
+    const { type, runId } = event;
+    
+    if (runId !== activeAutonomousRun) return;
+    
+    switch (type) {
+      case 'plan':
+        const planMessage = {
+          id: `plan_${Date.now()}`,
+          type: 'ai',
+          message: `📋 **Plan Generated**\n\n${event.summary}\n\nSteps: ${event.steps?.map(s => `• ${s.title || s.action}`).join('\n') || 'See progress below'}`,
+          timestamp: new Date().toISOString(),
+          success: true,
+          isAutonomous: true
+        };
+        setMessages(prev => [...prev, planMessage]);
+        break;
+        
+      case 'act':
+        const actMessage = {
+          id: `act_${Date.now()}`,
+          type: 'ai',
+          message: `⚡ **Step ${event.step}**: Using ${event.tool}`,
+          timestamp: new Date().toISOString(),
+          success: true,
+          isAutonomous: true
+        };
+        setMessages(prev => [...prev, actMessage]);
+        break;
+        
+      case 'critic':
+        if (event.verdict === 'failed') {
+          const criticMessage = {
+            id: `critic_${Date.now()}`,
+            type: 'ai',
+            message: `🔍 **Critic**: ${event.reason} - Replanning...`,
+            timestamp: new Date().toISOString(),
+            success: false,
+            isAutonomous: true
+          };
+          setMessages(prev => [...prev, criticMessage]);
+        }
+        break;
+        
+      case 'approval-request':
+        setPendingApproval({
+          runId: event.runId,
+          approvalId: event.approvalId,
+          action: event.action
+        });
+        break;
+        
+      case 'done':
+        const doneMessage = {
+          id: `done_${Date.now()}`,
+          type: 'ai',
+          message: event.status === 'success' ? 
+            `✅ **Autonomous execution completed successfully!**\n\nDuration: ${Math.round(event.duration / 1000)}s` :
+            `❌ **Autonomous execution ${event.status}**: ${event.error || event.reason}`,
+          timestamp: new Date().toISOString(),
+          success: event.status === 'success',
+          isAutonomous: true
+        };
+        setMessages(prev => [...prev, doneMessage]);
+        
+        // Cleanup
+        setActiveAutonomousRun(null);
+        setPendingApproval(null);
+        if (autonomousSocket) {
+          autonomousSocket.close();
+        }
+        break;
+        
+      default:
+        console.log('Unhandled autonomous event:', event);
+    }
+  }, [activeAutonomousRun, autonomousSocket]);
+
+  // Handle approval response
+  const handleApprovalResponse = useCallback(async (approved, reason = null) => {
+    if (!pendingApproval) return;
+    
+    try {
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+      await fetch(`${backendUrl}/api/agent/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          runId: pendingApproval.runId,
+          approved,
+          reason
+        })
+      });
+      
+      setPendingApproval(null);
+      
+    } catch (error) {
+      console.error('Failed to send approval:', error);
+    }
+  }, [pendingApproval]);
 
   // Handle Enter key press
   const handleKeyPress = useCallback((e) => {
@@ -434,6 +941,60 @@ const NativeAIChat = ({
   const renderMessage = useCallback((message) => {
     const isUser = message.type === 'user';
     const isSystem = message.type === 'system';
+    const isExecution = message.type === 'execution';
+    const isAnimated = message.type === 'ai_animated';
+    const isCompletion = message.type === 'ai_completion';
+    
+    // For completion summary messages, render with CompletionSummary component
+    if (isCompletion) {
+      return (
+        <div key={message.id} className="flex justify-start mb-3">
+          <div className="p-4 rounded-lg w-full max-w-[95%] text-gray-100 bg-gradient-to-br from-green-900/20 to-blue-900/20 border border-green-800/30">
+            <CompletionSummary 
+              summaryLines={message.sentences}
+              className="text-sm"
+            />
+            <div className="text-xs opacity-60 mt-3 pt-3 border-t border-gray-700/50">
+              {message.timestamp}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // For animated AI messages, render with AnimatedMessage component
+    if (isAnimated) {
+      return (
+        <div key={message.id} className="flex justify-start mb-1">
+          <div className="p-4 rounded-lg w-full max-w-[95%] text-gray-100">
+            <AnimatedMessage 
+              sentences={message.sentences}
+              className="text-sm"
+            />
+            <div className="text-xs opacity-60 mt-2">
+              {message.timestamp}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    
+    // For execution messages, render inline execution window
+    if (isExecution) {
+      return (
+        <div key={message.id} className="flex justify-start mb-2 w-full">
+          <div className="w-full max-w-[95%]">
+            <InlineExecutionWindow
+              step={message.step}
+              isExecuting={message.step?.status === 'executing'}
+              onStepComplete={() => {
+                // Step completion is handled in executeNextStepSequentially
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
     
     // For system messages, render them simply
     if (isSystem) {
@@ -579,6 +1140,30 @@ const NativeAIChat = ({
         <div ref={messagesEndRef} />
       </div>
 
+      {/* Usage Status Indicator */}
+      {subscriptionStatus && (isNearLimit || usageWarnings.length > 0) && (
+        <div className="px-4 py-2 border-t border-gray-700/30">
+          {usageWarnings.length > 0 ? (
+            <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-2">
+              <div className="text-xs text-yellow-300">
+                ⚠️ {usageWarnings[0].message}
+              </div>
+            </div>
+          ) : isNearLimit && (
+            <div className="bg-orange-900/20 border border-orange-600/50 rounded-lg p-2">
+              <div className="text-xs text-orange-300 flex items-center justify-between">
+                <span>
+                  📊 {subscriptionStatus.usage.aiTokens.percentage.toFixed(0)}% of monthly tokens used
+                </span>
+                <span className="text-studiosix-400">
+                  {subscriptionStatus.tier}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Chat Input Section - Restored Original Design */}
       <div className="p-4 border-t border-gray-700/50 glass-light space-y-3">
         {/* Mode and Model Selectors */}
@@ -594,6 +1179,30 @@ const NativeAIChat = ({
               <option value="agent">Agent</option>
               <option value="ask">Ask</option>
             </select>
+          </div>
+          
+          {/* Autonomous Agent Toggle */}
+          <div className="flex items-center space-x-1">
+            <span className="text-gray-400">🤖</span>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isAutonomousEnabled}
+                onChange={(e) => setIsAutonomousEnabled(e.target.checked)}
+                className="sr-only"
+                disabled={activeAutonomousRun}
+              />
+              <div className={`w-8 h-4 rounded-full transition-colors ${
+                isAutonomousEnabled ? 'bg-studiosix-500' : 'bg-gray-600'
+              } ${activeAutonomousRun ? 'opacity-50' : ''}`}>
+                <div className={`w-3 h-3 bg-white rounded-full transition-transform duration-200 transform ${
+                  isAutonomousEnabled ? 'translate-x-4' : 'translate-x-0.5'
+                } mt-0.5`}></div>
+              </div>
+              <span className={`ml-1 text-xs ${isAutonomousEnabled ? 'text-studiosix-400' : 'text-gray-400'}`}>
+                Auto {activeAutonomousRun && <span className="animate-pulse">●</span>}
+              </span>
+            </label>
           </div>
           
           {/* Model Selector */}
@@ -694,6 +1303,44 @@ const NativeAIChat = ({
             ))}
           </div>
         </div>
+
+        {/* Autonomous Agent Approval Dialog */}
+        {pendingApproval && (
+          <div className="bg-yellow-900/20 border border-yellow-600/50 rounded-lg p-3">
+            <div className="flex items-start space-x-3">
+              <div className="w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center flex-shrink-0">
+                <span className="text-yellow-900 text-sm font-bold">!</span>
+              </div>
+              <div className="flex-1">
+                <div className="text-sm text-yellow-200 font-medium mb-1">
+                  🤖 Agent requesting approval for destructive action:
+                </div>
+                <div className="text-sm text-gray-300 mb-3">
+                  <strong>{pendingApproval.action?.tool || 'Unknown action'}</strong>
+                  {pendingApproval.action?.args && (
+                    <div className="text-xs text-gray-400 mt-1">
+                      {JSON.stringify(pendingApproval.action.args, null, 2).slice(0, 100)}...
+                    </div>
+                  )}
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => handleApprovalResponse(true)}
+                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors"
+                  >
+                    ✓ Approve
+                  </button>
+                  <button
+                    onClick={() => handleApprovalResponse(false, 'User rejected')}
+                    className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors"
+                  >
+                    ✗ Reject
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* Input Form - Original Clean Design */}
         <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="flex space-x-2">

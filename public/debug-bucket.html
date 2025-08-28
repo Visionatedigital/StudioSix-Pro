@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Bucket Discovery</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #fff;
+        }
+        .log {
+            background: #2d2d2d;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            border-left: 4px solid #007acc;
+        }
+        .error {
+            border-left-color: #f44336;
+        }
+        .success {
+            border-left-color: #4caf50;
+        }
+        .test-image {
+            max-width: 200px;
+            margin: 10px;
+            border: 2px solid #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Bucket Discovery Debug Page</h1>
+    <div id="logs"></div>
+    
+    <h2>🖼️ Test Thumbnail URLs</h2>
+    <div id="thumbnails"></div>
+
+    <script>
+        function log(message, type = 'info') {
+            const logs = document.getElementById('logs');
+            const div = document.createElement('div');
+            div.className = `log ${type}`;
+            div.innerHTML = `<strong>[${new Date().toLocaleTimeString()}]</strong> ${message}`;
+            logs.appendChild(div);
+            console.log(message);
+        }
+
+        async function testBucketDiscovery() {
+            log('🚀 Testing bucket discovery access...');
+            
+            try {
+                const response = await fetch('/bucket-discovery.json');
+                log(`📡 Bucket discovery response: ${response.status} ${response.statusText}`, response.ok ? 'success' : 'error');
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(`✅ Bucket discovery loaded successfully!`, 'success');
+                    log(`📊 Categories: ${data.categories?.length || 0}`);
+                    log(`📊 Total models: ${data.categories?.reduce((sum, cat) => sum + (cat.modelCount || 0), 0) || 0}`);
+                    
+                    // Test first few thumbnail URLs
+                    if (data.categories && data.categories.length > 0) {
+                        const firstCategory = data.categories[0];
+                        log(`🔍 Testing thumbnails from first category: ${firstCategory.name}`);
+                        
+                        const thumbnailsDiv = document.getElementById('thumbnails');
+                        
+                        if (firstCategory.models && firstCategory.models.length > 0) {
+                            firstCategory.models.slice(0, 5).forEach((model, index) => {
+                                const img = document.createElement('img');
+                                img.src = model.thumbnailUrl;
+                                img.alt = model.name;
+                                img.className = 'test-image';
+                                
+                                img.onload = () => {
+                                    log(`✅ Thumbnail ${index + 1} loaded: ${model.name}`, 'success');
+                                };
+                                
+                                img.onerror = () => {
+                                    log(`❌ Thumbnail ${index + 1} failed: ${model.name} - ${model.thumbnailUrl}`, 'error');
+                                };
+                                
+                                thumbnailsDiv.appendChild(img);
+                                
+                                // Also log the URL
+                                log(`🖼️ Testing: ${model.thumbnailUrl}`);
+                            });
+                        }
+                    }
+                } else {
+                    log(`❌ Failed to load bucket discovery: ${response.status}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Error loading bucket discovery: ${error.message}`, 'error');
+            }
+        }
+
+        // Run test when page loads
+        testBucketDiscovery();
+    </script>
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

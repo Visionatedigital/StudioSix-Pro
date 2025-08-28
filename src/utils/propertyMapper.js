@@ -413,6 +413,182 @@ const OBJECT_PROPERTY_DEFINITIONS = {
         description: 'Unique object identifier'
       }
     }
+  },
+
+  // Furniture property definitions  
+  furniture: {
+    Geometry: {
+      width: {
+        type: 'number',
+        label: 'Width',
+        unit: 'm',
+        min: 0.1,
+        max: 10,
+        step: 0.1,
+        description: 'Furniture width'
+      },
+      height: {
+        type: 'number',
+        label: 'Height',
+        unit: 'm',
+        min: 0.1,
+        max: 5,
+        step: 0.1,
+        description: 'Furniture height'
+      },
+      depth: {
+        type: 'number',
+        label: 'Depth',
+        unit: 'm',
+        min: 0.1,
+        max: 5,
+        step: 0.1,
+        description: 'Furniture depth'
+      }
+    },
+    Position: {
+      position: {
+        type: 'position',
+        label: 'Position',
+        unit: 'm',
+        step: 0.1,
+        description: 'Furniture position in 3D space (X, Y, Z)'
+      },
+      rotation: {
+        type: 'rotation',
+        label: 'Rotation',
+        unit: '°',
+        step: 1,
+        description: 'Furniture rotation angles (X, Y, Z degrees)'
+      }
+    },
+    Model: {
+      modelUrl: {
+        type: 'string',
+        label: 'Model URL',
+        readonly: true,
+        description: '3D model file URL'
+      },
+      format: {
+        type: 'string',
+        label: 'Format',
+        readonly: true,
+        description: '3D model format (FBX, glTF, OBJ)'
+      }
+    },
+    Properties: {
+      type: {
+        type: 'string',
+        label: 'Type',
+        readonly: true,
+        description: 'Object type identifier'
+      },
+      id: {
+        type: 'string',
+        label: 'ID',
+        readonly: true,
+        description: 'Unique object identifier'
+      },
+      name: {
+        type: 'string',
+        label: 'Name',
+        description: 'Furniture name'
+      },
+      category: {
+        type: 'string',
+        label: 'Category',
+        readonly: true,
+        description: 'Furniture category'
+      }
+    }
+  },
+
+  // Fixture property definitions (similar to furniture)
+  fixture: {
+    Geometry: {
+      width: {
+        type: 'number',
+        label: 'Width',
+        unit: 'm',
+        min: 0.1,
+        max: 10,
+        step: 0.1,
+        description: 'Fixture width'
+      },
+      height: {
+        type: 'number',
+        label: 'Height',
+        unit: 'm',
+        min: 0.1,
+        max: 5,
+        step: 0.1,
+        description: 'Fixture height'
+      },
+      depth: {
+        type: 'number',
+        label: 'Depth',
+        unit: 'm',
+        min: 0.1,
+        max: 5,
+        step: 0.1,
+        description: 'Fixture depth'
+      }
+    },
+    Position: {
+      position: {
+        type: 'position',
+        label: 'Position',
+        unit: 'm',
+        step: 0.1,
+        description: 'Fixture position in 3D space (X, Y, Z)'
+      },
+      rotation: {
+        type: 'rotation',
+        label: 'Rotation',
+        unit: '°',
+        step: 1,
+        description: 'Fixture rotation angles (X, Y, Z degrees)'
+      }
+    },
+    Model: {
+      modelUrl: {
+        type: 'string',
+        label: 'Model URL',
+        readonly: true,
+        description: '3D model file URL'
+      },
+      format: {
+        type: 'string',
+        label: 'Format',
+        readonly: true,
+        description: '3D model format (FBX, glTF, OBJ)'
+      }
+    },
+    Properties: {
+      type: {
+        type: 'string',
+        label: 'Type',
+        readonly: true,
+        description: 'Object type identifier'
+      },
+      id: {
+        type: 'string',
+        label: 'ID',
+        readonly: true,
+        description: 'Unique object identifier'
+      },
+      name: {
+        type: 'string',
+        label: 'Name',
+        description: 'Fixture name'
+      },
+      category: {
+        type: 'string',
+        label: 'Category',
+        readonly: true,
+        description: 'Fixture category'
+      }
+    }
   }
 };
 
@@ -465,15 +641,22 @@ const DEFAULT_OBJECT_PROPERTIES = {
 export function mapFreeCADObjectToProperties(freecadObject) {
   if (!freecadObject) return {};
 
-  const objectType = freecadObject.type || 'Object';
-  const propertyDefinitions = OBJECT_PROPERTY_DEFINITIONS[objectType] || DEFAULT_OBJECT_PROPERTIES;
-  const mappedProperties = {};
+  try {
+    const objectType = freecadObject.type || 'Object';
+    const propertyDefinitions = OBJECT_PROPERTY_DEFINITIONS[objectType] || DEFAULT_OBJECT_PROPERTIES;
+    const mappedProperties = {};
 
   // Process each category of properties
   Object.entries(propertyDefinitions).forEach(([categoryName, categoryProps]) => {
     Object.entries(categoryProps).forEach(([propName, propDef]) => {
       // Get the actual value from the FreeCAD object
       let value = freecadObject[propName];
+      
+      // DEFENSIVE: Check if propDef exists and has required properties
+      if (!propDef || typeof propDef !== 'object') {
+        console.warn(`Property definition missing or invalid for ${propName}`);
+        return; // Skip this property
+      }
       
       // Handle special cases for value extraction
       if (propName === 'position') {
@@ -488,7 +671,7 @@ export function mapFreeCADObjectToProperties(freecadObject) {
         value = freecadObject.id || freecadObject.freecadId || 'unknown';
       }
 
-      // Apply default value if not found
+      // Apply default value if not found or invalid
       if (value === undefined || value === null) {
         switch (propDef.type) {
           case 'number':
@@ -514,6 +697,16 @@ export function mapFreeCADObjectToProperties(freecadObject) {
         }
       }
 
+      // Ensure number types are properly converted and valid
+      if (propDef.type === 'number' || propDef.type === 'integer') {
+        const numValue = Number(value);
+        if (isNaN(numValue)) {
+          value = propDef.min || 0;
+        } else {
+          value = numValue;
+        }
+      }
+
       // Create property entry
       mappedProperties[propName] = {
         value: value,
@@ -524,6 +717,28 @@ export function mapFreeCADObjectToProperties(freecadObject) {
   });
 
   return mappedProperties;
+  
+  } catch (error) {
+    console.error('Error mapping FreeCAD object to properties:', error);
+    console.error('Object causing error:', freecadObject);
+    // Return safe fallback properties
+    return {
+      id: {
+        value: freecadObject?.id || 'unknown',
+        category: 'Properties',
+        type: 'string',
+        label: 'ID',
+        readonly: true
+      },
+      type: {
+        value: freecadObject?.type || 'Object',
+        category: 'Properties', 
+        type: 'string',
+        label: 'Type',
+        readonly: true
+      }
+    };
+  }
 }
 
 /**

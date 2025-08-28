@@ -1,18 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import standaloneCADEngine from '../../services/StandaloneCADEngine';
+import { ColumnIcon } from '../icons';
 import {
   SwatchIcon,
   RectangleStackIcon,
   AdjustmentsVerticalIcon,
   CheckIcon,
   XMarkIcon,
-  PlayIcon,
-  BuildingOfficeIcon
+  PlayIcon
 } from '@heroicons/react/24/outline';
 
 /**
  * Column Tool Component - Provides interface for column creation and editing
- * Allows users to specify column parameters before placement
+ * Updated to match white properties panel styling and follow task requirements
  */
 const ColumnTool = ({
   isActive = false,
@@ -24,21 +24,24 @@ const ColumnTool = ({
   onObjectUpdated, // Callback when object is updated
   gridPoints = [] // Grid intersection points for column placement
 }) => {
-  // Column parameters state
+  // Column parameters state following task specifications
   const [columnParams, setColumnParams] = useState({
-    width: 0.4,
-    depth: 0.4,
-    height: 3.0,
-    shape: 'rectangular', // 'rectangular', 'circular'
+    width: 0.4,        // For rectangular columns
+    depth: 0.4,        // For rectangular columns
+    height: 3.0,       // Column height
+    radius: 0.2,       // For circular columns
+    shape: 'rect',     // 'rect' or 'circle'
     material: 'concrete',
-    offset: 0.0
+    inclinationAngle: 0,    // 0-45 degrees
+    inclinationAxis: 'x',   // 'x' or 'y'
+    rotation: 0,            // Rotation around vertical axis
+    position: { x: 0, y: 0, z: 0 } // Column base position
   });
 
   // Validation and interaction state
   const [isValid, setIsValid] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [validationErrors, setValidationErrors] = useState({});
-  const [availableGridPoints, setAvailableGridPoints] = useState([]);
 
   // Material options for columns
   const materialOptions = [
@@ -52,8 +55,14 @@ const ColumnTool = ({
 
   // Shape options
   const shapeOptions = [
-    { value: 'rectangular', label: 'Rectangular', icon: '▭' },
-    { value: 'circular', label: 'Circular', icon: '○' }
+    { value: 'rect', label: 'Rectangular', icon: '▭' },
+    { value: 'circle', label: 'Circular', icon: '○' }
+  ];
+
+  // Inclination axis options
+  const inclinationAxisOptions = [
+    { value: 'x', label: 'X-Axis', description: 'Tilt along X-axis' },
+    { value: 'y', label: 'Y-Axis', description: 'Tilt along Y-axis' }
   ];
 
   // Initialize with existing column data if editing
@@ -63,41 +72,71 @@ const ColumnTool = ({
         width: selectedObject.width || 0.4,
         depth: selectedObject.depth || 0.4,
         height: selectedObject.height || 3.0,
-        shape: selectedObject.shape || 'rectangular',
+        radius: selectedObject.radius || 0.2,
+        shape: selectedObject.shape || 'rect',
         material: selectedObject.material || 'concrete',
-        offset: selectedObject.offset || 0.0
+        inclinationAngle: selectedObject.inclinationAngle || 0,
+        inclinationAxis: selectedObject.inclinationAxis || 'x',
+        rotation: selectedObject.rotation || 0,
+        position: selectedObject.position || { x: 0, y: 0, z: 0 }
       });
     }
   }, [selectedObject]);
 
-  // Update available grid points for column placement
-  useEffect(() => {
-    if (!isActive) return;
+  // Handle parameter changes with validation
+  const handleParameterChange = useCallback((param, value) => {
+    setColumnParams(prev => {
+      const newParams = { ...prev, [param]: value };
+      
+      // Auto-derive radius from width/depth when switching to circle
+      if (param === 'shape' && value === 'circle') {
+        newParams.radius = Math.min(prev.width, prev.depth) / 2;
+      }
+      
+      // Auto-derive width/depth from radius when switching to rect
+      if (param === 'shape' && value === 'rect') {
+        newParams.width = prev.radius * 2;
+        newParams.depth = prev.radius * 2;
+      }
+      
+      return newParams;
+    });
     
-    // Use provided grid points or detect grids from CAD objects
-    const gridPointsToUse = gridPoints.length > 0 ? gridPoints : [];
-    setAvailableGridPoints(gridPointsToUse);
-  }, [cadObjects, gridPoints, isActive]);
+    // Clear specific validation error
+    if (validationErrors[param]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[param];
+        return newErrors;
+      });
+    }
+  }, [validationErrors]);
 
-  // Parameter validation
+  // Validate parameters
   const validateParameters = useCallback(() => {
     const errors = {};
     
-    // Width validation
-    if (columnParams.width <= 0 || columnParams.width > 2) {
-      errors.width = 'Width must be between 0.05m and 2m';
+    if (columnParams.height < 0.5 || columnParams.height > 20) {
+      errors.height = 'Height must be between 0.5m and 20m';
     }
     
-    // Depth validation (for rectangular columns)
-    if (columnParams.shape === 'rectangular' && (columnParams.depth <= 0 || columnParams.depth > 2)) {
-      errors.depth = 'Depth must be between 0.05m and 2m';
+    if (columnParams.shape === 'rect') {
+      if (columnParams.width < 0.1 || columnParams.width > 2) {
+        errors.width = 'Width must be between 0.1m and 2m';
+      }
+      if (columnParams.depth < 0.1 || columnParams.depth > 2) {
+        errors.depth = 'Depth must be between 0.1m and 2m';
+      }
+    } else {
+      if (columnParams.radius < 0.05 || columnParams.radius > 1) {
+        errors.radius = 'Radius must be between 0.05m and 1m';
+      }
     }
     
-    // Height validation
-    if (columnParams.height <= 0 || columnParams.height > 20) {
-      errors.height = 'Height must be between 0.1m and 20m';
+    if (columnParams.inclinationAngle < 0 || columnParams.inclinationAngle > 45) {
+      errors.inclinationAngle = 'Inclination angle must be between 0° and 45°';
     }
-
+    
     setValidationErrors(errors);
     const isValid = Object.keys(errors).length === 0;
     setIsValid(isValid);
@@ -105,18 +144,10 @@ const ColumnTool = ({
     return isValid;
   }, [columnParams]);
 
-  // Run validation when parameters change
+  // Validate on parameter changes
   useEffect(() => {
     validateParameters();
-  }, [validateParameters]);
-
-  // Handle parameter changes
-  const handleParameterChange = useCallback((param, value) => {
-    setColumnParams(prev => ({
-      ...prev,
-      [param]: value
-    }));
-  }, []);
+  }, [columnParams, validateParameters]);
 
   // Handle column creation
   const handleCreate = useCallback(async () => {
@@ -130,9 +161,20 @@ const ColumnTool = ({
         width: columnParams.width,
         depth: columnParams.depth,
         height: columnParams.height,
+        radius: columnParams.radius,
         shape: columnParams.shape,
         material: columnParams.material,
-        offset: columnParams.offset
+        inclinationAngle: columnParams.inclinationAngle,
+        inclinationAxis: columnParams.inclinationAxis,
+        rotation: columnParams.rotation,
+        position: columnParams.position,
+        // Add IFC metadata
+        ifc: {
+          type: 'IfcColumn',
+          name: `Column_${Date.now()}`,
+          objectType: 'COLUMN',
+          predefinedType: 'COLUMN'
+        }
       };
       
       // Create object using standalone CAD engine
@@ -153,9 +195,13 @@ const ColumnTool = ({
           width: 0.4,
           depth: 0.4,
           height: 3.0,
-          shape: 'rectangular',
+          radius: 0.2,
+          shape: 'rect',
           material: 'concrete',
-          offset: 0.0
+          inclinationAngle: 0,
+          inclinationAxis: 'x',
+          rotation: 0,
+          position: { x: 0, y: 0, z: 0 }
         });
       }
       
@@ -177,9 +223,13 @@ const ColumnTool = ({
         width: columnParams.width,
         depth: columnParams.depth,
         height: columnParams.height,
+        radius: columnParams.radius,
         shape: columnParams.shape,
         material: columnParams.material,
-        offset: columnParams.offset
+        inclinationAngle: columnParams.inclinationAngle,
+        inclinationAxis: columnParams.inclinationAxis,
+        rotation: columnParams.rotation,
+        position: columnParams.position
       };
       
       // Update object using standalone CAD engine
@@ -207,30 +257,21 @@ const ColumnTool = ({
   if (!isActive) return null;
 
   const isEditing = selectedObject && (selectedObject.type === 'Column' || selectedObject.type === 'column');
-  const selectedMaterial = materialOptions.find(m => m.value === columnParams.material);
 
   return (
-    <div className="column-tool-panel w-full h-full">
+    <div className="column-tool-panel w-full h-full bg-white border border-gray-200 rounded-lg shadow-lg">
       
       {/* Header */}
-      <div className={`p-4 border-b flex items-center justify-between ${
-        theme === 'dark' ? 'border-gray-700/50' : 'border-gray-300/50'
-      }`}>
+      <div className="p-4 border-b border-gray-200 flex items-center justify-between bg-white rounded-t-lg">
         <div className="flex items-center space-x-3">
-          <div className={`p-2 rounded-lg ${
-            theme === 'dark' ? 'bg-studiosix-600' : 'bg-studiosix-500'
-          }`}>
-            <BuildingOfficeIcon className="w-5 h-5 text-white" />
+          <div className="p-2 rounded-lg bg-studiosix-500">
+            <ColumnIcon className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h3 className={`font-semibold ${
-              theme === 'dark' ? 'text-white' : 'text-gray-900'
-            }`}>
+            <h3 className="font-semibold text-gray-900">
               {isEditing ? 'Edit Column' : 'Create Column'}
             </h3>
-            <p className={`text-xs ${
-              theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-            }`}>
+            <p className="text-xs text-gray-600">
               {isEditing ? 'Modify selected column properties' : 'Configure column parameters and create'}
             </p>
           </div>
@@ -238,11 +279,7 @@ const ColumnTool = ({
         
         <button
           onClick={onCancel}
-          className={`p-1 rounded-md transition-colors ${
-            theme === 'dark' 
-              ? 'hover:bg-gray-700/50 text-gray-400 hover:text-white' 
-              : 'hover:bg-gray-200/50 text-gray-600 hover:text-gray-900'
-          }`}
+          className="p-1 rounded-md transition-colors hover:bg-gray-100 text-gray-500 hover:text-gray-700"
           title="Close column tool"
         >
           <XMarkIcon className="w-4 h-4" />
@@ -250,236 +287,204 @@ const ColumnTool = ({
       </div>
 
       {/* Parameters */}
-      <div className="p-4 space-y-4">
+      <div className="p-3 space-y-4 bg-white max-h-[70vh] overflow-y-auto">
         
-        {/* Grid Points Info */}
-        {availableGridPoints.length > 0 && (
-          <div className={`p-2 rounded border ${
-            theme === 'dark' ? 'border-green-700/50 bg-green-800/20' : 'border-green-500/50 bg-green-50'
-          }`}>
-            <p className={`text-xs ${
-              theme === 'dark' ? 'text-green-400' : 'text-green-700'
-            }`}>
-              {availableGridPoints.length} grid point{availableGridPoints.length !== 1 ? 's' : ''} available for column placement
-            </p>
-          </div>
-        )}
-
-        {/* Shape Section */}
+        {/* Shape & Dimensions Section */}
         <div>
-          <h4 className={`text-sm font-medium mb-3 flex items-center ${
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-          }`}>
+          <h4 className="text-sm font-medium mb-2 flex items-center text-gray-700">
             <RectangleStackIcon className="w-4 h-4 mr-2" />
-            Shape
+            Shape & Dimensions
           </h4>
           
-          <div className="flex space-x-1 mb-3">
+          {/* Shape Selection */}
+          <div className="flex space-x-2 mb-3">
             {shapeOptions.map((option) => (
               <button
                 key={option.value}
                 onClick={() => handleParameterChange('shape', option.value)}
-                className={`flex-1 p-2 text-xs rounded transition-colors ${
+                className={`flex-1 p-2 text-xs rounded border transition-all ${
                   columnParams.shape === option.value
-                    ? theme === 'dark'
-                      ? 'bg-studiosix-600 text-white'
-                      : 'bg-studiosix-500 text-white'
-                    : theme === 'dark'
-                      ? 'bg-slate-800/50 text-gray-300 hover:bg-slate-700/50'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-studiosix-500 text-white border-studiosix-500'
+                    : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
                 }`}
               >
-                <span className="block text-sm mb-1">{option.icon}</span>
+                <span className="block text-sm mb-0.5">{option.icon}</span>
                 {option.label}
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Dimensions Section */}
-        <div>
-          <h4 className={`text-sm font-medium mb-3 flex items-center ${
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-          }`}>
-            <AdjustmentsVerticalIcon className="w-4 h-4 mr-2" />
-            Dimensions
-          </h4>
           
-          <div className="grid grid-cols-3 gap-3">
-            {/* Width */}
-            <div>
-              <label className={`block text-xs mb-1 ${
-                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-              }`}>
-                {columnParams.shape === 'circular' ? 'Diameter (m)' : 'Width (m)'}
-              </label>
-              <input
-                type="number"
-                value={columnParams.width}
-                onChange={(e) => handleParameterChange('width', parseFloat(e.target.value) || 0)}
-                min="0.05"
-                max="2"
-                step="0.01"
-                className={`w-full px-2 py-1 text-xs rounded border transition-colors ${
-                  validationErrors.width
-                    ? 'border-red-500 focus:border-red-400'
-                    : theme === 'dark'
-                      ? 'bg-slate-800/50 border-gray-600 text-white focus:border-studiosix-500'
-                      : 'bg-white border-gray-300 text-gray-900 focus:border-studiosix-500'
-                } focus:outline-none focus:ring-1 ${
-                  validationErrors.width
-                    ? 'focus:ring-red-400'
-                    : 'focus:ring-studiosix-500'
-                }`}
-              />
-              {validationErrors.width && (
-                <p className="text-xs text-red-400 mt-1">{validationErrors.width}</p>
-              )}
-            </div>
-            
-            {/* Depth - only show for rectangular columns */}
-            {columnParams.shape === 'rectangular' && (
-              <div>
-                <label className={`block text-xs mb-1 ${
-                  theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                }`}>
-                  Depth (m)
-                </label>
-                <input
-                  type="number"
-                  value={columnParams.depth}
-                  onChange={(e) => handleParameterChange('depth', parseFloat(e.target.value) || 0)}
-                  min="0.05"
-                  max="2"
-                  step="0.01"
-                  className={`w-full px-2 py-1 text-xs rounded border transition-colors ${
-                    validationErrors.depth
-                      ? 'border-red-500 focus:border-red-400'
-                      : theme === 'dark'
-                        ? 'bg-slate-800/50 border-gray-600 text-white focus:border-studiosix-500'
-                        : 'bg-white border-gray-300 text-gray-900 focus:border-studiosix-500'
-                  } focus:outline-none focus:ring-1 ${
-                    validationErrors.depth
-                      ? 'focus:ring-red-400'
-                      : 'focus:ring-studiosix-500'
-                  }`}
-                />
-                {validationErrors.depth && (
-                  <p className="text-xs text-red-400 mt-1">{validationErrors.depth}</p>
-                )}
-              </div>
-            )}
-            
+          {/* Dimensions Grid */}
+          <div className="grid grid-cols-3 gap-2">
             {/* Height */}
             <div>
-              <label className={`block text-xs mb-1 ${
-                theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-              }`}>
-                Height (m)
-              </label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Height (m)</label>
               <input
                 type="number"
                 value={columnParams.height}
                 onChange={(e) => handleParameterChange('height', parseFloat(e.target.value) || 0)}
-                min="0.1"
+                min="0.5"
                 max="20"
                 step="0.1"
-                className={`w-full px-2 py-1 text-xs rounded border transition-colors ${
-                  validationErrors.height
-                    ? 'border-red-500 focus:border-red-400'
-                    : theme === 'dark'
-                      ? 'bg-slate-800/50 border-gray-600 text-white focus:border-studiosix-500'
-                      : 'bg-white border-gray-300 text-gray-900 focus:border-studiosix-500'
-                } focus:outline-none focus:ring-1 ${
-                  validationErrors.height
-                    ? 'focus:ring-red-400'
-                    : 'focus:ring-studiosix-500'
-                }`}
+                className={`w-full px-2 py-1.5 text-xs rounded border ${
+                  validationErrors.height ? 'border-red-300' : 'border-gray-300'
+                } focus:outline-none focus:border-studiosix-500`}
               />
-              {validationErrors.height && (
-                <p className="text-xs text-red-400 mt-1">{validationErrors.height}</p>
-              )}
+            </div>
+
+            {columnParams.shape === 'rect' ? (
+              <>
+                {/* Width */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Width (m)</label>
+                  <input
+                    type="number"
+                    value={columnParams.width}
+                    onChange={(e) => handleParameterChange('width', parseFloat(e.target.value) || 0)}
+                    min="0.1"
+                    max="2"
+                    step="0.01"
+                    className={`w-full px-2 py-1.5 text-xs rounded border ${
+                      validationErrors.width ? 'border-red-300' : 'border-gray-300'
+                    } focus:outline-none focus:border-studiosix-500`}
+                  />
+                </div>
+                {/* Depth */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Depth (m)</label>
+                  <input
+                    type="number"
+                    value={columnParams.depth}
+                    onChange={(e) => handleParameterChange('depth', parseFloat(e.target.value) || 0)}
+                    min="0.1"
+                    max="2"
+                    step="0.01"
+                    className={`w-full px-2 py-1.5 text-xs rounded border ${
+                      validationErrors.depth ? 'border-red-300' : 'border-gray-300'
+                    } focus:outline-none focus:border-studiosix-500`}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                {/* Radius */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Radius (m)</label>
+                  <input
+                    type="number"
+                    value={columnParams.radius}
+                    onChange={(e) => handleParameterChange('radius', parseFloat(e.target.value) || 0)}
+                    min="0.05"
+                    max="1"
+                    step="0.01"
+                    className={`w-full px-2 py-1.5 text-xs rounded border ${
+                      validationErrors.radius ? 'border-red-300' : 'border-gray-300'
+                    } focus:outline-none focus:border-studiosix-500`}
+                  />
+                </div>
+                {/* Empty placeholder for grid alignment */}
+                <div></div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Inclination Section - Compact */}
+        <div>
+          <h4 className="text-sm font-medium mb-2 flex items-center text-gray-700">
+            <AdjustmentsVerticalIcon className="w-4 h-4 mr-2" />
+            Inclination
+          </h4>
+          
+          {/* Angle and Axis in one row */}
+          <div className="grid grid-cols-3 gap-2 items-end">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-700 mb-1">Angle: {columnParams.inclinationAngle}°</label>
+              <input
+                type="range"
+                value={columnParams.inclinationAngle}
+                onChange={(e) => handleParameterChange('inclinationAngle', parseFloat(e.target.value))}
+                min="0"
+                max="45"
+                step="1"
+                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Axis</label>
+              <select
+                value={columnParams.inclinationAxis}
+                onChange={(e) => handleParameterChange('inclinationAxis', e.target.value)}
+                className="w-full px-2 py-1.5 text-xs rounded border border-gray-300 focus:outline-none focus:border-studiosix-500"
+              >
+                {inclinationAxisOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
 
-        {/* Material Section */}
+        {/* Material Section - Compact */}
         <div>
-          <h4 className={`text-sm font-medium mb-3 flex items-center ${
-            theme === 'dark' ? 'text-gray-300' : 'text-gray-700'
-          }`}>
+          <h4 className="text-sm font-medium mb-2 flex items-center text-gray-700">
             <SwatchIcon className="w-4 h-4 mr-2" />
             Material
           </h4>
           
-          <div className="space-y-2">
-            <select
-              value={columnParams.material}
-              onChange={(e) => handleParameterChange('material', e.target.value)}
-              className={`w-full px-2 py-2 text-sm rounded border transition-colors ${
-                theme === 'dark'
-                  ? 'bg-slate-800/50 border-gray-600 text-white focus:border-studiosix-500'
-                  : 'bg-white border-gray-300 text-gray-900 focus:border-studiosix-500'
-              } focus:outline-none focus:ring-1 focus:ring-studiosix-500`}
-            >
-              {materialOptions.map((material) => (
-                <option key={material.value} value={material.value}>
-                  {material.label}
-                </option>
-              ))}
-            </select>
-            
-            {/* Material Preview */}
-            {selectedMaterial && (
-              <div className={`p-2 rounded border ${
-                theme === 'dark' ? 'border-gray-700/50 bg-slate-800/30' : 'border-gray-300/50 bg-gray-50'
-              }`}>
-                <div className="flex items-center space-x-2">
+          <div className="grid grid-cols-3 gap-1.5">
+            {materialOptions.map((material) => (
+              <button
+                key={material.value}
+                onClick={() => handleParameterChange('material', material.value)}
+                className={`p-2 text-xs rounded border transition-all ${
+                  columnParams.material === material.value
+                    ? 'bg-studiosix-500 text-white border-studiosix-500'
+                    : 'bg-white text-gray-700 border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center justify-center space-x-1">
                   <div
-                    className="w-4 h-4 rounded border"
-                    style={{ backgroundColor: selectedMaterial.color }}
+                    className="w-2 h-2 rounded-full border border-gray-300"
+                    style={{ backgroundColor: material.color }}
                   />
-                  <span className={`text-xs ${
-                    theme === 'dark' ? 'text-gray-400' : 'text-gray-600'
-                  }`}>
-                    Density: {selectedMaterial.density} kg/m³
-                  </span>
+                  <span>{material.label}</span>
                 </div>
-              </div>
-            )}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
       {/* Actions */}
-      <div className={`p-4 border-t flex space-x-2 ${
-        theme === 'dark' ? 'border-gray-700/50' : 'border-gray-300/50'
-      }`}>
+      <div className="p-3 border-t border-gray-200 flex space-x-2 bg-white rounded-b-lg">
         <button
           onClick={isEditing ? handleUpdate : handleCreate}
           disabled={!isValid || isCreating}
-          className={`flex-1 flex items-center justify-center space-x-2 py-2 px-4 rounded transition-all ${
+          className={`flex-1 flex items-center justify-center space-x-2 py-2 px-3 rounded transition-all text-sm font-medium ${
             isValid && !isCreating
-              ? 'bg-studiosix-600 hover:bg-studiosix-700 text-white'
-              : 'bg-gray-600 text-gray-400 cursor-not-allowed'
+              ? 'bg-studiosix-500 hover:bg-studiosix-600 text-white'
+              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
           }`}
         >
           {isCreating ? (
             <>
-              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              <span className="text-sm">Creating...</span>
+              <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <span>Creating...</span>
             </>
           ) : (
             <>
               {isEditing ? (
                 <>
                   <CheckIcon className="w-4 h-4" />
-                  <span className="text-sm">Update Column</span>
+                  <span>Update</span>
                 </>
               ) : (
                 <>
                   <PlayIcon className="w-4 h-4" />
-                  <span className="text-sm">Create Column</span>
+                  <span>Create</span>
                 </>
               )}
             </>
@@ -488,13 +493,9 @@ const ColumnTool = ({
         
         <button
           onClick={onCancel}
-          className={`px-4 py-2 rounded transition-colors ${
-            theme === 'dark'
-              ? 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-              : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-          }`}
+          className="px-4 py-2 rounded transition-colors bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium"
         >
-          <span className="text-sm">Cancel</span>
+          Cancel
         </button>
       </div>
     </div>

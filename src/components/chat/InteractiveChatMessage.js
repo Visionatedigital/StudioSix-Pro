@@ -243,11 +243,11 @@ const InteractiveChatMessage = ({
   const isInteractive = stepData && !isUser;
 
   return (
-    <div className={`message-bubble p-3 mb-3 rounded-lg max-w-[85%] break-words overflow-hidden ${
+    <div className={`message-bubble p-3 mb-3 rounded-lg break-words overflow-hidden ${
       isUser 
-        ? 'bg-studiosix-600 text-white ml-auto' 
-        : 'glass-light text-gray-100'
-    }`} style={{ maxWidth: '85%', overflow: 'hidden', wordWrap: 'break-word' }}>
+        ? 'bg-studiosix-600 text-white ml-auto max-w-[85%]' 
+        : 'text-gray-100 w-full max-w-[95%]'
+    }`} style={{ overflow: 'hidden', wordWrap: 'break-word' }}>
       
       {/* Main Message Content */}
       <div 

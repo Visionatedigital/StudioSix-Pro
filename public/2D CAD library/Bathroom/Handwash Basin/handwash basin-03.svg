@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 41.9 34.3">
+  <defs>
+    <style>
+      .cls-1 {
+        stroke-width: 1.1px;
+      }
+
+      .cls-1, .cls-2 {
+        fill: #fff;
+        stroke: #000;
+        stroke-linecap: square;
+        stroke-miterlimit: 10;
+      }
+
+      .cls-2 {
+        stroke-width: .4px;
+      }
+    </style>
+  </defs>
+  <!-- Generator: Adobe Illustrator 28.6.0, SVG Export Plug-In . SVG Version: 1.2.0 Build 709)  -->
+  <g>
+    <g id="Layer_1">
+      <g>
+        <path class="cls-1" d="M24.7-3.2h12.8v40.8h-12.8c-11.3,0-20.4-9.1-20.4-20.4h0C4.3,5.9,13.5-3.2,24.7-3.2Z" transform="translate(3.8 38.1) rotate(-90)"/>
+        <ellipse class="cls-1" cx="20.9" cy="19.1" rx="15.4" ry="12.3"/>
+        <path class="cls-2" d="M20.9,16.6c1.2,0,2.1-1,2.1-2.1s-1-2.1-2.1-2.1-2.1,1-2.1,2.1,1,2.1,2.1,2.1Z"/>
+        <rect class="cls-1" x="16.4" y="5.3" width="9.1" height="2.6" transform="translate(14.4 27.5) rotate(-90)"/>
+      </g>
+    </g>
+  </g>
+</svg>

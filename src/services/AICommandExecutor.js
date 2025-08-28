@@ -48,6 +48,32 @@ class AICommandExecutor {
   }
 
   /**
+   * Get handler functions for tool registry integration
+   */
+  getHandlers() {
+    const handlers = {};
+    for (const [tool, handler] of this.toolHandlers.entries()) {
+      handlers[`geometry.create${tool.charAt(0).toUpperCase()}${tool.slice(1)}`] = handler;
+    }
+    return handlers;
+  }
+
+  /**
+   * Execute tool by name for autonomous agent integration
+   */
+  async executeTool(toolName, args) {
+    // Extract tool name from full tool path (e.g., 'geometry.createWall' -> 'wall')
+    const baseTool = toolName.replace(/^geometry\.create/i, '').toLowerCase();
+    const handler = this.toolHandlers.get(baseTool);
+    
+    if (!handler) {
+      throw new Error(`Unknown tool: ${toolName}`);
+    }
+    
+    return await handler(args);
+  }
+
+  /**
    * Update context with current app state
    */
   updateContext(newContext) {
@@ -183,6 +209,10 @@ class AICommandExecutor {
         const result = await this.executeToolSelection(parsedCommand);
         response.message = result.message;
         response.actions = result.actions;
+      } else if (parsedCommand.intent === 'transform_furniture') {
+        const result = await this.executeFurnitureTransformation(parsedCommand);
+        response.message = result.message;
+        response.actions = result.actions;
       } else if (parsedCommand.intent === 'modify_object') {
         const result = await this.executeObjectModification(parsedCommand);
         response.message = result.message;
@@ -245,6 +275,11 @@ class AICommandExecutor {
       return this.parseToolSelection(lowerMessage, message);
     }
     
+    // Furniture transformation patterns (check before general modification)
+    if (this.matchesFurnitureTransformation(lowerMessage)) {
+      return this.parseFurnitureTransformation(lowerMessage, message);
+    }
+    
     // Object modification patterns
     if (this.matchesPattern(lowerMessage, ['modify', 'change', 'update', 'edit', 'adjust', 'resize'])) {
       return this.parseObjectModification(lowerMessage, message);
@@ -278,6 +313,51 @@ class AICommandExecutor {
    */
   matchesPattern(message, patterns) {
     return patterns.some(pattern => message.includes(pattern));
+  }
+
+  /**
+   * Check if message is about furniture transformation
+   */
+  matchesFurnitureTransformation(message) {
+    const furnitureTerms = ['furniture', 'chair', 'table', 'desk', 'sofa', 'couch', 'bed', 'lamp', 'cabinet', 'shelf'];
+    const transformTerms = ['resize', 'scale', 'bigger', 'smaller', 'larger', 'move', 'position', 'rotate', 'turn', 'spin'];
+    
+    // Check if message contains both furniture and transformation terms
+    const hasFurniture = furnitureTerms.some(term => message.includes(term));
+    const hasTransform = transformTerms.some(term => message.includes(term));
+    
+    return hasFurniture && hasTransform;
+  }
+
+  /**
+   * Parse furniture transformation commands
+   */
+  parseFurnitureTransformation(lowerMessage, originalMessage) {
+    console.log('🪑 Parsing furniture transformation:', originalMessage);
+    
+    // Use enhanced NLP parser for detailed analysis
+    const NLPParser = require('./NLPParser.js').default || require('./NLPParser.js');
+    const parser = new NLPParser();
+    const analysis = parser.parse(originalMessage);
+    
+    // Determine primary transformation intent
+    let transformIntent = 'transform_furniture';
+    if (analysis.intent.primary === 'RESIZE') {
+      transformIntent = 'resize_furniture';
+    } else if (analysis.intent.primary === 'REPOSITION') {
+      transformIntent = 'reposition_furniture';
+    } else if (analysis.intent.primary === 'ROTATE') {
+      transformIntent = 'rotate_furniture';
+    }
+    
+    return {
+      intent: 'transform_furniture',
+      transformationType: transformIntent,
+      entities: analysis.entities,
+      transformations: analysis.transformations,
+      confidence: analysis.confidence,
+      originalMessage: originalMessage
+    };
   }
 
   /**
@@ -2674,6 +2754,485 @@ class AICommandExecutor {
           console.error(`Error in AI Command Executor event listener (${event}):`, error);
         }
       });
+    }
+  }
+
+  /**
+   * Execute furniture transformation commands (resize, reposition, rescale)
+   */
+  async executeFurnitureTransformation(command) {
+    console.log('🪑 AI: Executing furniture transformation:', command);
+    
+    const { transformations, intent, entities, originalMessage } = command;
+    
+    // Get selected furniture objects or identify target furniture
+    const targetFurniture = await this.identifyTargetFurniture(entities, originalMessage);
+    
+    if (targetFurniture.length === 0) {
+      return {
+        message: `🪑 **No furniture found** to transform.\n\nPlease select a furniture object first, or specify which piece you'd like to modify (e.g., "the chair", "my table", "all furniture").`,
+        actions: []
+      };
+    }
+    
+    // Process transformations based on intent
+    let result;
+    if (intent.primary === 'RESIZE' || intent.primary === 'TRANSFORM') {
+      result = await this.resizeFurniture(targetFurniture, transformations, originalMessage);
+    } else if (intent.primary === 'REPOSITION') {
+      result = await this.repositionFurniture(targetFurniture, transformations, originalMessage);
+    } else if (intent.primary === 'ROTATE') {
+      result = await this.rotateFurniture(targetFurniture, transformations, originalMessage);
+    } else {
+      // General transformation - try to determine from transformation data
+      result = await this.performGeneralTransformation(targetFurniture, transformations, originalMessage);
+    }
+    
+    return result;
+  }
+
+  /**
+   * Identify target furniture objects from user input
+   */
+  async identifyTargetFurniture(entities, originalMessage) {
+    const allObjects = standaloneCADEngine.getAllObjects();
+    const furnitureObjects = allObjects.filter(obj => 
+      obj.type === 'furniture' || obj.type === 'fixture'
+    );
+    
+    // If no furniture exists, return empty array
+    if (furnitureObjects.length === 0) {
+      return [];
+    }
+    
+    // Check if user specified a particular furniture type
+    const furnitureEntities = entities.filter(entity => 
+      entity.category === 'FURNITURE' || 
+      (entity.keywords && entity.keywords.some(k => 
+        ['chair', 'table', 'sofa', 'bed', 'cabinet', 'furniture'].includes(k)
+      ))
+    );
+    
+    if (furnitureEntities.length > 0) {
+      // Filter by specified furniture type
+      const matchingFurniture = furnitureObjects.filter(obj => {
+        const objSubtype = (obj.subtype || '').toLowerCase();
+        const objName = (obj.name || '').toLowerCase();
+        
+        return furnitureEntities.some(entity => 
+          entity.keywords.some(keyword => 
+            objSubtype.includes(keyword) || objName.includes(keyword)
+          )
+        );
+      });
+      
+      if (matchingFurniture.length > 0) {
+        return matchingFurniture;
+      }
+    }
+    
+    // Check for selected objects
+    const selectedObjects = Array.from(this.context.selectedObjects);
+    const selectedFurniture = selectedObjects.filter(obj => 
+      obj.type === 'furniture' || obj.type === 'fixture'
+    );
+    
+    if (selectedFurniture.length > 0) {
+      return selectedFurniture;
+    }
+    
+    // If user mentioned "all" or no specific selection, return all furniture
+    if (originalMessage.includes('all furniture') || originalMessage.includes('all items')) {
+      return furnitureObjects;
+    }
+    
+    // Default to first furniture item if only one exists
+    if (furnitureObjects.length === 1) {
+      return furnitureObjects;
+    }
+    
+    return [];
+  }
+
+  /**
+   * Resize furniture objects
+   */
+  async resizeFurniture(furnitureObjects, transformations, originalMessage) {
+    const modifiedObjects = [];
+    const errors = [];
+    
+    for (const furniture of furnitureObjects) {
+      try {
+        const scaleFactors = this.calculateScaleFactors(transformations.scale, furniture);
+        
+        // Apply scaling using the transform controls system
+        const success = await this.applyScaleTransformation(furniture.id, scaleFactors);
+        
+        if (success) {
+          modifiedObjects.push({
+            id: furniture.id,
+            name: furniture.name || furniture.id,
+            scaleFactor: scaleFactors
+          });
+        } else {
+          errors.push(`Failed to resize ${furniture.name || furniture.id}`);
+        }
+      } catch (error) {
+        console.error('🪑 Error resizing furniture:', error);
+        errors.push(`Error resizing ${furniture.name || furniture.id}: ${error.message}`);
+      }
+    }
+    
+    // Generate response message
+    let message;
+    if (modifiedObjects.length > 0) {
+      const objectList = modifiedObjects.map(obj => 
+        `🪑 **${obj.name}** - scaled by ${this.formatScaleFactor(obj.scaleFactor)}`
+      ).join('\n');
+      
+      message = `✅ **Furniture resized successfully!**\n\n${objectList}`;
+      
+      if (errors.length > 0) {
+        message += `\n\n⚠️ **Some issues occurred:**\n${errors.join('\n')}`;
+      }
+    } else {
+      message = `❌ **Failed to resize furniture.**\n\n${errors.join('\n')}`;
+    }
+    
+    return {
+      message: message,
+      actions: modifiedObjects.map(obj => ({
+        type: 'furniture_transformed',
+        objectId: obj.id,
+        transformation: 'scale',
+        details: obj.scaleFactor
+      }))
+    };
+  }
+
+  /**
+   * Reposition furniture objects
+   */
+  async repositionFurniture(furnitureObjects, transformations, originalMessage) {
+    const modifiedObjects = [];
+    const errors = [];
+    
+    for (const furniture of furnitureObjects) {
+      try {
+        const positionChanges = this.calculatePositionChanges(transformations.position, furniture);
+        
+        // Apply position changes using the transform controls system
+        const success = await this.applyPositionTransformation(furniture.id, positionChanges);
+        
+        if (success) {
+          modifiedObjects.push({
+            id: furniture.id,
+            name: furniture.name || furniture.id,
+            position: positionChanges
+          });
+        } else {
+          errors.push(`Failed to reposition ${furniture.name || furniture.id}`);
+        }
+      } catch (error) {
+        console.error('🪑 Error repositioning furniture:', error);
+        errors.push(`Error repositioning ${furniture.name || furniture.id}: ${error.message}`);
+      }
+    }
+    
+    // Generate response message
+    let message;
+    if (modifiedObjects.length > 0) {
+      const objectList = modifiedObjects.map(obj => 
+        `🪑 **${obj.name}** - moved to ${this.formatPosition(obj.position)}`
+      ).join('\n');
+      
+      message = `✅ **Furniture repositioned successfully!**\n\n${objectList}`;
+      
+      if (errors.length > 0) {
+        message += `\n\n⚠️ **Some issues occurred:**\n${errors.join('\n')}`;
+      }
+    } else {
+      message = `❌ **Failed to reposition furniture.**\n\n${errors.join('\n')}`;
+    }
+    
+    return {
+      message: message,
+      actions: modifiedObjects.map(obj => ({
+        type: 'furniture_transformed',
+        objectId: obj.id,
+        transformation: 'position',
+        details: obj.position
+      }))
+    };
+  }
+
+  /**
+   * Rotate furniture objects
+   */
+  async rotateFurniture(furnitureObjects, transformations, originalMessage) {
+    const modifiedObjects = [];
+    const errors = [];
+    
+    for (const furniture of furnitureObjects) {
+      try {
+        const rotationChanges = this.calculateRotationChanges(transformations.rotation, furniture);
+        
+        // Apply rotation changes using the transform controls system
+        const success = await this.applyRotationTransformation(furniture.id, rotationChanges);
+        
+        if (success) {
+          modifiedObjects.push({
+            id: furniture.id,
+            name: furniture.name || furniture.id,
+            rotation: rotationChanges
+          });
+        } else {
+          errors.push(`Failed to rotate ${furniture.name || furniture.id}`);
+        }
+      } catch (error) {
+        console.error('🪑 Error rotating furniture:', error);
+        errors.push(`Error rotating ${furniture.name || furniture.id}: ${error.message}`);
+      }
+    }
+    
+    // Generate response message
+    let message;
+    if (modifiedObjects.length > 0) {
+      const objectList = modifiedObjects.map(obj => 
+        `🪑 **${obj.name}** - rotated by ${this.formatRotation(obj.rotation)}`
+      ).join('\n');
+      
+      message = `✅ **Furniture rotated successfully!**\n\n${objectList}`;
+      
+      if (errors.length > 0) {
+        message += `\n\n⚠️ **Some issues occurred:**\n${errors.join('\n')}`;
+      }
+    } else {
+      message = `❌ **Failed to rotate furniture.**\n\n${errors.join('\n')}`;
+    }
+    
+    return {
+      message: message,
+      actions: modifiedObjects.map(obj => ({
+        type: 'furniture_transformed',
+        objectId: obj.id,
+        transformation: 'rotation',
+        details: obj.rotation
+      }))
+    };
+  }
+
+  /**
+   * Apply scale transformation to furniture via Architect3D system
+   */
+  async applyScaleTransformation(objectId, scaleFactors) {
+    try {
+      // Get the object from StandaloneCADEngine
+      const cadObject = standaloneCADEngine.getObject(objectId);
+      if (!cadObject) return false;
+      
+      // Apply scaling through the CAD engine
+      const currentScale = cadObject.scale || { x: 1, y: 1, z: 1 };
+      const newScale = {
+        x: currentScale.x * scaleFactors.x,
+        y: currentScale.y * scaleFactors.y,
+        z: currentScale.z * scaleFactors.z
+      };
+      
+      // Update the object in the CAD engine
+      standaloneCADEngine.updateObject(objectId, { scale: newScale });
+      
+      // Trigger viewport updates
+      standaloneCADEngine.emit('object_updated', { objectId, property: 'scale', value: newScale });
+      
+      console.log(`🪑 Applied scale transformation to ${objectId}:`, newScale);
+      return true;
+    } catch (error) {
+      console.error('🪑 Error applying scale transformation:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Apply position transformation to furniture
+   */
+  async applyPositionTransformation(objectId, positionChanges) {
+    try {
+      const cadObject = standaloneCADEngine.getObject(objectId);
+      if (!cadObject) return false;
+      
+      const currentPosition = cadObject.position || { x: 0, y: 0, z: 0 };
+      const newPosition = { ...currentPosition };
+      
+      // Apply position changes
+      if (positionChanges.x !== undefined) newPosition.x = positionChanges.x;
+      if (positionChanges.y !== undefined) newPosition.y = positionChanges.y;
+      if (positionChanges.z !== undefined) newPosition.z = positionChanges.z;
+      
+      // Update the object
+      standaloneCADEngine.updateObject(objectId, { position: newPosition });
+      standaloneCADEngine.emit('object_updated', { objectId, property: 'position', value: newPosition });
+      
+      console.log(`🪑 Applied position transformation to ${objectId}:`, newPosition);
+      return true;
+    } catch (error) {
+      console.error('🪑 Error applying position transformation:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Apply rotation transformation to furniture
+   */
+  async applyRotationTransformation(objectId, rotationChanges) {
+    try {
+      const cadObject = standaloneCADEngine.getObject(objectId);
+      if (!cadObject) return false;
+      
+      const currentRotation = cadObject.rotation || { x: 0, y: 0, z: 0 };
+      const newRotation = { ...currentRotation };
+      
+      // Apply rotation changes (convert degrees to radians)
+      if (rotationChanges.x !== undefined) newRotation.x += rotationChanges.x * (Math.PI / 180);
+      if (rotationChanges.y !== undefined) newRotation.y += rotationChanges.y * (Math.PI / 180);
+      if (rotationChanges.z !== undefined) newRotation.z += rotationChanges.z * (Math.PI / 180);
+      
+      // Update the object
+      standaloneCADEngine.updateObject(objectId, { rotation: newRotation });
+      standaloneCADEngine.emit('object_updated', { objectId, property: 'rotation', value: newRotation });
+      
+      console.log(`🪑 Applied rotation transformation to ${objectId}:`, newRotation);
+      return true;
+    } catch (error) {
+      console.error('🪑 Error applying rotation transformation:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Calculate scale factors from transformation data
+   */
+  calculateScaleFactors(scaleData, furniture) {
+    const defaultScale = { x: 1, y: 1, z: 1 };
+    
+    if (!scaleData || scaleData.length === 0) {
+      return defaultScale;
+    }
+    
+    // Use the first scale factor found
+    const scale = scaleData[0];
+    const factor = scale.factor || 1;
+    
+    // Apply uniform scaling by default, or specific axis if mentioned
+    return {
+      x: factor,
+      y: factor,
+      z: factor
+    };
+  }
+
+  /**
+   * Calculate position changes from transformation data
+   */
+  calculatePositionChanges(positionData, furniture) {
+    const changes = {};
+    
+    if (positionData && positionData.length > 0) {
+      for (const pos of positionData) {
+        if (pos.type === 'coordinate') {
+          changes[pos.axis] = pos.value;
+        } else if (pos.type === 'relative') {
+          // Handle relative movements
+          const currentPos = furniture.position || { x: 0, y: 0, z: 0 };
+          const moveDistance = 1; // Default move distance
+          
+          switch (pos.direction) {
+            case 'left': changes.x = currentPos.x - moveDistance; break;
+            case 'right': changes.x = currentPos.x + moveDistance; break;
+            case 'forward': changes.z = currentPos.z - moveDistance; break;
+            case 'backward': changes.z = currentPos.z + moveDistance; break;
+            case 'up': changes.y = currentPos.y + moveDistance; break;
+            case 'down': changes.y = currentPos.y - moveDistance; break;
+          }
+        }
+      }
+    }
+    
+    return changes;
+  }
+
+  /**
+   * Calculate rotation changes from transformation data
+   */
+  calculateRotationChanges(rotationData, furniture) {
+    const changes = { x: 0, y: 0, z: 0 };
+    
+    if (rotationData && rotationData.length > 0) {
+      for (const rot of rotationData) {
+        if (rot.type === 'degrees') {
+          // Default to Y-axis rotation (most common for furniture)
+          changes.y = rot.angle;
+        } else if (rot.type === 'named') {
+          changes.y = rot.angle;
+        }
+      }
+    }
+    
+    return changes;
+  }
+
+  /**
+   * Format scale factor for display
+   */
+  formatScaleFactor(scaleFactor) {
+    if (scaleFactor.x === scaleFactor.y && scaleFactor.y === scaleFactor.z) {
+      return `${scaleFactor.x}x`;
+    }
+    return `${scaleFactor.x}x × ${scaleFactor.y}x × ${scaleFactor.z}x`;
+  }
+
+  /**
+   * Format position for display
+   */
+  formatPosition(position) {
+    const coords = [];
+    if (position.x !== undefined) coords.push(`X: ${position.x.toFixed(2)}`);
+    if (position.y !== undefined) coords.push(`Y: ${position.y.toFixed(2)}`);
+    if (position.z !== undefined) coords.push(`Z: ${position.z.toFixed(2)}`);
+    return coords.join(', ') || 'relative position';
+  }
+
+  /**
+   * Format rotation for display
+   */
+  formatRotation(rotation) {
+    const angles = [];
+    if (rotation.x !== 0) angles.push(`X: ${rotation.x}°`);
+    if (rotation.y !== 0) angles.push(`Y: ${rotation.y}°`);
+    if (rotation.z !== 0) angles.push(`Z: ${rotation.z}°`);
+    return angles.join(', ') || `${rotation.y}°`;
+  }
+
+  /**
+   * Perform general transformation (when intent is unclear)
+   */
+  async performGeneralTransformation(furnitureObjects, transformations, originalMessage) {
+    // Determine which transformations to apply based on available data
+    const hasScale = transformations.scale && transformations.scale.length > 0;
+    const hasPosition = transformations.position && transformations.position.length > 0;
+    const hasRotation = transformations.rotation && transformations.rotation.length > 0;
+    
+    if (hasScale) {
+      return await this.resizeFurniture(furnitureObjects, transformations, originalMessage);
+    } else if (hasPosition) {
+      return await this.repositionFurniture(furnitureObjects, transformations, originalMessage);
+    } else if (hasRotation) {
+      return await this.rotateFurniture(furnitureObjects, transformations, originalMessage);
+    } else {
+      return {
+        message: `🪑 **Unable to determine transformation type.**\n\nPlease be more specific about what you'd like to do:\n• "Make the chair bigger" (resize)\n• "Move the table to the left" (reposition)\n• "Rotate the sofa 90 degrees" (rotate)`,
+        actions: []
+      };
     }
   }
 

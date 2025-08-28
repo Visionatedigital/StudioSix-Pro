@@ -102,7 +102,7 @@ class RecentProjectsManager {
    */
   async updateProject(projectId, updates) {
     // Try Supabase first
-    if (this.currentUserId && supabaseProjectsService.isAvailable()) {
+    if (this.currentUserId && await supabaseProjectsService.isAvailable()) {
       try {
         const result = await supabaseProjectsService.updateProject(
           this.currentUserId, 
@@ -119,7 +119,7 @@ class RecentProjectsManager {
     }
 
     // Fallback to localStorage
-    const recentProjects = this.getRecentProjects();
+    const recentProjects = await this.getRecentProjects();
     const projectIndex = recentProjects.findIndex(p => p.id === projectId);
     
     if (projectIndex !== -1) {
@@ -145,7 +145,7 @@ class RecentProjectsManager {
    */
   async markProjectOpened(projectId) {
     // Try Supabase first
-    if (this.currentUserId && supabaseProjectsService.isAvailable()) {
+    if (this.currentUserId && await supabaseProjectsService.isAvailable()) {
       try {
         const result = await supabaseProjectsService.markProjectOpened(
           this.currentUserId, 
@@ -191,7 +191,10 @@ class RecentProjectsManager {
     };
 
     // Try to save to Supabase first
-    if (this.currentUserId && supabaseProjectsService.isAvailable()) {
+    const supabaseAvailable = await supabaseProjectsService.isAvailable();
+    // console.log('🔍 Supabase availability check:', supabaseAvailable, 'User ID:', this.currentUserId);
+    
+    if (this.currentUserId && supabaseAvailable) {
       try {
         const result = await supabaseProjectsService.saveProject(
           this.currentUserId, 
@@ -207,7 +210,7 @@ class RecentProjectsManager {
     }
 
     // Fallback to localStorage
-    const recentProjects = this.getRecentProjects();
+    const recentProjects = await this.getRecentProjects();
     
     // Remove existing entry if it exists
     const existingIndex = recentProjects.findIndex(p => p.id === project.id);
@@ -234,7 +237,7 @@ class RecentProjectsManager {
    */
   async getRecentProjects() {
     // Try Supabase first if user is authenticated
-    if (this.currentUserId && supabaseProjectsService.isAvailable()) {
+    if (this.currentUserId && await supabaseProjectsService.isAvailable()) {
       try {
         const result = await supabaseProjectsService.getUserProjects(this.currentUserId);
         if (result.success && result.projects.length > 0) {
@@ -282,7 +285,7 @@ class RecentProjectsManager {
    */
   async removeProject(projectId) {
     // Try Supabase first
-    if (this.currentUserId && supabaseProjectsService.isAvailable()) {
+    if (this.currentUserId && await supabaseProjectsService.isAvailable()) {
       try {
         const result = await supabaseProjectsService.deleteProject(
           this.currentUserId, 
@@ -309,7 +312,7 @@ class RecentProjectsManager {
    */
   async clearRecentProjects() {
     // Clear from Supabase
-    if (this.currentUserId && supabaseProjectsService.isAvailable()) {
+    if (this.currentUserId && await supabaseProjectsService.isAvailable()) {
       try {
         const result = await supabaseProjectsService.clearUserProjects(this.currentUserId);
         if (result.success) {
