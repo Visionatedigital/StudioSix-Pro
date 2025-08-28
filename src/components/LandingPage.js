@@ -260,8 +260,12 @@ const HeroSection = ({ onEmailCapture }) => {
   const handlePromptSubmit = (e) => {
     e.preventDefault();
     if (inputValue.trim()) {
-      // Trigger email capture modal or redirect to sign up
-      onEmailCapture(inputValue.trim());
+      const prompt = inputValue.trim();
+      try {
+        localStorage.setItem('initial_ai_prompt', prompt);
+        localStorage.setItem('auth_return_url', '/app?auth=1');
+      } catch {}
+      window.location.href = '/app?auth=1';
     }
   };
 

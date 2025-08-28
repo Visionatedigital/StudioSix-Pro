@@ -1689,6 +1689,13 @@ const WebSocket = require('ws');
 let wss = null;
 
 try {
+  // Allow disabling WS on platforms that only expose a single $PORT (e.g., DO App Platform)
+  const disableAgentWS = process.env.DISABLE_AGENT_WS === '1' || process.env.AGENT_WS_ENABLED === '0';
+  if (disableAgentWS) {
+    console.log('🔌 Agent WebSocket disabled via env (DISABLE_AGENT_WS=1 or AGENT_WS_ENABLED=0)');
+    throw new Error('WS_DISABLED');
+  }
+
   const server = require('http').createServer();
   
   // Handle port conflicts gracefully so the server doesn't crash
@@ -1722,13 +1729,17 @@ try {
     }
   });
   
-  // Start WebSocket server on different port
+  // Start WebSocket server on different port (may not be externally routable on some PaaS)
   server.listen(8081, () => {
     console.log('🔌 Agent WebSocket server running on port 8081');
   });
   
 } catch (error) {
-  console.warn('⚠️ WebSocket setup failed, agent will work without real-time updates:', error.message);
+  if (error && error.message === 'WS_DISABLED') {
+    console.log('⚠️ Skipping WebSocket startup (disabled by env)');
+  } else {
+    console.warn('⚠️ WebSocket setup failed, agent will work without real-time updates:', error.message);
+  }
 }
 
 // Mock autonomous agent for server-side (production would import actual service)

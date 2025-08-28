@@ -4415,6 +4415,17 @@ function MainApp({ user, onRequestAuth }) {
   const [currentProject, setCurrentProject] = useState(null);
   const [initialAIPrompt, setInitialAIPrompt] = useState(null); // Store initial AI prompt from project creation
 
+  // Pick up initial prompt stored before auth (e.g., from landing page)
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('initial_ai_prompt');
+      if (stored) {
+        setInitialAIPrompt(stored);
+        localStorage.removeItem('initial_ai_prompt');
+      }
+    } catch {}
+  }, []);
+
   // Debug appState and currentProject updates
   useEffect(() => {
     console.log('🔄 DEBUG: App state changed to:', appState, 'at', new Date().toISOString());
