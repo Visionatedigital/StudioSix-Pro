@@ -52,6 +52,11 @@ class AgentManager {
   createLegacyPlan(userRequest) {
     const normalizedRequest = userRequest.toLowerCase().trim();
     
+    // Multi-room or multi-space requests
+    if (/(\d+\s*-?\s*bed(room)?s?)|(\btwo\b|\bthree\b|\bfour\b).*bed(room)?/i.test(userRequest) || /\b(apartment|flat|house)\b/.test(userRequest)) {
+      return this.createSimpleHousePlan(normalizedRequest);
+    }
+
     // Room creation patterns
     if (this.isRoomRequest(normalizedRequest)) {
       return this.createRoomPlan(normalizedRequest);
@@ -69,6 +74,38 @@ class AgentManager {
     
     // Default fallback
     return this.createGenericPlan(normalizedRequest);
+  }
+
+  /**
+   * Very simple house plan: slab -> perimeter walls -> internal partition(s) -> joinery
+   */
+  createSimpleHousePlan(request) {
+    const base = this.extractDimensions(request);
+    const plan = {
+      id: `house_${Date.now()}`,
+      title: 'Creating Simple House',
+      description: 'I\'ll create a simple house: foundation, perimeter walls, and two bedrooms partition.',
+      totalSteps: 4,
+      steps: [
+        {
+          id: 'step_1', number: 1, title: 'Create Foundation Slab', action: 'createSlab', status: 'pending',
+          params: { width: Math.max(base.width, 8), depth: Math.max(base.depth, 6), thickness: 0.25, material: 'concrete', centerPosition: { x: 0, y: 0, z: 0 } }
+        },
+        {
+          id: 'step_2', number: 2, title: 'Perimeter Walls', action: 'createPerimeterWalls', status: 'pending',
+          params: { width: Math.max(base.width, 8), depth: Math.max(base.depth, 6), height: 3, thickness: 0.2, material: 'concrete' }
+        },
+        {
+          id: 'step_3', number: 3, title: 'Create Internal Partition', action: 'createInternalPartition', status: 'pending',
+          params: { orientation: 'vertical', offset: 0, height: 3, thickness: 0.15 }
+        },
+        {
+          id: 'step_4', number: 4, title: 'Apply Wall Joinery', action: 'applyWallJoinery', status: 'pending',
+          params: { tolerance: 0.5, cornerStyle: 'overlap' }
+        }
+      ]
+    };
+    return plan;
   }
 
   /**
@@ -357,6 +394,9 @@ class AgentManager {
         case 'createPerimeterWalls':
           return await this.executeCreatePerimeterWalls(step.params);
         
+        case 'createInternalPartition':
+          return await this.executeCreateInternalPartition(step.params);
+        
         case 'createDoor':
           return await this.executeCreateDoor(step.params);
         
@@ -459,6 +499,41 @@ class AgentManager {
       return { success: true, wallIds };
     } catch (error) {
       console.error('❌ Perimeter walls creation failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Execute internal partition creation (simple center split)
+   */
+  async executeCreateInternalPartition(params) {
+    console.log('🧱 Creating internal partition with params:', params);
+    try {
+      await this.delay(1000 + Math.random() * 600);
+      // Use current plan slab dimensions if available
+      const slabStep = this.currentPlan?.steps?.find(s => s.action === 'createSlab');
+      const width = slabStep?.params?.width || 8;
+      const depth = slabStep?.params?.depth || 6;
+      const halfWidth = width / 2;
+      const halfDepth = depth / 2;
+      let startPoint, endPoint;
+      if (params.orientation === 'vertical') {
+        startPoint = { x: 0, y: 0, z: -halfDepth + 0.2 };
+        endPoint = { x: 0, y: 0, z: halfDepth - 0.2 };
+      } else {
+        startPoint = { x: -halfWidth + 0.2, y: 0, z: 0 };
+        endPoint = { x: halfWidth - 0.2, y: 0, z: 0 };
+      }
+      const wallId = this.cadEngine.createObject('wall', {
+        startPoint, endPoint,
+        height: params.height || 3,
+        thickness: params.thickness || 0.15,
+        material: 'concrete'
+      });
+      if (!wallId) throw new Error('Failed to create internal partition');
+      return { success: true, wallId };
+    } catch (error) {
+      console.error('❌ Internal partition creation failed:', error);
       return { success: false, error: error.message };
     }
   }

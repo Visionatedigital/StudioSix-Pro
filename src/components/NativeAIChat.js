@@ -435,6 +435,17 @@ const NativeAIChat = ({
         viewMode,
         currentFloor
       });
+      // Guard: ensure plan has actionable steps
+      if (!plan?.steps || plan.steps.length === 0) {
+        setMessages(prev => [...prev, {
+          id: `warn_${Date.now()}`,
+          type: 'ai',
+          message: '⚠️ I could not generate a valid plan from that request. Please try specifying dimensions, e.g., "Create a 8m by 6m two-bedroom house".',
+          timestamp: new Date().toISOString(),
+          success: false
+        }]);
+        return;
+      }
       
       setCurrentExecutionPlan(plan);
       
