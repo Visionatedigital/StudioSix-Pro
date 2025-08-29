@@ -539,6 +539,43 @@ class StandaloneCADEngine {
   }
 
   /**
+   * Generic addObject helper for external callers
+   * Accepts a plain object (e.g., openings or 2D SVG blocks) and stores it in the engine
+   * Returns the assigned object id
+   */
+  addObject(objectData) {
+    try {
+      const id = objectData.id || `cad_${this.nextObjectId++}`;
+      const type = objectData.type || 'generic';
+      const params = { ...objectData };
+      delete params.id;
+      delete params.type;
+
+      const cadObject = {
+        id,
+        type,
+        params,
+        mesh3D: null,
+        mesh2D: null,
+        created: new Date().toISOString(),
+        selected: false,
+        visible: objectData.visible !== false
+      };
+
+      // Store and notify
+      this.objects.set(id, cadObject);
+      this.emit('object_created', {
+        object: this.serializeObject(cadObject),
+        objects: this.getAllObjects()
+      });
+      return id;
+    } catch (e) {
+      console.error('addObject failed:', e);
+      return null;
+    }
+  }
+
+  /**
    * Get object by ID
    */
   getObject(objectId) {
