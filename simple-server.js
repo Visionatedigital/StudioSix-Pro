@@ -14,15 +14,19 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-const OpenAI = require('openai');
+// Initialize OpenAI client ONLY if API key is configured to avoid startup crash in production
+let openai = null;
+try {
+  if (process.env.OPENAI_API_KEY) {
+    const OpenAI = require('openai');
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+} catch (e) {
+  console.warn('⚠️ Failed to initialize OpenAI client (will run without AI):', e.message);
+}
 
 const app = express();
 const PORT = process.env.PORT || 8080;
-
-// Initialize OpenAI client
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 console.log('OpenAI API Key configured:', !!process.env.OPENAI_API_KEY);
 
@@ -702,9 +706,19 @@ Keep responses helpful, professional, and focused on architecture/design/constru
 
     console.log('🤖 Sending request to OpenAI with model:', model);
 
+    // If OpenAI is not configured, return mock response so server still boots
+    if (!openai) {
+      return res.json({
+        response: 'AI service not configured. Please set OPENAI_API_KEY.',
+        model: 'mock',
+        timestamp: new Date().toISOString(),
+        context
+      });
+    }
+
     // Call OpenAI API
     const completion = await openai.chat.completions.create({
-      model: model === 'gpt-4' ? 'gpt-4o-mini' : model, // Use gpt-4o-mini for cost efficiency
+      model: model === 'gpt-4' ? 'gpt-4o-mini' : model,
       messages: messages,
       max_tokens: 1000,
       temperature: 0.7,
