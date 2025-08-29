@@ -2130,6 +2130,30 @@ const CAD2DViewport = ({
     setIsPanning(false);
   }, []);
 
+  // Enable drop of CAD blocks from modal
+  const handleSvgDragOver = useCallback((event) => {
+    event.preventDefault();
+    if (svgRef.current) svgRef.current.style.cursor = 'copy';
+  }, []);
+
+  const handleSvgDrop = useCallback(async (event) => {
+    event.preventDefault();
+    try {
+      const data = event.dataTransfer.getData('application/x-studiosix-2d-block') || '';
+      if (!data) return;
+      const blockData = JSON.parse(data);
+      await startSVGPlacement(blockData);
+      const rect = svgRef.current.getBoundingClientRect();
+      const dropPos = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const worldPos = to3D(dropPos);
+      completeSVGPlacement(worldPos);
+    } catch (err) {
+      console.error('Failed to handle drop:', err);
+    } finally {
+      if (svgRef.current) svgRef.current.style.cursor = 'default';
+    }
+  }, [startSVGPlacement, completeSVGPlacement, to3D]);
+
   // Handle mouse wheel for zooming
   const handleWheel = useCallback((event) => {
     event.preventDefault();
@@ -5524,6 +5548,8 @@ const renderCADEngineMesh2D = useCallback((object) => {
         onMouseMove={handleSvgMouseMove}
         onMouseUp={handleSvgMouseUp}
         onWheel={handleWheel}
+        onDragOver={handleSvgDragOver}
+        onDrop={handleSvgDrop}
       >
         {/* Grid lines */}
         <defs>

@@ -255,6 +255,27 @@ const CAD2DBlocksModal = ({
     onClose();
   };
 
+  // Support drag-and-drop into the 2D viewport
+  const handleDragStart = (event, svgBlock) => {
+    try {
+      const blockData = {
+        id: svgBlock.id,
+        name: svgBlock.name,
+        category: svgBlock.category,
+        subcategory: svgBlock.subcategory,
+        path: svgBlock.fullPath,
+        type: '2d-cad-block',
+        svgPath: svgBlock.fullPath
+      };
+      event.dataTransfer.effectAllowed = 'copy';
+      event.dataTransfer.setData('application/x-studiosix-2d-block', JSON.stringify(blockData));
+      // Fallback for simpler drop targets
+      event.dataTransfer.setData('text/plain', svgBlock.fullPath);
+    } catch (err) {
+      console.error('Failed to start drag for svg block:', err);
+    }
+  };
+
   // Click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -424,6 +445,8 @@ const CAD2DBlocksModal = ({
                     <button
                       key={svgBlock.id}
                       onClick={() => setSelectedSVG(svgBlock)}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, svgBlock)}
                       className={`aspect-square rounded-lg transition-all border-2 p-2 ${
                         selectedSVG?.id === svgBlock.id
                           ? 'border-studiosix-500 bg-studiosix-500/10'
