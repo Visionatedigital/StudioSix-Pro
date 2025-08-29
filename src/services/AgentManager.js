@@ -32,10 +32,19 @@ class AgentManager {
       
       if (intelligentResult.success) {
         console.log('✅ AgentManager: Intelligent parsing successful');
-        return intelligentResult.plan;
+        let plan = intelligentResult.plan;
+        // Safety net: if the plan is too shallow for a house/multi-room request, augment it
+        if (this.needsHouseAugmentation(userRequest, plan)) {
+          plan = this.augmentPlanForSimpleHouse(plan, userRequest);
+        }
+        return plan;
       } else {
         console.warn('⚠️ AgentManager: Intelligent parsing failed, using fallback');
-        return intelligentResult.fallbackPlan || this.createBasicFallbackPlan(userRequest);
+        let plan = intelligentResult.fallbackPlan || this.createBasicFallbackPlan(userRequest);
+        if (this.needsHouseAugmentation(userRequest, plan)) {
+          plan = this.augmentPlanForSimpleHouse(plan, userRequest);
+        }
+        return plan;
       }
       
     } catch (error) {
@@ -44,6 +53,77 @@ class AgentManager {
       // Fallback to legacy patterns for compatibility
       return this.createLegacyPlan(userRequest);
     }
+  }
+
+  /**
+   * Determine if a user request describes a house/multi-room and the plan is missing walls/partition
+   */
+  needsHouseAugmentation(userRequest, plan) {
+    if (!plan) return false;
+    const req = (userRequest || '').toLowerCase();
+    const isHouseLike = /\b(house|home|apartment|flat)\b/.test(req) || /(two|2|three|3|four|4)[\s-]*bed(room)?s?/.test(req);
+    if (!isHouseLike) return false;
+    const actions = (plan.steps || []).map(s => s.action);
+    const hasSlab = actions.includes('createSlab');
+    const hasPerimeter = actions.includes('createPerimeterWalls');
+    const hasPartition = actions.includes('createInternalPartition');
+    return hasSlab && (!hasPerimeter || !hasPartition);
+  }
+
+  /**
+   * Insert perimeter walls and an internal partition after slab when missing
+   */
+  augmentPlanForSimpleHouse(plan, userRequest) {
+    const clone = JSON.parse(JSON.stringify(plan));
+    const slab = (clone.steps || []).find(s => s.action === 'createSlab');
+    const dims = { width: Math.max(slab?.params?.width || 8, 8), depth: Math.max(slab?.params?.depth || 6, 6) };
+    const augmented = [];
+    let insertedPerimeter = false;
+    (clone.steps || []).forEach((s, idx) => {
+      augmented.push(s);
+      if (s.action === 'createSlab') {
+        if (!(clone.steps || []).some(x => x.action === 'createPerimeterWalls')) {
+          augmented.push({
+            id: `aug_perimeter_${Date.now()}`,
+            number: s.number + 0.1,
+            title: 'Perimeter Walls',
+            description: 'Adding walls around the footprint',
+            action: 'createPerimeterWalls',
+            params: { width: dims.width, depth: dims.depth, height: 3, thickness: 0.2, material: 'concrete' },
+            status: 'pending'
+          });
+          insertedPerimeter = true;
+        }
+        if (!(clone.steps || []).some(x => x.action === 'createInternalPartition')) {
+          augmented.push({
+            id: `aug_partition_${Date.now()}`,
+            number: s.number + 0.2,
+            title: 'Create Internal Partition',
+            description: 'Splitting into two rooms with a central wall',
+            action: 'createInternalPartition',
+            params: { orientation: 'vertical', height: 3, thickness: 0.15 },
+            status: 'pending'
+          });
+        }
+      }
+    });
+    // Ensure joinery at end
+    if (!augmented.some(x => x.action === 'applyWallJoinery')) {
+      augmented.push({
+        id: `aug_joinery_${Date.now()}`,
+        number: augmented.length + 1,
+        title: 'Apply Wall Joinery',
+        description: 'Ensure clean corners',
+        action: 'applyWallJoinery',
+        params: { tolerance: 0.5, cornerStyle: 'overlap' },
+        status: 'pending'
+      });
+    }
+    clone.title = clone.title || 'Creating Simple House';
+    clone.description = clone.description || 'Foundation, perimeter walls, and internal partition';
+    clone.totalSteps = augmented.length;
+    clone.steps = augmented;
+    return clone;
   }
 
   /**
