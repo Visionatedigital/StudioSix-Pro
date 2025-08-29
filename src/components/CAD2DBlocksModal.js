@@ -30,12 +30,34 @@ const SVGPreview = ({ svgData, isSelected }) => {
     }
   }, [svgData]);
 
+  const normalizeSVG = (raw) => {
+    try {
+      // Ensure the root <svg> scales to its container and preserves aspect ratio
+      let content = raw;
+      // Add preserveAspectRatio if missing
+      if (!/preserveAspectRatio=/i.test(content)) {
+        content = content.replace(/<svg(\s|>)/i, '<svg preserveAspectRatio="xMidYMid meet" ');
+      }
+      // Remove hardcoded width/height to allow responsive fit
+      content = content.replace(/\swidth="[^"]*"/gi, '').replace(/\sheight="[^"]*"/gi, '');
+      // Force style width/height to 100%
+      if (!/style="[^"]*"/i.test(content)) {
+        content = content.replace(/<svg/i, '<svg style="width:100%;height:100%"');
+      } else {
+        content = content.replace(/style="([^"]*)"/i, (m, s) => `style="${s};width:100%;height:100%"`);
+      }
+      return content;
+    } catch {
+      return raw;
+    }
+  };
+
   const loadSVG = async () => {
     try {
       setLoading(true);
       setError(false);
       const content = await cad2DLibraryService.loadSVGContent(svgData.fullPath);
-      setSvgContent(content);
+      setSvgContent(normalizeSVG(content));
     } catch (err) {
       console.error('Failed to load SVG:', err);
       setError(true);
@@ -65,16 +87,11 @@ const SVGPreview = ({ svgData, isSelected }) => {
       className={`w-full h-full bg-white flex items-center justify-center p-2 border-2 transition-all ${
         isSelected ? 'border-studiosix-500 bg-studiosix-50' : 'border-transparent'
       }`}
-      dangerouslySetInnerHTML={{ __html: svgContent }}
-      style={{
-        svg: {
-          maxWidth: '100%',
-          maxHeight: '100%',
-          width: 'auto',
-          height: 'auto'
-        }
-      }}
-    />
+    >
+      <div className="w-full h-full overflow-hidden">
+        <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: svgContent }} />
+      </div>
+    </div>
   );
 };
 

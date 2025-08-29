@@ -343,7 +343,7 @@ const CAD2DViewport = ({
     try {
       // Load SVG content
       console.log('📥 Loading SVG content from:', blockData.path);
-      const response = await fetch(blockData.path);
+      const response = await fetch(encodeURI(blockData.path));
       if (!response.ok) {
         throw new Error(`Failed to load SVG: ${response.statusText}`);
       }
@@ -351,7 +351,12 @@ const CAD2DViewport = ({
       
       // Set up placement state
       setPendingCADBlock(blockData);
-      setCadBlockSVGContent(svgContent);
+      // Normalize SVG so it fits our ghost and placement rendering cleanly
+      const normalized = svgContent
+        .replace(/\swidth="[^"]*"/gi, '')
+        .replace(/\sheight="[^"]*"/gi, '')
+        .replace(/<svg(\s|>)/i, '<svg preserveAspectRatio="xMidYMid meet" ');
+      setCadBlockSVGContent(normalized);
       setCadBlockCursorPos({ x: 0, y: 0 });
       
       console.log('✅ CAD2DViewport: SVG placement ready - cursor will follow mouse until clicked');
@@ -369,6 +374,18 @@ const CAD2DViewport = ({
     console.log('🎯 CAD2DViewport: Placing SVG block at position:', worldPosition);
     
     // Create a new 2D CAD object
+    // Extract basic viewBox dimensions for proper scaling/handles
+    let viewBox = { minX: 0, minY: 0, width: 1, height: 1 };
+    try {
+      const vbMatch = cadBlockSVGContent.match(/viewBox="([^"]+)"/i);
+      if (vbMatch) {
+        const parts = vbMatch[1].split(/\s+/).map(Number);
+        if (parts.length === 4 && parts.every(n => !isNaN(n))) {
+          viewBox = { minX: parts[0], minY: parts[1], width: Math.max(1, parts[2]), height: Math.max(1, parts[3]) };
+        }
+      }
+    } catch {}
+
     const cadBlock = {
       id: `cad2d-block-${Date.now()}`,
       type: '2d-cad-block',
@@ -379,6 +396,7 @@ const CAD2DViewport = ({
       subcategory: pendingCADBlock.subcategory,
       svgPath: pendingCADBlock.path,
       svgContent: cadBlockSVGContent,
+      svgViewBox: viewBox,
       scale: { x: 1, y: 1, z: 1 },
       visible: true
     };
@@ -4626,6 +4644,19 @@ const CAD2DViewport = ({
     // Determine object dimensions and color based on type
     const getObjectProps = () => {
       switch (object.type) {
+        case '2d-cad-block': {
+          // Use SVG viewBox to compute default footprint, scale with zoom
+          const vb = object.svgViewBox || { width: 100, height: 100 };
+          const base = 1; // 1 meter default normalized unit
+          const aspect = vb.width / Math.max(1, vb.height);
+          const width = base * aspect * 100 * zoom;
+          const height = base * 100 * zoom;
+          return {
+            width,
+            height,
+            shape: 'svg-block'
+          };
+        }
         case 'wall':
           // For walls, width = length, height = thickness for top-down view
           const wallLength = object.length || 4;
@@ -4769,6 +4800,19 @@ const CAD2DViewport = ({
       return renderedSlab;
     }
     
+    if (props.shape === 'svg-block') {
+      // Render raw SVG content centered at position
+      const transform = `translate(${pos2d.x}, ${pos2d.y})`;
+      // Wrap content so it can be scaled uniformly; initial scale 1 maps to viewBox
+      return (
+        <g key={object.id} transform={transform} {...createUnifiedElementHandlers(object)}>
+          <g transform={`translate(${- (props.width/2)}, ${- (props.height/2)})`}>
+            <g dangerouslySetInnerHTML={{ __html: (object.svgContent || '').replace(/<\/?svg[^>]*>/g, '') }} />
+          </g>
+        </g>
+      );
+    }
+
     if (props.shape === 'rect') {
       // Calculate rotation for walls
       const rotation = props.rotation ? (props.rotation * 180 / Math.PI) : 0;
@@ -4792,6 +4836,24 @@ const CAD2DViewport = ({
       
       return (
         <g key={object.id}>
+          {/* Scale/transform handles for 2D CAD block selection */}
+          {object.type === '2d-cad-block' && selectedObjects.has(object.id) && (() => {
+            const bboxPadding = 10;
+            const pos = to2D(object.position);
+            const w = (object.svgViewBox?.width || 100) * zoom;
+            const h = (object.svgViewBox?.height || 100) * zoom;
+            const x = pos.x - w/2 - bboxPadding;
+            const y = pos.y - h/2 - bboxPadding;
+            const bw = w + bboxPadding*2;
+            const bh = h + bboxPadding*2;
+            return (
+              <g key={`${object.id}-handles`}>
+                <rect x={x} y={y} width={bw} height={bh} fill="none" stroke="#22d3ee" strokeDasharray="6,3" strokeWidth={1.5} />
+                {/* Simple bottom-right scale handle */}
+                <rect x={x + bw - 8} y={y + bh - 8} width={8} height={8} fill="#22d3ee" />
+              </g>
+            );
+          })()}
           <rect
             x={pos2d.x - props.width/2}
             y={pos2d.y - props.height/2}
@@ -5615,7 +5677,7 @@ const renderCADEngineMesh2D = useCallback((object) => {
         {pendingCADBlock && cadBlockGhostContent && (
           <g
             pointerEvents="none"
-            opacity="0.6"
+            opacity="0.7"
             transform={`translate(${cadBlockCursorPos.x.toFixed(2)}, ${cadBlockCursorPos.y.toFixed(2)})`}
             dangerouslySetInnerHTML={{ __html: cadBlockGhostContent }}
           />
