@@ -89,7 +89,9 @@ const SVGPreview = ({ svgData, isSelected }) => {
       }`}
     >
       <div className="w-full h-full overflow-hidden">
-        <div className="w-full h-full" dangerouslySetInnerHTML={{ __html: svgContent }} />
+        <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" width="100%" height="100%">
+          <g dangerouslySetInnerHTML={{ __html: svgContent.replace(/<\/?svg[^>]*>/g, '') }} />
+        </svg>
       </div>
     </div>
   );
@@ -235,25 +237,25 @@ const CAD2DBlocksModal = ({
   };
 
   // Handle SVG import
-  const handleImport = () => {
-    if (!selectedSVG || !onImportBlock) return;
-    
-    console.log('🎨 Importing 2D CAD block:', selectedSVG);
-    
-    // Prepare the SVG data for placement
+  const importBlock = (svgBlock) => {
+    const block = svgBlock || selectedSVG;
+    if (!block || !onImportBlock) return;
+
+    console.log('🎨 Importing 2D CAD block:', block);
     const blockData = {
-      id: selectedSVG.id,
-      name: selectedSVG.name,
-      category: selectedSVG.category,
-      subcategory: selectedSVG.subcategory,
-      path: selectedSVG.fullPath,
+      id: block.id,
+      name: block.name,
+      category: block.category,
+      subcategory: block.subcategory,
+      path: block.fullPath,
       type: '2d-cad-block',
-      svgPath: selectedSVG.fullPath
+      svgPath: block.fullPath
     };
-    
     onImportBlock(blockData);
     onClose();
   };
+
+  const handleImport = () => importBlock(selectedSVG);
 
   // Support drag-and-drop into the 2D viewport
   const handleDragStart = (event, svgBlock) => {
@@ -445,6 +447,7 @@ const CAD2DBlocksModal = ({
                     <button
                       key={svgBlock.id}
                       onClick={() => setSelectedSVG(svgBlock)}
+                      onDoubleClick={() => importBlock(svgBlock)}
                       draggable
                       onDragStart={(e) => handleDragStart(e, svgBlock)}
                       className={`aspect-square rounded-lg transition-all border-2 p-2 ${
