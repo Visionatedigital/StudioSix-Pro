@@ -31,6 +31,8 @@ This app is configured for automatic deployment on DigitalOcean App Platform.
 
 Push to `main` branch triggers automatic deployment.
 
+> Deployment note: Set DISABLE_AGENT_WS=1 in production to run on a single port.
+
 ## Environment Variables
 ```
 REACT_APP_SUPABASE_URL=your-supabase-url
