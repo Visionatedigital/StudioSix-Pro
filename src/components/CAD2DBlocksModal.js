@@ -307,8 +307,7 @@ const CAD2DBlocksModal = ({
         className="bg-slate-900 rounded-2xl shadow-2xl border border-slate-700 overflow-hidden glass"
         style={{ 
           width: '1200px', 
-          height: '800px',
-          transform: `translate(${position.x - 600}px, ${position.y - 400}px)`
+          height: '800px'
         }}
         onClick={(e) => e.stopPropagation()}
       >
