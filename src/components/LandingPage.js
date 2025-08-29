@@ -227,12 +227,13 @@ const LandingHeader = ({ onEmailCapture }) => {
             >
               Sign In
             </a>
-            <button 
-              onClick={() => onEmailCapture('I want to try StudioSix Pro for free')}
+            <a 
+              href="/app?auth=1"
               className="bg-studiosix-500 hover:bg-studiosix-600 text-white px-4 py-2 rounded-lg transition-all duration-200 transform hover:scale-105"
+              title="Try StudioSix Pro for free"
             >
               Try for Free
-            </button>
+            </a>
           </div>
         </div>
       </div>
@@ -331,13 +332,14 @@ const HeroSection = ({ onEmailCapture }) => {
 
             {/* Quick Action Buttons */}
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
-              <button 
-                onClick={() => onEmailCapture('I want early access to StudioSix Pro')}
+              <a 
+                href="/app?auth=1"
                 className="bg-studiosix-500 hover:bg-studiosix-600 text-white px-8 py-4 rounded-xl font-semibold transition-all duration-200 transform hover:scale-105 hover:shadow-xl hover:shadow-studiosix-500/25 flex items-center justify-center space-x-2 group"
+                title="Try StudioSix Pro for free"
               >
                 <UserPlusIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                <span>Get Early Access</span>
-              </button>
+                <span>Try for Free</span>
+              </a>
               <button 
                 onClick={() => window.open('https://calendly.com/visionatedigital/30min', '_blank')}
                 className="bg-slate-800/50 hover:bg-slate-700/50 text-white px-8 py-4 rounded-xl font-semibold border border-gray-600/50 transition-all duration-200 flex items-center justify-center space-x-2 group"
