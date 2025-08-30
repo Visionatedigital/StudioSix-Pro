@@ -49,7 +49,7 @@ class UserDatabaseService {
   async getUserProfile(userId = null) {
     await this.initialize();
     
-    const targetUserId = userId || this.getCurrentUserId();
+    let targetUserId = userId || this.getCurrentUserId();
     if (!targetUserId) {
       console.log('⚠️ No user ID available for getUserProfile');
       return this.getFallbackUserProfile();
@@ -64,7 +64,8 @@ class UserDatabaseService {
     }
 
     try {
-      if (!isAuthConfigured) {
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId);
+      if (!isAuthConfigured || !isUuid) {
         console.log('📊 Using fallback user profile (no Supabase)');
         const fallback = this.getFallbackUserProfile(targetUserId);
         this.cache.set(cacheKey, { data: fallback, timestamp: Date.now() });
@@ -272,9 +273,11 @@ class UserDatabaseService {
     }
 
     try {
-      if (!isAuthConfigured) {
-        console.log('📊 Simulating usage recording (no Supabase)');
-        return true;
+      // If Supabase isn't configured or the ID is not a UUID, skip DB write
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId);
+      if (!isAuthConfigured || !isUuid) {
+        console.log('📊 Skipping DB recordUsage (no Supabase or non-UUID user). Falling back to local.');
+        return true; // treat as success; local logic will handle display
       }
 
       console.log('📊 Recording usage:', { targetUserId, usageType, amount, metadata });
@@ -292,6 +295,8 @@ class UserDatabaseService {
 
       if (error) {
         console.error('❌ Error recording usage:', error);
+        // If error is due to invalid UUID or DB issue, do not block client
+        if (error.code === '22P02') return true; // invalid input syntax for uuid
         return false;
       }
 
@@ -318,9 +323,10 @@ class UserDatabaseService {
     }
 
     try {
-      if (!isAuthConfigured) {
-        console.log('📊 Simulating action check (no Supabase)');
-        return true; // Allow all actions when no database
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId);
+      if (!isAuthConfigured || !isUuid) {
+        console.log('📊 Skipping DB canPerformAction (no Supabase or non-UUID user). Returning undefined for local fallback.');
+        return undefined; // Let caller fall back to local logic
       }
 
       const { data, error } = await supabase.rpc('can_user_perform_action', {
@@ -331,7 +337,9 @@ class UserDatabaseService {
 
       if (error) {
         console.error('❌ Error checking action permission:', error);
-        return false;
+        // If invalid UUID or DB error, do not block; allow local fallback
+        if (error.code === '22P02') return undefined;
+        return undefined;
       }
 
       console.log(`🔍 Action permission check: ${actionType} x${amount} = ${data ? 'ALLOWED' : 'DENIED'}`);
@@ -339,7 +347,7 @@ class UserDatabaseService {
 
     } catch (error) {
       console.error('❌ Error in canPerformAction:', error);
-      return false;
+      return undefined; // Fall back to local logic on unexpected errors
     }
   }
 
@@ -445,7 +453,7 @@ class UserDatabaseService {
     const limits = {
       free: {
         aiTokensPerMonth: 5000,
-        imageRendersPerMonth: 20,
+        imageRendersPerMonth: 3,
         bimExportsPerMonth: 0,
         availableModels: ['gpt-3.5-turbo'],
         maxImageResolution: 512,
@@ -453,7 +461,7 @@ class UserDatabaseService {
       },
       pro: {
         aiTokensPerMonth: 50000,
-        imageRendersPerMonth: 200,
+        imageRendersPerMonth: 50,
         bimExportsPerMonth: 10,
         availableModels: ['gpt-3.5-turbo', 'gpt-4'],
         maxImageResolution: 768,
@@ -462,7 +470,7 @@ class UserDatabaseService {
       },
       studio: {
         aiTokensPerMonth: 200000,
-        imageRendersPerMonth: 1000,
+        imageRendersPerMonth: 200,
         bimExportsPerMonth: 50,
         availableModels: ['gpt-3.5-turbo', 'gpt-4', 'claude-3-5-sonnet-20241022'],
         maxImageResolution: 1024,

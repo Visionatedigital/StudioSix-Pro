@@ -20,6 +20,7 @@ import CommandExecutionWindow from './CommandExecutionWindow';
 import InlineExecutionWindow from './InlineExecutionWindow';
 import AnimatedMessage from './AnimatedMessage';
 import CompletionSummary from './CompletionSummary';
+import eventManager from '../services/EventManager';
 
 const NativeAIChat = ({ 
   // App state integration
@@ -66,7 +67,7 @@ const NativeAIChat = ({
   const [agentManager, setAgentManager] = useState(null);
   const [currentExecutionPlan, setCurrentExecutionPlan] = useState(null);
   const [showExecutionWindow, setShowExecutionWindow] = useState(false);
-  const [executionMode, setExecutionMode] = useState('auto'); // 'auto', 'sequential', 'traditional'
+  const [executionMode, setExecutionMode] = useState('sequential'); // default to agentic sequential mode
   
   // Autonomous agent state
   const [isAutonomousEnabled, setIsAutonomousEnabled] = useState(false);
@@ -79,6 +80,11 @@ const NativeAIChat = ({
   const inputRef = useRef(null);
   const chatContainerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const lastUserMessageRef = useRef('');
+  const autonomousFallbackTimerRef = useRef(null);
+  const autonomousFallbackTriggeredRef = useRef(false);
+  const autonomousLastEventRef = useRef(0);
+  const runListenersRef = useRef(new Map());
 
   // Initialize AgentManager and speech recognition
   useEffect(() => {
@@ -126,38 +132,16 @@ const NativeAIChat = ({
     const speechAvailable = ('webkitSpeechRecognition' in window) || ('SpeechRecognition' in window);
     setSpeechRecognitionAvailable(speechAvailable);
     
-    // Test AI connections on mount - non-blocking
-    const testAIConnections = async () => {
-      try {
-        const results = await aiService.testConnections();
-        setConnectionStatus(results);
-        if (results.available !== false) {
-          console.log('🔗 AI Connection Status:', results);
-        } else {
-          console.info('ℹ️ AI services unavailable - running in standalone mode');
-        }
-      } catch (error) {
-        // Silently handle connection errors to prevent uncaught exceptions
-        console.info('ℹ️ AI proxy not available - running in offline mode');
-        setConnectionStatus({
-          openai: false,
-          claude: false,
-          available: false,
-          errors: { connection: 'AI proxy server not running' }
-        });
-      }
-    };
-    
-    // Run async without blocking component mount
-    testAIConnections().catch(error => {
-      console.info('ℹ️ AI connection test skipped:', error.message);
-    });
-    
     // Cleanup listeners on unmount
     return () => {
       unsubscribeSettings();
       unsubscribeSubscription();
       unsubscribeUsage();
+      // Detach any pending TaskWeaver listeners
+      for (const [rid, listener] of runListenersRef.current.entries()) {
+        try { eventManager.detach(rid, listener); } catch {}
+      }
+      runListenersRef.current.clear();
     };
   }, []);
 
@@ -190,19 +174,80 @@ const NativeAIChat = ({
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsProcessing(true);
+    lastUserMessageRef.current = message;
 
-    // Check if we should use autonomous execution (when enabled)
-    if (isAutonomousEnabled && !activeAutonomousRun) {
-      setIsProcessing(false);
-      return handleAutonomousExecution(message);
+    // NEW: Route Agent vs Ask modes using local UI state
+    const isAgentMode = true; // Force TaskWeaver backend regardless of UI toggle; UI retained for consistency
+
+    if (isAgentMode) {
+      try {
+        const { runId } = await aiService.runTaskWeaver(message, {
+          ...currentContext,
+          recentMessages: messages.slice(-5),
+          objects: standaloneCADEngine.getAllObjects(),
+          uploadedFiles: uploadedFiles
+        }, selectedModel);
+
+        // Attach to TaskWeaver event stream via EventManager and reflect in chat
+        const listener = (ev) => {
+          try {
+            if (!ev || !ev.type) return;
+            if (ev.type === 'plan') {
+              setMessages(prev => [...prev, {
+                id: `plan_${Date.now()}`,
+                type: 'ai',
+                message: `📋 Plan: ${ev.summary || 'Plan created.'}`,
+                timestamp: new Date().toISOString(),
+                success: true
+              }]);
+            } else if (ev.type === 'act' && ev.status === 'start') {
+              setMessages(prev => [...prev, {
+                id: `act_${Date.now()}`,
+                type: 'ai',
+                message: `⚡ Executing ${ev.tool}`,
+                timestamp: new Date().toISOString(),
+                success: true
+              }]);
+            } else if (ev.type === 'act' && ev.status === 'result') {
+              const ok = ev.result?.ok !== false;
+              setMessages(prev => [...prev, {
+                id: `act_res_${Date.now()}`,
+                type: 'ai',
+                message: ok ? `✅ ${ev.tool} completed` : `❌ ${ev.tool} failed` ,
+                timestamp: new Date().toISOString(),
+                success: ok
+              }]);
+            } else if (ev.type === 'done') {
+              setMessages(prev => [...prev, {
+                id: `done_${Date.now()}`,
+                type: 'ai',
+                message: ev.status === 'success' ? '✅ Done' : `❌ ${ev.status}`,
+                timestamp: new Date().toISOString(),
+                success: ev.status === 'success'
+              }]);
+              // Detach listener when done
+              const l = runListenersRef.current.get(runId);
+              if (l) {
+                try { eventManager.detach(runId, l); } catch {}
+                runListenersRef.current.delete(runId);
+              }
+            }
+          } catch {}
+        };
+        eventManager.attach(runId, listener);
+        runListenersRef.current.set(runId, listener);
+
+        setIsProcessing(false);
+        return;
+      } catch (e) {
+        // Fallback to sequential execution if agent backend unavailable
+        console.warn('Agent backend unavailable, falling back to sequential:', e.message);
+        setIsProcessing(false);
+        return handleSequentialExecution(message);
+      }
     }
 
-    // Check if we should use sequential execution
-    if (shouldUseSequentialExecution(message)) {
-      setIsProcessing(false);
-      return handleSequentialExecution(message);
-    }
-
+    // Ask mode (existing chat path)
     try {
       // Check usage limits before making request
       try {
@@ -232,59 +277,44 @@ const NativeAIChat = ({
 
       // First, get AI response using the selected model and mode from settings
       const aiResponse = await aiService.sendMessage(
-        message, 
-        currentSettings.model, 
-        systemPrompt, 
+        message,
+        currentSettings.model,
+        currentSettings.systemPrompt,
         {
           ...enhancedContext,
-          processedFiles,
-          temperature: currentSettings.temperature,
-          maxTokens: currentSettings.maxTokens
+          processedFiles
         }
       );
 
-      // Then process the message through the command executor for actions
-      let commandResponse = null;
-      try {
-        commandResponse = await aiCommandExecutor.processMessage(message, enhancedContext);
-      } catch (cmdError) {
-        console.warn('⚠️ Command executor warning:', cmdError.message);
-        // Continue with AI response even if command processing fails
-      }
-
-      // Combine AI response with any command actions
-      const combinedResponse = {
+      // Add AI response to messages
+      const aiMessage = {
         id: `ai_${Date.now()}`,
         type: 'ai',
         message: aiResponse.message,
         timestamp: new Date().toISOString(),
-        success: true,
-        actions: commandResponse?.actions || [],
         model: aiResponse.model,
-        provider: aiResponse.provider
+        provider: aiResponse.provider,
+        usage: aiResponse.usage
       };
 
-      setMessages(prev => [...prev, combinedResponse]);
+      setMessages(prev => [...prev, aiMessage]);
 
-      // Clear uploaded files after successful message
-      if (uploadedFiles.length > 0) {
-        setUploadedFiles([]);
-      }
-
+      // Then, try to parse and execute commands from the response content
+      await handleSequentialExecution(message);
+      
     } catch (error) {
-      console.error('❌ Chat error:', error);
-      const errorMessage = {
+      console.error('❌ Error in AI processing:', error);
+      setMessages(prev => [...prev, {
         id: `error_${Date.now()}`,
-        type: 'ai',
+        type: 'system',
         message: `❌ ${error.message}`,
         timestamp: new Date().toISOString(),
         success: false
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      }]);
     } finally {
       setIsProcessing(false);
     }
-  }, [inputValue, isProcessing, currentContext, messages, uploadedFiles, isAutonomousEnabled, activeAutonomousRun]);
+  }, [inputValue, isProcessing, messages, currentContext, uploadedFiles, selectedModel, mode]);
 
   // Handle initial prompt from project creation
   useEffect(() => {
@@ -628,6 +658,16 @@ const NativeAIChat = ({
         };
         
         setMessages(prev => [...prev, autonomousMessage]);
+        // Fallback: if no WS opens within 2500ms, switch to sequential plan
+        autonomousFallbackTriggeredRef.current = false;
+        if (autonomousFallbackTimerRef.current) clearTimeout(autonomousFallbackTimerRef.current);
+        autonomousFallbackTimerRef.current = setTimeout(() => {
+          if (!autonomousSocket && !autonomousFallbackTriggeredRef.current) {
+            autonomousFallbackTriggeredRef.current = true;
+            console.info('ℹ️ Autonomous WS not available, falling back to sequential execution');
+            handleSequentialExecution(lastUserMessageRef.current);
+          }
+        }, 2500);
       }
       
     } catch (error) {
@@ -654,11 +694,26 @@ const NativeAIChat = ({
       ws.onopen = () => {
         console.log('📡 Connected to autonomous agent WebSocket');
         setAutonomousSocket(ws);
+        if (autonomousFallbackTimerRef.current) {
+          clearTimeout(autonomousFallbackTimerRef.current);
+          autonomousFallbackTimerRef.current = null;
+        }
+        // Start inactivity fallback: if no events within 3.5s, switch to sequential
+        autonomousLastEventRef.current = Date.now();
+        setTimeout(() => {
+          const idleMs = Date.now() - autonomousLastEventRef.current;
+          if (!autonomousFallbackTriggeredRef.current && idleMs > 3000) {
+            autonomousFallbackTriggeredRef.current = true;
+            console.info('ℹ️ Autonomous WS idle, falling back to sequential');
+            handleSequentialExecution(lastUserMessageRef.current);
+          }
+        }, 3500);
       };
       
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          autonomousLastEventRef.current = Date.now();
           handleAutonomousEvent(data);
         } catch (error) {
           console.error('Failed to parse WebSocket message:', error);
@@ -668,10 +723,18 @@ const NativeAIChat = ({
       ws.onclose = () => {
         console.log('📡 Disconnected from autonomous agent WebSocket');
         setAutonomousSocket(null);
+        if (!autonomousFallbackTriggeredRef.current && activeAutonomousRun) {
+          autonomousFallbackTriggeredRef.current = true;
+          handleSequentialExecution(lastUserMessageRef.current);
+        }
       };
       
       ws.onerror = (error) => {
         console.error('📡 WebSocket error:', error);
+        if (!autonomousFallbackTriggeredRef.current && activeAutonomousRun) {
+          autonomousFallbackTriggeredRef.current = true;
+          handleSequentialExecution(lastUserMessageRef.current);
+        }
       };
       
     } catch (error) {

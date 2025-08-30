@@ -6719,6 +6719,38 @@ class StandaloneCADEngine {
   }
 
   /**
+   * Clear all CAD objects (safe reset for starting a new project)
+   */
+  clearAllObjects() {
+    try {
+      console.log('🧹 CAD ENGINE: Clearing all objects');
+      // Deselect everything
+      this.selectedObjects.clear();
+      // Remove meshes from scenes if present
+      for (const cadObject of this.objects.values()) {
+        try {
+          if (cadObject.mesh3D && this.scene3D) {
+            this.scene3D.remove(cadObject.mesh3D);
+          }
+          if (cadObject.mesh2D && this.scene2D) {
+            this.scene2D.remove(cadObject.mesh2D);
+          }
+        } catch {}
+      }
+      // Reset storage
+      this.objects.clear();
+      // Notify listeners
+      this.emit('objects_changed', { objects: [] });
+      this.emit('selection_changed', { selectedObjects: [] });
+      console.log('✅ CAD ENGINE: All objects cleared');
+      return true;
+    } catch (error) {
+      console.warn('⚠️ CAD ENGINE: Failed to clear objects:', error?.message || error);
+      return false;
+    }
+  }
+
+  /**
    * Get selected objects
    */
   getSelectedObjects() {

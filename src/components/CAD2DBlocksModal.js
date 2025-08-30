@@ -20,67 +20,7 @@ import cad2DLibraryService from '../services/CAD2DLibraryService';
  * SVG Preview Component
  */
 const SVGPreview = ({ svgData, isSelected }) => {
-  const [svgContent, setSvgContent] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    if (svgData) {
-      loadSVG();
-    }
-  }, [svgData]);
-
-  const normalizeSVG = (raw) => {
-    try {
-      // Ensure the root <svg> scales to its container and preserves aspect ratio
-      let content = raw;
-      // Add preserveAspectRatio if missing
-      if (!/preserveAspectRatio=/i.test(content)) {
-        content = content.replace(/<svg(\s|>)/i, '<svg preserveAspectRatio="xMidYMid meet" ');
-      }
-      // Remove hardcoded width/height to allow responsive fit
-      content = content.replace(/\swidth="[^"]*"/gi, '').replace(/\sheight="[^"]*"/gi, '');
-      // Force style width/height to 100%
-      if (!/style="[^"]*"/i.test(content)) {
-        content = content.replace(/<svg/i, '<svg style="width:100%;height:100%"');
-      } else {
-        content = content.replace(/style="([^"]*)"/i, (m, s) => `style="${s};width:100%;height:100%"`);
-      }
-      return content;
-    } catch {
-      return raw;
-    }
-  };
-
-  const loadSVG = async () => {
-    try {
-      setLoading(true);
-      setError(false);
-      const content = await cad2DLibraryService.loadSVGContent(svgData.fullPath);
-      setSvgContent(normalizeSVG(content));
-    } catch (err) {
-      console.error('Failed to load SVG:', err);
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="w-full h-full bg-gray-100 flex items-center justify-center">
-        <ArrowPathIcon className="w-6 h-6 text-gray-400 animate-spin" />
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="w-full h-full bg-gray-100 flex items-center justify-center">
-        <ExclamationTriangleIcon className="w-6 h-6 text-red-400" />
-      </div>
-    );
-  }
+  const [imgError, setImgError] = useState(false);
 
   return (
     <div 
@@ -88,11 +28,19 @@ const SVGPreview = ({ svgData, isSelected }) => {
         isSelected ? 'border-studiosix-500 bg-studiosix-50' : 'border-transparent'
       }`}
     >
-      <div className="w-full h-full overflow-hidden">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" width="100%" height="100%">
-          <g dangerouslySetInnerHTML={{ __html: svgContent.replace(/<\/?svg[^>]*>/g, '') }} />
-        </svg>
-      </div>
+      {!imgError ? (
+        <img
+          src={encodeURI(svgData.fullPath)}
+          alt={svgData.name}
+          className="w-full h-full object-contain"
+          draggable={false}
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <div className="w-full h-full bg-gray-100 flex items-center justify-center">
+          <ExclamationTriangleIcon className="w-6 h-6 text-red-400" />
+        </div>
+      )}
     </div>
   );
 };

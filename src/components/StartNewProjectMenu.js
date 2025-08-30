@@ -4,6 +4,7 @@ import {
   HomeIcon,
   BuildingStorefrontIcon,
   CommandLineIcon,
+  CameraIcon,
   FolderOpenIcon,
   PlusIcon,
   SparklesIcon,
@@ -70,7 +71,7 @@ const PROJECT_TEMPLATES = [
 
 // Recent projects are now loaded dynamically from RecentProjectsManager
 
-const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }) => {
+const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, onOpenRenderStudio }) => {
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [showProjectForm, setShowProjectForm] = useState(false);
   const [projectData, setProjectData] = useState({
@@ -744,6 +745,87 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
               {/* Add top margin to align with project templates grid */}
               <div className="mt-16"></div>
               
+              {/* Quick actions (moved above Recent Projects) */}
+              <div className="glass p-6 rounded-xl border border-gray-700/50 mb-4">
+                <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
+                  <CommandLineIcon className="w-5 h-5 mr-2 text-studiosix-400" />
+                  Quick Actions
+                </h3>
+                
+                <div className="space-y-3">
+                  {/* Hidden file input */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    accept={acceptedExtensions}
+                    onChange={handleFileSelect}
+                  />
+                  
+                  {/* Switch to Render Studio first */}
+                  <button
+                    onClick={onOpenRenderStudio}
+                    className="w-full p-3 rounded-lg text-left transition-all duration-200 group border border-amber-500/40 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <CameraIcon className="w-5 h-5 text-white" />
+                      <div>
+                        <p className="text-white text-sm font-semibold">Switch to Render Studio</p>
+                        <p className="text-amber-100/90 text-xs">Jump straight into AI image generation</p>
+                      </div>
+                    </div>
+                  </button>
+
+                  {/* Import CAD File below */}
+                  <button 
+                    onClick={handleFileImport}
+                    disabled={isUploading}
+                    className={`w-full p-3 rounded-lg text-left transition-all duration-200 group ${
+                      isUploading 
+                        ? 'bg-slate-800/50 cursor-not-allowed' 
+                        : 'bg-slate-800/30 hover:bg-slate-700/40'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      {isUploading ? (
+                        <ArrowUpTrayIcon className="w-5 h-5 text-studiosix-400 animate-pulse" />
+                      ) : uploadStatus === 'success' ? (
+                        <CheckCircleIcon className="w-5 h-5 text-green-400" />
+                      ) : uploadStatus === 'error' ? (
+                        <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
+                      ) : (
+                        <DocumentTextIcon className="w-5 h-5 text-gray-400 group-hover:text-studiosix-400" />
+                      )}
+                      <div className="flex-1">
+                        <p className={`text-sm font-medium ${
+                          isUploading ? 'text-gray-300' : 'text-white'
+                        }`}>
+                          {isUploading ? 'Importing CAD File...' : 'Import CAD File'}
+                        </p>
+                        <p className="text-gray-500 text-xs">
+                          {isUploading 
+                            ? `${uploadProgress}% complete` 
+                            : uploadStatus === 'success' 
+                              ? 'Import successful - starting project...'
+                              : uploadStatus === 'error'
+                                ? 'Import failed - click to retry'
+                                : 'SketchUp, IFC, DWG, DXF, STEP, etc.'
+                          }
+                        </p>
+                        {isUploading && (
+                          <div className="w-full bg-gray-700 rounded-full h-1 mt-2">
+                            <div 
+                              className="bg-studiosix-500 h-1 rounded-full transition-all duration-300"
+                              style={{ width: `${uploadProgress}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+              
               {/* Recent projects */}
               <div className="glass p-6 rounded-xl border border-gray-700/50 mb-4">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
@@ -855,81 +937,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut }
                 </div>
               </div>
 
-              {/* Quick actions */}
-              <div className="glass p-6 rounded-xl border border-gray-700/50">
-                <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                  <CommandLineIcon className="w-5 h-5 mr-2 text-studiosix-400" />
-                  Quick Actions
-                </h3>
-                
-                <div className="space-y-3">
-                  {/* Hidden file input */}
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    className="hidden"
-                    accept={acceptedExtensions}
-                    onChange={handleFileSelect}
-                  />
-                  
-                  <button 
-                    onClick={handleFileImport}
-                    disabled={isUploading}
-                    className={`w-full p-3 rounded-lg text-left transition-all duration-200 group ${
-                      isUploading 
-                        ? 'bg-slate-800/50 cursor-not-allowed' 
-                        : 'bg-slate-800/30 hover:bg-slate-700/40'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-3">
-                      {isUploading ? (
-                        <ArrowUpTrayIcon className="w-5 h-5 text-studiosix-400 animate-pulse" />
-                      ) : uploadStatus === 'success' ? (
-                        <CheckCircleIcon className="w-5 h-5 text-green-400" />
-                      ) : uploadStatus === 'error' ? (
-                        <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
-                      ) : (
-                        <DocumentTextIcon className="w-5 h-5 text-gray-400 group-hover:text-studiosix-400" />
-                      )}
-                      <div className="flex-1">
-                        <p className={`text-sm font-medium ${
-                          isUploading ? 'text-gray-300' : 'text-white'
-                        }`}>
-                          {isUploading ? 'Importing CAD File...' : 'Import CAD File'}
-                        </p>
-                        <p className="text-gray-500 text-xs">
-                          {isUploading 
-                            ? `${uploadProgress}% complete` 
-                            : uploadStatus === 'success' 
-                              ? 'Import successful - starting project...'
-                              : uploadStatus === 'error'
-                                ? 'Import failed - click to retry'
-                                : 'SketchUp, IFC, DWG, DXF, STEP, etc.'
-                          }
-                        </p>
-                        {isUploading && (
-                          <div className="w-full bg-gray-700 rounded-full h-1 mt-2">
-                            <div 
-                              className="bg-studiosix-500 h-1 rounded-full transition-all duration-300"
-                              style={{ width: `${uploadProgress}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                  
-                  <button className="w-full p-3 bg-slate-800/30 rounded-lg text-left hover:bg-slate-700/40 transition-all duration-200 group">
-                    <div className="flex items-center space-x-3">
-                      <UserIcon className="w-5 h-5 text-gray-400 group-hover:text-studiosix-400" />
-                      <div>
-                        <p className="text-white text-sm font-medium">Collaboration Setup</p>
-                        <p className="text-gray-500 text-xs">Invite team members</p>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-              </div>
+              {/* Quick actions moved above */}
             </div>
           </div>
         </div>

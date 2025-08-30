@@ -59,6 +59,7 @@ import {
 } from '@heroicons/react/24/outline';
 import SplashScreen from './components/SplashScreen';
 import StartNewProjectMenu from './components/StartNewProjectMenu';
+import RenderStudioPage from './components/RenderStudioPage';
 import { PropertyPanel } from './components/property-panel';
 import OBJModelPanel from './components/property-panel/OBJModelPanel';
 import SlabPropertyPanel from './components/property-panel/SlabPropertyPanel';
@@ -4411,7 +4412,7 @@ function MainApp({ user, onRequestAuth }) {
   }, [user]);
 
   // Application state management
-  const [appState, setAppState] = useState('splash'); // 'splash', 'project-menu', 'main-app'
+  const [appState, setAppState] = useState('splash'); // 'splash', 'project-menu', 'render-studio', 'main-app'
   const [currentProject, setCurrentProject] = useState(null);
   const [initialAIPrompt, setInitialAIPrompt] = useState(null); // Store initial AI prompt from project creation
 
@@ -4908,8 +4909,8 @@ function MainApp({ user, onRequestAuth }) {
       
       setSelectedObjects([objectData]);
       
-      // Don't set properties for furniture/fixture objects since we don't show property panel
-      if (objectData.type === 'furniture' || objectData.type === 'fixture') {
+      // Don't set properties for furniture/fixture or 2D CAD blocks
+      if (objectData.type === 'furniture' || objectData.type === 'fixture' || objectData.type === '2d-cad-block') {
         console.log(`🪑 ${objectData.type} selected - skipping property panel setup`);
         setSelectedObjectProperties({});
       } else {
@@ -4950,6 +4951,11 @@ function MainApp({ user, onRequestAuth }) {
       } else {
         setShowSlabPropertyPanel(false);
         setSelectedSlabData(null);
+      }
+
+      // Hide generic property panel for 2D CAD blocks
+      if (objectData.type === '2d-cad-block') {
+        setShowPropertyPanel(false);
       }
       
       // Activate the corresponding tool when an object is selected
@@ -4999,8 +5005,8 @@ function MainApp({ user, onRequestAuth }) {
           }
         }
       } else {
-        // If no tool mapping found, don't show property panel for furniture/fixtures
-        if (objectData.type === 'furniture' || objectData.type === 'fixture') {
+        // If no tool mapping found, don't show property panel for furniture/fixtures or 2D CAD blocks
+        if (objectData.type === 'furniture' || objectData.type === 'fixture' || objectData.type === '2d-cad-block') {
           console.log(`🪑 ${objectData.type} selected - no property panel needed`);
           setShowPropertyPanel(false);
         } else {
@@ -7076,7 +7082,14 @@ Would you like to sign out?
         onOpenExisting={handleOpenExisting}
         user={user}
         onSignOut={handleSignOut}
+        onOpenRenderStudio={() => setAppState('render-studio')}
       />
+    );
+  }
+
+  if (appState === 'render-studio') {
+    return (
+      <RenderStudioPage onBack={() => setAppState('project-menu')} />
     );
   }
 

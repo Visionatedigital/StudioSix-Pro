@@ -17,6 +17,11 @@ class SubscriptionService {
     this.profileCache = new Map();
     this.cacheExpiry = 2 * 60 * 1000; // 2 minutes
     
+    // Demo users who should bypass all render limits (for presentations)
+    this.demoUnlimitedEmails = new Set([
+      'visionatedigital@gmail.com'
+    ]);
+    
     // Initialize auth listener
     this.initAuthListener();
     
@@ -36,7 +41,7 @@ class SubscriptionService {
           // AI Chat limits
           aiTokensPerMonth: 5000,           // 5K tokens/month
           // Render limits  
-          imageRendersPerMonth: 20,         // 20 renders/month
+          imageRendersPerMonth: 3,          // 3 renders/month (Free requirement)
           maxImageResolution: '512x512',    // Up to 512px
           imageFormats: ['jpg'],            // Low-res JPG only
           // Model access
@@ -72,7 +77,7 @@ class SubscriptionService {
           // AI Chat limits
           aiTokensPerMonth: 50000,          // 50K tokens/month
           // Render limits
-          imageRendersPerMonth: 200,        // 200 renders/month
+          imageRendersPerMonth: 50,         // 50 renders/month (Pro requirement)
           maxImageResolution: '768x768',    // Up to 768px
           imageFormats: ['jpg', 'png'],     // JPG + PNG
           // Model access
@@ -109,7 +114,7 @@ class SubscriptionService {
           // AI Chat limits
           aiTokensPerMonth: 200000,         // 200K tokens/month
           // Render limits
-          imageRendersPerMonth: 1000,       // 1K renders/month
+          imageRendersPerMonth: 200,        // 200 renders/month (Studio requirement)
           maxImageResolution: '1024x1024',  // Up to 1024px
           imageFormats: ['jpg', 'png', 'png-transparent'], // All formats
           // Model access
@@ -238,9 +243,10 @@ class SubscriptionService {
         this.handleUserChange(user);
         return user;
       }
-      
-      // Fall back to Supabase session
-      const supabaseSession = localStorage.getItem('sb-studiosix-auth-token');
+
+      // Discover Supabase auth token key dynamically (sb-<ref>-auth-token)
+      const sessionKey = Object.keys(localStorage).find(k => /sb-.*-auth-token$/.test(k));
+      const supabaseSession = sessionKey ? localStorage.getItem(sessionKey) : null;
       if (supabaseSession) {
         try {
           const session = JSON.parse(supabaseSession);
@@ -248,9 +254,7 @@ class SubscriptionService {
             this.handleUserChange(session.user);
             return session.user;
           }
-        } catch (e) {
-          // Handle gracefully
-        }
+        } catch (e) { /* ignore */ }
       }
     } catch (error) {
       console.warn('Failed to get current user:', error);
@@ -459,6 +463,11 @@ class SubscriptionService {
    */
   async canPerformAction(actionType, actionDetails = {}) {
     try {
+      // Bypass limits for demo allowlist users
+      if (await this.isUnlimitedDemoUser()) {
+        if (actionType === 'image_render') return true;
+      }
+      
       // First try database check for accuracy
       const canPerform = await userDatabaseService.canPerformAction(
         this.currentUserId, 
@@ -511,6 +520,11 @@ class SubscriptionService {
    */
   async recordUsage(actionType, actionDetails = {}) {
     try {
+      // Skip recording for demo allowlist users (unlimited renders)
+      if (await this.isUnlimitedDemoUser()) {
+        if (actionType === 'image_render') return true;
+      }
+      
       const amount = actionDetails.tokens || actionDetails.amount || 1;
       const metadata = {
         model: actionDetails.model,
@@ -562,24 +576,57 @@ class SubscriptionService {
   }
 
   /**
+   * Check whether the current user is a demo allowlist user
+   */
+  async isUnlimitedDemoUser() {
+    try {
+      const profile = await this.getDatabaseProfile();
+      let email = profile?.email;
+      
+      if (!email && typeof localStorage !== 'undefined') {
+        try {
+          const manual = localStorage.getItem('studiosix_manual_auth_user');
+          if (manual) {
+            const u = JSON.parse(manual);
+            email = u?.email || email;
+          }
+          if (!email) {
+            const sessionKey = Object.keys(localStorage).find(k => /sb-.*-auth-token$/.test(k));
+            const raw = sessionKey ? localStorage.getItem(sessionKey) : null;
+            if (raw) {
+              const session = JSON.parse(raw);
+              email = session?.user?.email || email;
+            }
+          }
+        } catch (_) { /* ignore */ }
+      }
+      
+      return !!email && this.demoUnlimitedEmails.has(String(email).toLowerCase());
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /**
    * Get usage statistics
    */
   getUsageStats() {
     const tier = this.getCurrentTier();
-    const usage = this.subscription.usage;
+    const usage = (this.subscription && this.subscription.usage) ? this.subscription.usage : { aiTokensThisMonth: 0, imageRendersThisMonth: 0 };
+    const limits = (tier && tier.limits) ? tier.limits : { aiTokensPerMonth: 0, imageRendersPerMonth: 0 };
     
     return {
       aiTokens: {
-        used: usage.aiTokensThisMonth,
-        limit: tier.limits.aiTokensPerMonth,
-        percentage: tier.limits.aiTokensPerMonth > 0 ? 
-          (usage.aiTokensThisMonth / tier.limits.aiTokensPerMonth) * 100 : 0
+        used: usage.aiTokensThisMonth || 0,
+        limit: limits.aiTokensPerMonth || 0,
+        percentage: (limits.aiTokensPerMonth && limits.aiTokensPerMonth > 0) ? 
+          ((usage.aiTokensThisMonth || 0) / limits.aiTokensPerMonth) * 100 : 0
       },
       imageRenders: {
-        used: usage.imageRendersThisMonth,
-        limit: tier.limits.imageRendersPerMonth,
-        percentage: tier.limits.imageRendersPerMonth > 0 ?
-          (usage.imageRendersThisMonth / tier.limits.imageRendersPerMonth) * 100 : 0
+        used: usage.imageRendersThisMonth || 0,
+        limit: limits.imageRendersPerMonth || 0,
+        percentage: (limits.imageRendersPerMonth && limits.imageRendersPerMonth > 0) ?
+          ((usage.imageRendersThisMonth || 0) / limits.imageRendersPerMonth) * 100 : 0
       }
     };
   }

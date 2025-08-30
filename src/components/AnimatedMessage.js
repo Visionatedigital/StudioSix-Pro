@@ -54,7 +54,7 @@ const AnimatedMessage = ({ sentences, onComplete = null, className = "" }) => {
         </div>
       ))}
       
-      <style jsx>{`
+      <style>{`
         .animated-message {
           line-height: 1.5;
         }

@@ -18,7 +18,7 @@ const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch
 let openai = null;
 try {
   if (process.env.OPENAI_API_KEY) {
-    const OpenAI = require('openai');
+const OpenAI = require('openai');
     openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   }
 } catch (e) {
@@ -32,12 +32,202 @@ console.log('OpenAI API Key configured:', !!process.env.OPENAI_API_KEY);
 
 // Enable CORS for frontend connections
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'https://studiosix.ai'],
+  origin: [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'http://localhost:8081',
+    'http://127.0.0.1:8081',
+    'https://studiosix.ai'
+  ],
   credentials: true
 }));
 
-// Enable JSON parsing for API endpoints
-app.use(express.json());
+// Enable JSON parsing for API endpoints (large payloads for base64 images)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// --- TaskWeaver proxy integration ---
+const TW_URL = process.env.TASKWEAVER_URL || 'http://127.0.0.1:8765';
+const TW_TOKEN = process.env.TASKWEAVER_TOKEN || process.env.TW_SHARED_TOKEN || 'replace-me';
+
+// Preferred aliases used by the frontend
+app.post('/api/tw/run', async (req, res) => {
+  try {
+    const { runId, goal, context, model, maxSteps, toolWhitelist } = req.body || {};
+    const r = await fetch(`${TW_URL}/tw/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-TW-Token': TW_TOKEN },
+      body: JSON.stringify({ runId, goal, context, model, maxSteps, toolWhitelist })
+    });
+    const j = await r.json();
+    res.status(r.status).json(j);
+  } catch (e) {
+    res.status(502).json({ ok: false, error: { code: 'E_TW_DOWN', title: 'Agent service unavailable', hint: String(e) } });
+  }
+});
+
+app.get('/api/tw/events', async (req, res) => {
+  try {
+    const runId = req.query.runId;
+    const r = await fetch(`${TW_URL}/tw/events/${encodeURIComponent(runId)}`, {
+      headers: { 'Accept': 'text/event-stream', 'X-TW-Token': TW_TOKEN }
+    });
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    if (r.body && r.body.pipe) {
+      r.body.pipe(res);
+    } else {
+      res.status(502).end();
+    }
+  } catch (e) {
+    res.status(502).end();
+  }
+});
+
+// --- Google AI Studio (Gemini) image generation proxy ---
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENAI_API_KEY || '';
+app.post('/api/ai/google-generate', async (req, res) => {
+  try {
+    const { prompt, imageDataUrl, secondaryImageDataUrl, quality = 'standard', imageSize = '1024x1024', model = 'gemini-2.5-flash-image-preview' } = req.body || {};
+    if (!GOOGLE_API_KEY) {
+      return res.status(503).json({ ok: false, error: { code: 'E_NO_GOOGLE_KEY', title: 'Google API key missing', hint: 'Set GOOGLE_API_KEY in environment' } });
+    }
+    if (!prompt || !imageDataUrl) {
+      return res.status(400).json({ ok: false, error: { code: 'E_BAD_INPUT', title: 'prompt and imageDataUrl required' } });
+    }
+    // Parse data URL
+    const match = /^data:(.*?);base64,(.*)$/.exec(imageDataUrl);
+    if (!match) {
+      return res.status(400).json({ ok: false, error: { code: 'E_BAD_IMAGE', title: 'Invalid image data URL' } });
+    }
+    const mimeType = match[1];
+    const base64 = match[2];
+    const beefedPrompt = `${prompt}\n\nOutput quality: ${quality}. Target size: ${imageSize}. Render architectural fidelity, consistent lighting, accurate materials, balanced exposure.`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GOOGLE_API_KEY)}`;
+    const parts = [ { text: beefedPrompt }, { inlineData: { mimeType, data: base64 } } ];
+    // Optional secondary image (e.g., furniture to insert)
+    if (secondaryImageDataUrl && typeof secondaryImageDataUrl === 'string') {
+      const m2 = /^data:(.*?);base64,(.*)$/.exec(secondaryImageDataUrl);
+      if (m2) {
+        parts.push({ inlineData: { mimeType: m2[1], data: m2[2] } });
+      }
+    }
+    const payload = {
+      contents: [ { role: 'user', parts } ],
+      generationConfig: { temperature: 0.6 }
+    };
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const rawText = await r.text();
+    let j = {};
+    try { j = JSON.parse(rawText); } catch {}
+    if (!r.ok) {
+      console.error('❌ Google API error', r.status, j?.error || rawText?.slice?.(0, 200));
+      return res.status(502).json({ ok: false, error: { code: 'E_GOOGLE', title: 'Google API error', status: r.status, detail: j?.error || j || rawText } });
+    }
+    // Try to extract image data from candidates
+    let outMime = 'image/png';
+    let outData = null;
+    try {
+      const candidates = j.candidates || [];
+      for (const c of candidates) {
+        const parts = (c.content && c.content.parts) || c.parts || [];
+        for (const p of parts) {
+          if (p.inlineData && p.inlineData.data) {
+            outMime = p.inlineData.mimeType || outMime;
+            outData = p.inlineData.data;
+            break;
+          }
+          if (p.blob && p.blob.data) { // fallback shape
+            outData = p.blob.data;
+            outMime = p.blob.mimeType || outMime;
+            break;
+          }
+        }
+        if (outData) break;
+      }
+    } catch {}
+    if (!outData && j && j.inlineData && j.inlineData.data) {
+      outData = j.inlineData.data;
+      outMime = j.inlineData.mimeType || outMime;
+    }
+    if (!outData) {
+      return res.status(500).json({ ok: false, error: { code: 'E_NO_IMAGE', title: 'No image returned', detail: j } });
+    }
+    const dataUrl = `data:${outMime};base64,${outData}`;
+    return res.json({ ok: true, status: 'completed', output_image: dataUrl });
+  } catch (e) {
+    console.error('❌ Google generate failed:', e);
+    return res.status(500).json({ ok: false, error: { code: 'E_PROXY', title: 'Proxy failure', hint: String(e) } });
+  }
+});
+
+app.post('/api/tw/tool-result', async (req, res) => {
+  try {
+    const r = await fetch(`${TW_URL}/tw/tool-result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-TW-Token': TW_TOKEN },
+      body: JSON.stringify(req.body || {})
+    });
+    const j = await r.json();
+    res.status(r.status).json(j);
+  } catch (e) {
+    res.status(502).json({ ok: false, error: { code: 'E_TW_DOWN', title: 'Agent service unavailable', hint: String(e) } });
+  }
+});
+
+// Backward-compatible aliases
+app.post('/api/agent/run', async (req, res) => {
+  try {
+    const r = await fetch(`${TW_URL}/tw/run`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-TW-Token': TW_TOKEN }, body: JSON.stringify(req.body || {}) });
+    const j = await r.json();
+    res.status(r.status).json(j);
+  } catch (e) { res.status(502).json({ ok: false, error: { code: 'E_TW_DOWN', title: 'Agent service unavailable', hint: String(e) } }); }
+});
+
+app.get('/api/agent/events', async (req, res) => {
+  try {
+    const runId = req.query.runId;
+    const r = await fetch(`${TW_URL}/tw/events/${encodeURIComponent(runId)}`, { headers: { 'Accept': 'text/event-stream', 'X-TW-Token': TW_TOKEN } });
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    if (r.body && r.body.pipe) { r.body.pipe(res); } else { res.status(502).end(); }
+  } catch (e) { res.status(502).end(); }
+});
+
+app.post('/api/agent/tool-result', async (req, res) => {
+  try {
+    const r = await fetch(`${TW_URL}/tw/tool-result`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-TW-Token': TW_TOKEN }, body: JSON.stringify(req.body || {}) });
+    const j = await r.json();
+    res.status(r.status).json(j);
+  } catch (e) { res.status(502).json({ ok: false, error: { code: 'E_TW_DOWN', title: 'Agent service unavailable', hint: String(e) } }); }
+});
+
+// Tools dispatcher - secure TW -> Node calls
+app.post('/api/tools/:name', async (req, res) => {
+  const token = req.headers['x-tw-token'];
+  if (!token || token !== TW_TOKEN) {
+    return res.status(403).json({ ok: false, error: { code: 'E_FORBIDDEN', title: 'Forbidden' } });
+  }
+  const name = req.params.name;
+  try {
+    // Lazy import to avoid bundling issues
+    const aiCommandExecutor = require('./src/services/AICommandExecutor').default || require('./src/services/AICommandExecutor');
+    if (typeof aiCommandExecutor.executeToolByName === 'function') {
+      const result = await aiCommandExecutor.executeToolByName(name, req.body);
+      return res.json(result);
+    }
+    if (typeof aiCommandExecutor.executeTool === 'function') {
+      // Fallback: some names are like geometry.createStair
+      const result = await aiCommandExecutor.executeTool(name, req.body);
+      return res.json({ ok: true, data: result });
+    }
+    return res.json({ ok: false, error: { code: 'E_NOT_IMPL', title: `No handler for ${name}` } });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: { code: 'E_EXEC', title: 'Tool exec failed', hint: String(e) } });
+  }
+});
 
 console.log('Current working directory:', process.cwd());
 console.log('Available files:', fs.readdirSync(process.cwd()).filter(f => !f.startsWith('.')));
@@ -1752,7 +1942,7 @@ try {
   if (error && error.message === 'WS_DISABLED') {
     console.log('⚠️ Skipping WebSocket startup (disabled by env)');
   } else {
-    console.warn('⚠️ WebSocket setup failed, agent will work without real-time updates:', error.message);
+  console.warn('⚠️ WebSocket setup failed, agent will work without real-time updates:', error.message);
   }
 }
 

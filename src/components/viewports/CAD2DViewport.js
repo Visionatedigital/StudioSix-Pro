@@ -349,7 +349,7 @@ const CAD2DViewport = ({
       }
       const svgContent = await response.text();
       
-      // Set up placement state
+      // Set up placement state to start ghost mode immediately
       setPendingCADBlock(blockData);
       // Normalize SVG so it fits our ghost and placement rendering cleanly
       const normalized = svgContent
@@ -357,7 +357,19 @@ const CAD2DViewport = ({
         .replace(/\sheight="[^"]*"/gi, '')
         .replace(/<svg(\s|>)/i, '<svg preserveAspectRatio="xMidYMid meet" ');
       setCadBlockSVGContent(normalized);
-      setCadBlockCursorPos({ x: 0, y: 0 });
+      
+      // Initialize ghost at current mouse position if available
+      if (svgRef.current) {
+        const rect = svgRef.current.getBoundingClientRect();
+        // Use actual mouse position if inside viewport during import
+        const pos = {
+          x: Math.max(0, Math.min(rect.width, (window._lastMouseX ?? rect.width / 2) - rect.left || rect.width / 2)),
+          y: Math.max(0, Math.min(rect.height, (window._lastMouseY ?? rect.height / 2) - rect.top || rect.height / 2))
+        };
+        setCadBlockCursorPos(pos);
+      } else {
+        setCadBlockCursorPos({ x: 0, y: 0 });
+      }
       
       console.log('✅ CAD2DViewport: SVG placement ready - cursor will follow mouse until clicked');
       
@@ -390,7 +402,8 @@ const CAD2DViewport = ({
       id: `cad2d-block-${Date.now()}`,
       type: '2d-cad-block',
       name: pendingCADBlock.name,
-      position: { x: worldPosition.x, y: worldPosition.y, z: 0 },
+      // Use top-down world mapping (x, z) with y as elevation
+      position: { x: worldPosition.x, y: 0, z: worldPosition.z },
       rotation: { x: 0, y: 0, z: 0 },
       category: pendingCADBlock.category,
       subcategory: pendingCADBlock.subcategory,
@@ -401,10 +414,8 @@ const CAD2DViewport = ({
       visible: true
     };
     
-    // Add to objects list for rendering
+    // Confirm placement: add to objects and CAD engine
     setObjects(prevObjects => [...prevObjects, cadBlock]);
-    
-    // Also add to standalone CAD engine
     standaloneCADEngine.addObject(cadBlock);
     
     // Clear placement state
@@ -420,7 +431,7 @@ const CAD2DViewport = ({
   // Expose placement functions to parent component
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      window.cad2DViewportRef = { current: { startSVGPlacement } };
+      window.cad2DViewportRef = { current: { startSVGPlacement, completeSVGPlacement } };
     }
     return () => {
       if (typeof window !== 'undefined') {
@@ -444,6 +455,37 @@ const CAD2DViewport = ({
   
   // Professional door placement workflow state
   const [doorPlacementStep, setDoorPlacementStep] = useState(0); // 0: none, 1: positioning, 2: swing direction
+  // SVG Block resize interaction state
+  const [activeResize, setActiveResize] = useState(null); // { id, startX, startY, origScaleX, origScaleY, origHalfW, origHalfH }
+  const [activeDrag, setActiveDrag] = useState(null); // { id, startX, startY, origPos }
+
+  const startSvgBlockResize = useCallback((event, objectId, centerPos2d, halfW, halfH) => {
+    event.stopPropagation();
+    event.preventDefault();
+    setActiveResize({
+      id: objectId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origScaleX: (objects.find(o => o.id === objectId)?.scale?.x) || 1,
+      origScaleY: (objects.find(o => o.id === objectId)?.scale?.y) || 1,
+      origHalfW: halfW,
+      origHalfH: halfH
+    });
+  }, [objects]);
+
+  const startSvgBlockDrag = useCallback((event, objectId) => {
+    event.stopPropagation();
+    event.preventDefault();
+    const target = objects.find(o => o.id === objectId);
+    if (!target) return;
+    setActiveDrag({
+      id: objectId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origPos: { x: target.position?.x || 0, z: target.position?.z || 0 }
+    });
+  }, [objects]);
+
   const [doorPlacementData, setDoorPlacementData] = useState(null);
   const [doorSwingDirection, setDoorSwingDirection] = useState('right'); // 'left' or 'right'
 
@@ -1055,8 +1097,8 @@ const CAD2DViewport = ({
       const z = typeof pos3d.z === 'number' ? pos3d.z : (typeof pos3d.y === 'number' ? pos3d.y : 0);
       
       const result = {
-        x: 400 + Math.round((x - viewCenter.x) * scale),
-        y: 300 + Math.round((z - viewCenter.y) * scale)
+        x: 400 + (x - viewCenter.x) * scale,
+        y: 300 + (z - viewCenter.y) * scale
       };
       
       if (!isFinite(result.x) || !isFinite(result.y)) {
@@ -1716,6 +1758,33 @@ const CAD2DViewport = ({
 
   // Handle mouse move for panning and drafting preview
   const handleSvgMouseMove = useCallback((event) => {
+    // Handle active resize first
+    if (activeResize) {
+      const deltaX = event.clientX - activeResize.startX;
+      const deltaY = event.clientY - activeResize.startY;
+      const target = objects.find(o => o.id === activeResize.id);
+      if (target) {
+        // Uniform scale based on the larger delta
+        const denom = Math.max(10, Math.max(activeResize.origHalfW, activeResize.origHalfH) * 2);
+        const factor = 1 + Math.max(deltaX, deltaY) / denom;
+        const clamped = Math.max(0.1, factor);
+        const newScaleX = activeResize.origScaleX * clamped;
+        const newScaleY = activeResize.origScaleY * clamped;
+        target.scale = { x: newScaleX, y: newScaleY, z: 1 };
+        setObjects(prev => prev.map(obj => obj.id === target.id ? { ...obj, scale: target.scale } : obj));
+      }
+      return;
+    }
+
+    if (activeDrag) {
+      const dxPx = event.clientX - activeDrag.startX;
+      const dyPx = event.clientY - activeDrag.startY;
+      const scale = 100 * zoom;
+      const dxWorld = dxPx / scale;
+      const dyWorld = dyPx / scale;
+      setObjects(prev => prev.map(obj => obj.id === activeDrag.id ? { ...obj, position: { x: activeDrag.origPos.x + dxWorld, y: 0, z: activeDrag.origPos.z + dyWorld } } : obj));
+      return;
+    }
     if (isPanning) {
       const deltaX = (event.clientX - lastPanPoint.x) / (40 * zoom);
       const deltaY = (event.clientY - lastPanPoint.y) / (40 * zoom);
@@ -1759,6 +1828,9 @@ const CAD2DViewport = ({
       
       // Update cursor position for CAD block ghost preview
       setCadBlockCursorPos(movePos);
+      // Store last mouse for better ghost init
+      window._lastMouseX = event.clientX;
+      window._lastMouseY = event.clientY;
       
       // Set cursor style for CAD block placement
       svgRef.current.style.cursor = 'crosshair';
@@ -2124,11 +2196,25 @@ const CAD2DViewport = ({
         });
       }
     }
-  }, [isPanning, lastPanPoint, zoom, isDrafting, draftStartPoint, selectedTool, to3D]);
+  }, [isPanning, lastPanPoint, zoom, isDrafting, draftStartPoint, selectedTool, to3D, activeResize, activeDrag, objects]);
 
   const handleSvgMouseUp = useCallback(() => {
     setIsPanning(false);
-  }, []);
+    if (activeResize) {
+      const target = objects.find(o => o.id === activeResize.id);
+      if (target) {
+        standaloneCADEngine.updateObject(target.id, { scale: target.scale });
+      }
+      setActiveResize(null);
+    }
+    if (activeDrag) {
+      const target = objects.find(o => o.id === activeDrag.id);
+      if (target) {
+        standaloneCADEngine.updateObject(target.id, { position: target.position });
+      }
+      setActiveDrag(null);
+    }
+  }, [activeResize, objects]);
 
   // Enable drop of CAD blocks from modal
   const handleSvgDragOver = useCallback((event) => {
@@ -4669,17 +4755,49 @@ const CAD2DViewport = ({
     const getObjectProps = () => {
       switch (object.type) {
         case '2d-cad-block': {
-          // Use SVG viewBox to compute default footprint, scale with zoom
-          const vb = object.svgViewBox || { width: 100, height: 100 };
-          const base = 1; // 1 meter default normalized unit
-          const aspect = vb.width / Math.max(1, vb.height);
-          const width = base * aspect * 100 * zoom;
-          const height = base * 100 * zoom;
-          return {
-            width,
-            height,
-            shape: 'svg-block'
+          // Standards in meters (approximate footprints)
+          const standards = {
+            Furniture: {
+              Sofa: { w: 2.1, h: 0.9 }, // 3-seat sofa
+              Chair: { w: 0.6, h: 0.6 },
+              Dining: { w: 1.6, h: 0.9 },
+              Bed: { w: 2.0, h: 1.6 } // queen
+            },
+            Bathroom: {
+              Bathtub: { w: 1.7, h: 0.75 },
+              'Handwash Basin': { w: 0.6, h: 0.5 }
+            },
+            Kitchen: {
+              Sinks: { w: 0.8, h: 0.6 }
+            }
           };
+          const vb = object.svgViewBox || { width: 100, height: 100 };
+          const aspect = vb.width / Math.max(1, vb.height);
+          const cat = object.category || 'Furniture';
+          const sub = object.subcategory || 'Sofa';
+          const std = standards[cat] && standards[cat][sub] ? standards[cat][sub] : { w: 1.0, h: 1.0 };
+          // Fit SVG aspect into standard footprint while preserving aspect
+          const targetWm = std.w;
+          const targetHm = std.h;
+          let widthM, heightM;
+          if (aspect >= 1) {
+            widthM = targetWm;
+            heightM = targetWm / aspect;
+            if (heightM > targetHm) {
+              heightM = targetHm;
+              widthM = targetHm * aspect;
+            }
+          } else {
+            heightM = targetHm;
+            widthM = targetHm * aspect;
+            if (widthM > targetWm) {
+              widthM = targetWm;
+              heightM = targetWm / aspect;
+            }
+          }
+          const width = widthM * 100 * zoom;
+          const height = heightM * 100 * zoom;
+          return { width, height, shape: 'svg-block' };
         }
         case 'wall':
           // For walls, width = length, height = thickness for top-down view
@@ -4825,14 +4943,53 @@ const CAD2DViewport = ({
     }
     
     if (props.shape === 'svg-block') {
-      // Render raw SVG content centered at position
+      // Render SVG content centered and scaled using its viewBox
       const transform = `translate(${pos2d.x}, ${pos2d.y})`;
-      // Wrap content so it can be scaled uniformly; initial scale 1 maps to viewBox
+      const vb = object.svgViewBox || { minX: 0, minY: 0, width: 100, height: 100 };
+      console.debug('🧭 SVG-BLOCK POS DEBUG', {
+        id: object.id,
+        worldPos: object.position,
+        pos2d,
+        vb,
+        objScale: object.scale,
+        zoom,
+        viewCenter
+      });
+      // Apply object's current scale uniformly around center
+      const objectScaleX = (object.scale?.x || 1);
+      const objectScaleY = (object.scale?.y || 1);
+      // props.width/height now reflect standardized footprint in pixels
+      const targetWidthPx = (props.width || 100) * objectScaleX;
+      const targetHeightPx = (props.height || 100) * objectScaleY;
+      const scaleX = targetWidthPx / Math.max(1, vb.width);
+      const scaleY = targetHeightPx / Math.max(1, vb.height);
+      const vbCenterX = vb.minX + vb.width / 2;
+      const vbCenterY = vb.minY + vb.height / 2;
+      const innerTransform = `translate(0,0) scale(${scaleX}, ${scaleY}) translate(${-vbCenterX}, ${-vbCenterY})`;
       return (
-        <g key={object.id} transform={transform} {...createUnifiedElementHandlers(object)}>
-          <g transform={`translate(${- (props.width/2)}, ${- (props.height/2)})`}>
-            <g dangerouslySetInnerHTML={{ __html: (object.svgContent || '').replace(/<\/?svg[^>]*>/g, '') }} />
-          </g>
+        <g key={object.id} transform={transform} onMouseDown={(e) => { if (selectedObjects.has(object.id)) startSvgBlockDrag(e, object.id); }} {...createUnifiedElementHandlers(object)}>
+          <g transform={innerTransform} dangerouslySetInnerHTML={{ __html: (object.svgContent || '').replace(/<\/?svg[^>]*>/g, '') }} />
+          {selectedObjects.has(object.id) && (() => {
+            const handleSize = Math.max(6, 6 * zoom);
+            const halfW = targetWidthPx / 2;
+            const halfH = targetHeightPx / 2;
+            return (
+              <g>
+                {/* Use local coordinates within the translated group */}
+                <rect x={-halfW} y={-halfH} width={halfW*2} height={halfH*2} fill="none" stroke="#8b5cf6" strokeDasharray="6,3" strokeWidth={1.5} />
+                {/* bottom-right scale handle */}
+                <rect
+                  x={halfW - handleSize}
+                  y={halfH - handleSize}
+                  width={handleSize}
+                  height={handleSize}
+                  fill="#10b981"
+                  cursor="nwse-resize"
+                  onMouseDown={(e) => startSvgBlockResize(e, object.id, pos2d, halfW, halfH)}
+                />
+              </g>
+            );
+          })()}
         </g>
       );
     }
@@ -5584,14 +5741,13 @@ const renderCADEngineMesh2D = useCallback((object) => {
         {/* CAD Objects */}
         {(() => {
           try {
-          // Only log when there are actually objects to render  
-          if (objects.length > 0) {
-            console.warn(`🗂️ 2D Viewport: Rendering ${objects.length} objects`);
-            console.warn(`🗂️ OBJECTS TYPES:`, objects.map(obj => ({ id: obj.id, type: obj.type })));
+          // Concise log; toggle with window.A3D_DEBUG
+          if (objects.length > 0 && (typeof window !== 'undefined' && window.A3D_DEBUG)) {
+            console.debug('🗂️ 2D render:', objects.map(obj => ({ id: obj.id, type: obj.type })).slice(0, 8));
           }
           
           // Make objects available globally for debugging
-          window.debugObjects = objects;
+          if (typeof window !== 'undefined') window.debugObjects = objects;
           
             // Separate objects by type for proper rendering order
             const slabs = objects.filter(obj => obj && obj.type === 'slab');

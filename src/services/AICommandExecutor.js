@@ -11,6 +11,7 @@
  */
 
 import standaloneCADEngine from './StandaloneCADEngine';
+import cad2DLibraryService from './CAD2DLibraryService';
 
 class AICommandExecutor {
   constructor() {
@@ -187,6 +188,98 @@ class AICommandExecutor {
     try {
       // Update context with current state
       this.updateContext(context);
+
+      // Lightweight fast-path intents for 2D SVG placement/transform before full NLP
+      const m = String(message || '').toLowerCase();
+      const placeMatch = /(place|add|insert)\s+(a\s+)?(sofa|couch|chair|table|bathtub|sink|basin|bed)\b/.exec(m);
+      if (placeMatch && typeof window !== 'undefined' && window.cad2DViewportRef?.current) {
+        const noun = placeMatch[3];
+        const mapping = {
+          sofa: { category: 'Furniture', subcategory: 'Sofa' },
+          couch: { category: 'Furniture', subcategory: 'Sofa' },
+          chair: { category: 'Furniture', subcategory: 'Chair' },
+          table: { category: 'Furniture', subcategory: 'Dining' },
+          bathtub: { category: 'Bathroom', subcategory: 'Bathtub' },
+          sink: { category: 'Kitchen', subcategory: 'Sinks' },
+          basin: { category: 'Bathroom', subcategory: 'Handwash Basin' },
+          bed: { category: 'Furniture', subcategory: 'Bed' }
+        }[noun];
+
+        try {
+          const svgs = await cad2DLibraryService.getCategorySVGs(mapping.category, mapping.subcategory);
+          if (svgs && svgs.length > 0) {
+            const svg = svgs[0];
+            window.cad2DViewportRef.current.startSVGPlacement({
+              id: svg.id,
+              name: svg.name,
+              category: svg.category,
+              subcategory: svg.subcategory,
+              path: svg.fullPath,
+              type: '2d-cad-block',
+              svgPath: svg.fullPath
+            });
+            const quickResp = {
+              success: true,
+              message: `I found a suitable ${noun} in ${mapping.category}/${mapping.subcategory} ("${svg.name}"). I've put it on your cursor in 2D — move and click to place. After placing, I can resize, rotate, or move it. What would you like next?`,
+              type: 'ai',
+              actions: [{ type: 'viewport_action', action: 'start_svg_placement', args: { name: svg.name } }],
+              timestamp: new Date().toISOString()
+            };
+            this.emit('message_processed', quickResp);
+            return quickResp;
+          }
+        } catch (e) {
+          // Fall through to general NLP if library access fails
+          console.warn('2D CAD library lookup failed:', e.message);
+        }
+      }
+
+      // Uniform resize command on selected 2D block
+      if (/(resize|scale)\s+(it|the\s+sofa|sofa|symbol|block)/.test(m)) {
+        const selected = Array.isArray(this.context.selectedObjects) ? this.context.selectedObjects : Array.from(this.context.selectedObjects || []);
+        const targetId = selected[0]?.id || selected[0];
+        const fMatch = m.match(/(\d+(?:\.\d+)?)\s*(x|times|%)?/);
+        const factor = fMatch ? (fMatch[2] === '%' ? parseFloat(fMatch[1]) / 100 : parseFloat(fMatch[1])) : 1.2;
+        if (targetId) {
+          const obj = standaloneCADEngine.getEntity ? standaloneCADEngine.getEntity(targetId) : null;
+          const current = obj?.scale || { x: 1, y: 1, z: 1 };
+          const newScale = { x: current.x * factor, y: current.y * factor, z: 1 };
+          standaloneCADEngine.updateObject(targetId, { scale: newScale });
+          const resp = {
+            success: true,
+            message: `Done. I scaled the selection by ${factor}×. Want me to fine‑tune the size or position it somewhere specific?`,
+            type: 'ai',
+            actions: [{ type: 'viewport_update', action: 'resize', args: { id: targetId, scale: newScale } }],
+            timestamp: new Date().toISOString()
+          };
+          this.emit('message_processed', resp);
+          return resp;
+        }
+      }
+
+      // Move command (dx/dy in meters if specified)
+      if (/(move|shift)\s+(it|the\s+sofa|sofa|symbol|block)/.test(m)) {
+        const selected = Array.isArray(this.context.selectedObjects) ? this.context.selectedObjects : Array.from(this.context.selectedObjects || []);
+        const targetId = selected[0]?.id || selected[0];
+        if (targetId) {
+          const dx = (/right/.test(m) ? 1 : /left/.test(m) ? -1 : 0) * (parseFloat((m.match(/(left|right)\s*(\d+(?:\.\d+)?)?/) || [])[2]) || 1);
+          const dy = (/down/.test(m) ? 1 : /up/.test(m) ? -1 : 0) * (parseFloat((m.match(/(up|down)\s*(\d+(?:\.\d+)?)?/) || [])[2]) || 1);
+          const obj = standaloneCADEngine.getEntity ? standaloneCADEngine.getEntity(targetId) : null;
+          if (obj?.position) {
+            const pos = { x: obj.position.x + dx, y: 0, z: obj.position.z + dy };
+            standaloneCADEngine.updateObject(targetId, { position: pos });
+            const resp = {
+              success: true,
+              message: `Moved it ${dx || 0}m horizontally and ${dy || 0}m vertically. Should I align it with walls or center it in the room?`,
+              type: 'ai',
+              actions: [{ type: 'viewport_update', action: 'move', args: { id: targetId, position: pos } }],
+              timestamp: new Date().toISOString()
+            };
+            this.emit('message_processed', resp);
+            return resp;
+          }
+        }
+      }
       
       // Parse the natural language message
       const parsedCommand = await this.parseNaturalLanguage(message);
@@ -2189,7 +2282,7 @@ class AICommandExecutor {
         allWalls.forEach(wall => standaloneCADEngine.selectObject(wall.id, true));
         
         return {
-          message: `🧱 **Selected all ${allWalls.length} wall${allWalls.length > 1 ? 's' : ''}** in your project.\n\nNow you can ask me to modify them, such as:\n• "Make the walls taller"\n• "Change the material to wood"\n• "Make them 5 meters long"`,
+          message: `🧱 **Selected all ${allWalls.length} wall${allWalls.length > 1 ? 's' : ''}** in your project.\n\nNow you can ask me to modify them, such as:\n• "Make the walls taller"\n• "Change the material to wood"\n• "Make them all 3m high"`,
           actions: [{ 
             type: 'selection_action', 
             action: 'select_all_walls',

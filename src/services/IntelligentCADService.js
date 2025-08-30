@@ -73,7 +73,7 @@ class IntelligentCADService {
    * Enrich NLP analysis with conversation and project context
    */
   enrichWithContext(analysis, additionalContext) {
-    const enriched = { ...analysis };
+    let enriched = { ...analysis };
     
     // Add project context
     enriched.projectContext = {

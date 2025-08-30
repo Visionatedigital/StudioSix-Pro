@@ -3,11 +3,66 @@
  * Handles communication with the backend for AI image rendering via ChatGPT
  */
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8080';
+// Compute API base URL, avoiding stale 8081
+function computeApiBaseUrl() {
+  try {
+    const envBase = process.env.REACT_APP_API_BASE_URL;
+    let base = envBase && envBase.trim() ? envBase.trim() : window.location.origin;
+    if (base.includes(':3000')) base = base.replace(':3000', ':8080');
+    if (base.includes(':8081')) base = base.replace(':8081', ':8080');
+    return base;
+  } catch (e) {
+    return 'http://127.0.0.1:8080';
+  }
+}
+
+const API_BASE_URL = computeApiBaseUrl();
 
 class AIRenderService {
   constructor() {
     this.baseURL = API_BASE_URL;
+  }
+
+  /**
+   * Google AI Studio image generation (Gemini)
+   * @param {Object} params
+   * @param {string} params.prompt
+   * @param {string} params.imageDataUrl - data URL (image/png or image/jpeg)
+   * @param {string} [params.quality]
+   * @param {string} [params.imageSize]
+   * @param {string} [params.model]
+   */
+  async generateWithGoogle({ prompt, imageDataUrl, secondaryImageDataUrl, quality = 'standard', imageSize = '1024x1024', model = 'gemini-2.5-flash-image-preview' }) {
+    // Recompute base each call in case of HMR/origin changes
+    this.baseURL = computeApiBaseUrl();
+    let url = `${this.baseURL}/api/ai/google-generate`;
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, imageDataUrl, secondaryImageDataUrl, quality, imageSize, model })
+      });
+    } catch (e) {
+      // Fallback to explicit localhost
+      url = 'http://127.0.0.1:8080/api/ai/google-generate';
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, imageDataUrl, secondaryImageDataUrl, quality, imageSize, model })
+      });
+    }
+    const text = await res.text();
+    try {
+      const json = JSON.parse(text);
+      if (!res.ok || !json.ok) {
+        throw new Error(json?.error?.title || json?.error?.message || `HTTP ${res.status}`);
+      }
+      return json;
+    } catch (e) {
+      // Bubble up with payload snippet for debugging
+      throw new Error((e && e.message) || `Bad response: ${text.substring(0, 120)}`);
+    }
   }
 
   /**

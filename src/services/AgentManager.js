@@ -164,8 +164,8 @@ class AgentManager {
     const plan = {
       id: `house_${Date.now()}`,
       title: 'Creating Simple House',
-      description: 'I\'ll create a simple house: foundation, perimeter walls, and two bedrooms partition.',
-      totalSteps: 4,
+      description: 'I\'ll create a simple house: foundation, perimeter walls, internal partitions, and initial furniture in each room.',
+      totalSteps: 7,
       steps: [
         {
           id: 'step_1', number: 1, title: 'Create Foundation Slab', action: 'createSlab', status: 'pending',
@@ -179,8 +179,23 @@ class AgentManager {
           id: 'step_3', number: 3, title: 'Create Internal Partition', action: 'createInternalPartition', status: 'pending',
           params: { orientation: 'vertical', offset: 0, height: 3, thickness: 0.15 }
         },
+        // Furnish Bedroom 1 (sofa is not typical; use bed)
         {
-          id: 'step_4', number: 4, title: 'Apply Wall Joinery', action: 'applyWallJoinery', status: 'pending',
+          id: 'step_4', number: 4, title: 'Furnish Bedroom 1', action: 'place2DItem', status: 'pending',
+          params: { category: 'Furniture', subcategory: 'Bed', preferred: 'Bed', offset: { x: -2, z: -1.5 } }
+        },
+        // Furnish Bathroom (bathtub)
+        {
+          id: 'step_5', number: 5, title: 'Furnish Bathroom', action: 'place2DItem', status: 'pending',
+          params: { category: 'Bathroom', subcategory: 'Bathtub', preferred: 'Bathtub', offset: { x: 2.2, z: -1.2 } }
+        },
+        // Furnish Living Room (sofa)
+        {
+          id: 'step_6', number: 6, title: 'Furnish Living Room', action: 'place2DItem', status: 'pending',
+          params: { category: 'Furniture', subcategory: 'Sofa', preferred: 'Sofa', offset: { x: 0, z: 1.8 } }
+        },
+        {
+          id: 'step_7', number: 7, title: 'Apply Wall Joinery', action: 'applyWallJoinery', status: 'pending',
           params: { tolerance: 0.5, cornerStyle: 'overlap' }
         }
       ]
@@ -482,6 +497,9 @@ class AgentManager {
         
         case 'applyWallJoinery':
           return await this.executeApplyWallJoinery(step.params);
+
+        case 'place2DItem':
+          return await this.executePlace2DItem(step.params);
         
         default:
           throw new Error(`Unknown action: ${step.action}`);
@@ -654,6 +672,40 @@ class AgentManager {
       return { success: result !== false }; // Consider null/undefined as success
     } catch (error) {
       console.error('❌ Wall joinery failed:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Execute placing a 2D CAD library item (sofa, bed, bathtub...) in the 2D viewport
+   */
+  async executePlace2DItem(params) {
+    try {
+      const { category, subcategory, preferred, offset = { x: 0, z: 0 } } = params || {};
+      const library = (await import('./CAD2DLibraryService')).default;
+      const svgs = await library.getCategorySVGs(category, subcategory);
+      const svg = svgs && svgs.length > 0 ? svgs[0] : null;
+      if (!svg) {
+        return { success: false, error: 'No SVG found in library for the requested item' };
+      }
+      if (typeof window !== 'undefined' && window.cad2DViewportRef?.current) {
+        window.cad2DViewportRef.current.startSVGPlacement({
+          id: svg.id,
+          name: svg.name,
+          category: svg.category,
+          subcategory: svg.subcategory,
+          path: svg.fullPath,
+          type: '2d-cad-block',
+          svgPath: svg.fullPath
+        });
+        // Auto-complete placement near center with an offset to keep execution flowing
+        const centerWorld = { x: offset.x, y: 0, z: offset.z };
+        window.cad2DViewportRef.current.completeSVGPlacement(centerWorld);
+        return { success: true };
+      }
+      return { success: false, error: 'Viewport not ready for placement' };
+    } catch (error) {
+      console.error('place2DItem failed:', error);
       return { success: false, error: error.message };
     }
   }

@@ -12,6 +12,8 @@
 import aiSettingsService from './AISettingsService';
 import subscriptionService from './SubscriptionService';
 import tokenUsageService from './TokenUsageService';
+import eventManager from './EventManager';
+import aiCommandExecutor from './AICommandExecutor'; // Added import for aiCommandExecutor
 
 class AIService {
   constructor() {
@@ -19,6 +21,9 @@ class AIService {
     this.proxyUrl = process.env.REACT_APP_AI_PROXY_URL || 'http://localhost:8080';
     this.aiChatEndpoint = `${this.proxyUrl}/api/ai-chat`;
     this.testConnectionsEndpoint = `${this.proxyUrl}/api/ai-chat/test-connections`;
+    this.agentRunEndpoint = `${this.proxyUrl}/api/agent/run`;
+    this.agentEventsEndpoint = `${this.proxyUrl}/api/agent/events`;
+    this.agentToolResultEndpoint = `${this.proxyUrl}/api/agent/tool-result`; // Added new endpoint
     
     // Listen for settings changes to update behavior
     this.settingsUnsubscribe = aiSettingsService.onSettingsChange(() => {
@@ -107,10 +112,99 @@ RESPONSE STYLE:
 - Reference relevant building codes and standards when applicable
 - Provide practical, implementable advice
 - Use clear explanations with examples
-- Include relevant architectural terminology
 
 You focus on consultation and guidance rather than direct tool manipulation.`
     };
+  }
+
+  // NEW: TaskWeaver agent run helper
+  async runTaskWeaver(goal, context = {}, model = null, maxSteps = 12) {
+    try {
+      const runId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const effectiveModel = this.getEffectiveModel(model);
+      const pruned = this.pruneContextForMemoryHygiene(context, this.getChatSettings());
+
+      console.log('[TW] runTaskWeaver -> starting', { runId, goal: String(goal).slice(0, 120), model: effectiveModel, maxSteps });
+
+      const resp = await fetch(this.agentRunEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runId, goal, context: pruned, model: effectiveModel, maxSteps })
+      });
+      console.log('[TW] runTaskWeaver -> response status', resp.status);
+      if (!resp.ok) {
+        try { console.warn('[TW] runTaskWeaver -> error body', await resp.json()); } catch {}
+        throw new Error('Agent service unavailable');
+      }
+
+      // Attach SSE stream to EventManager
+      console.log('[TW] attachTaskWeaver -> attaching SSE', { runId, url: this.agentEventsEndpoint });
+      this.attachTaskWeaver(runId);
+      return { runId };
+    } catch (e) {
+      console.warn('[TW] runTaskWeaver -> failed', e);
+      throw e;
+    }
+  }
+
+  // NEW: Attach SSE and re-emit minimal events
+  attachTaskWeaver(runId) {
+    try {
+      const url = `${this.agentEventsEndpoint}?runId=${encodeURIComponent(runId)}`;
+      console.log('[TW] EventSource opening', url);
+      const evt = new EventSource(url);
+      evt.onopen = () => {
+        console.log('[TW] EventSource open', { runId });
+      };
+      evt.onmessage = (ev) => {
+        try { const data = JSON.parse(ev.data); console.log('[TW] evt:message', data?.type || 'message'); eventManager.progress(runId, data); } catch { /* heartbeat or ping */ }
+      };
+      evt.addEventListener('plan', (ev) => {
+        try { const data = JSON.parse(ev.data); console.log('[TW] evt:plan'); eventManager.progress(runId, data); } catch {}
+      });
+      evt.addEventListener('act', async (ev) => {
+        let payload = null;
+        try { payload = JSON.parse(ev.data); console.log('[TW] evt:act', payload?.status, payload?.tool); } catch { payload = null; }
+        if (payload && payload.status === 'start' && payload.tool) {
+          // Execute locally via our executor, then report result back
+          try {
+            const execResult = await (aiCommandExecutor.executeTool ? aiCommandExecutor.executeTool(payload.tool, payload.args || {}) : Promise.resolve({ ok: false, error: { code: 'E_NO_EXEC', title: 'No executor available' } }));
+            await fetch(this.agentToolResultEndpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ runId, tool: payload.tool, result: { ok: true, data: execResult } })
+            }).catch(() => {});
+            eventManager.progress(runId, { type: 'act', status: 'result', tool: payload.tool, result: { ok: true } });
+          } catch (e) {
+            console.warn('[TW] local exec failed', e);
+            await fetch(this.agentToolResultEndpoint, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ runId, tool: payload.tool, result: { ok: false, error: { code: 'E_EXEC', title: 'Client exec failed', hint: String(e) } } })
+            }).catch(() => {});
+            eventManager.progress(runId, { type: 'act', status: 'result', tool: payload.tool, result: { ok: false } });
+          }
+        }
+        try { eventManager.progress(runId, payload || {}); } catch {}
+      });
+      evt.addEventListener('critic', (ev) => {
+        try { const data = JSON.parse(ev.data); console.log('[TW] evt:critic'); eventManager.progress(runId, data); } catch {}
+      });
+      evt.addEventListener('replan', (ev) => {
+        try { const data = JSON.parse(ev.data); console.log('[TW] evt:replan'); eventManager.progress(runId, data); } catch {}
+      });
+      evt.addEventListener('done', (ev) => {
+        try { const data = JSON.parse(ev.data); console.log('[TW] evt:done'); eventManager.done(runId, data); } catch {}
+        evt.close();
+      });
+      evt.onerror = (err) => {
+        console.warn('[TW] EventSource error', err);
+        try { eventManager.progress(runId, { type: 'error', title: 'Agent stream error' }); } catch {}
+        evt.close();
+      };
+    } catch (e) {
+      console.warn('Failed to attach TaskWeaver stream:', e.message);
+    }
   }
 
   /**
@@ -133,7 +227,6 @@ You focus on consultation and guidance rather than direct tool manipulation.`
   getBYOKSettings() {
     return aiSettingsService.getBYOKSettings();
   }
-
 
   /**
    * Get effective model and provider based on settings
