@@ -316,6 +316,25 @@ class SubscriptionService {
   createDefaultSubscription() {
     const now = new Date();
     const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    // Defensive: fallback limits to avoid crash if tiers not initialized
+    const fallbackLimits = {
+      aiTokensPerMonth: 5000,
+      imageRendersPerMonth: 3,
+      maxImageResolution: '512x512',
+      imageFormats: ['jpg'],
+      availableModels: ['gpt-3.5-turbo'],
+      availableRenderModels: ['sdxl-base'],
+      maxProjectSize: 1,
+      cloudStorage: 0,
+      teamSeats: 1,
+      support: 'community',
+      restrictedTools: [],
+      canExportBIM: false,
+      canExportHighRes: false
+    };
+    const freeLimits = (this && this.tiers && this.tiers.free && this.tiers.free.limits)
+      ? { ...this.tiers.free.limits }
+      : fallbackLimits;
     
     return {
       userId: this.currentUserId,
@@ -329,7 +348,7 @@ class SubscriptionService {
         imageRendersThisMonth: 0,
         lastResetDate: now.toDateString()
       },
-      limits: { ...this.tiers.free.limits }
+      limits: freeLimits
     };
   }
 
@@ -337,7 +356,7 @@ class SubscriptionService {
    * Validate and upgrade subscription data structure
    */
   validateSubscription(subscription) {
-    const tier = this.tiers[subscription.tierId] || this.tiers.free;
+    const tier = (this && this.tiers && (this.tiers[subscription.tierId] || this.tiers.free)) || { limits: { aiTokensPerMonth: 5000, imageRendersPerMonth: 3 } };
     
     // Reset monthly usage if new month
     const today = new Date().toDateString();
@@ -351,7 +370,7 @@ class SubscriptionService {
     }
     
     // Update limits to match current tier definition
-    subscription.limits = { ...tier.limits };
+    subscription.limits = { ...(tier && tier.limits ? tier.limits : { aiTokensPerMonth: 5000, imageRendersPerMonth: 3 }) };
     
     return subscription;
   }
