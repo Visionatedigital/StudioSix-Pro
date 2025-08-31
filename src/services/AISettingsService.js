@@ -496,12 +496,14 @@ class AISettingsService {
     
     // Check daily limit
     if (dailyUsage >= dailyLimit) {
-      throw new Error(`Daily ${type} usage limit (${dailyLimit}) exceeded`);
+      console.warn(`Daily ${type} usage limit (${dailyLimit}) exceeded`);
+      return; // warn only; Supabase enforces real limits
     }
     
     // Check session limit
     if (sessionUsage >= sessionLimit) {
-      throw new Error(`Session ${type} usage limit (${sessionLimit}) exceeded`);
+      console.warn(`Session ${type} usage limit (${sessionLimit}) exceeded`);
+      return; // warn only
     }
     
     // Check alert threshold

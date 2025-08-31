@@ -60,6 +60,7 @@ import {
 import SplashScreen from './components/SplashScreen';
 import StartNewProjectMenu from './components/StartNewProjectMenu';
 import RenderStudioPage from './components/RenderStudioPage';
+import AdminCreditsPage from './components/AdminCreditsPage';
 import { PropertyPanel } from './components/property-panel';
 import OBJModelPanel from './components/property-panel/OBJModelPanel';
 import SlabPropertyPanel from './components/property-panel/SlabPropertyPanel';
@@ -4412,7 +4413,21 @@ function MainApp({ user, onRequestAuth }) {
   }, [user]);
 
   // Application state management
-  const [appState, setAppState] = useState('splash'); // 'splash', 'project-menu', 'render-studio', 'main-app'
+  const [appState, setAppState] = useState('splash'); // 'splash', 'project-menu', 'render-studio-loading', 'render-studio', 'main-app'
+
+  // Smoothly open the AI Render Studio without UI glitching
+  const openRenderStudio = () => {
+    try {
+      // Show a brief loading screen to allow services to settle
+      setAppState('render-studio-loading');
+      // Ensure at least one frame and ~700ms delay for a stable transition
+      window.requestAnimationFrame(() => {
+        setTimeout(() => setAppState('render-studio'), 700);
+      });
+    } catch {
+      setAppState('render-studio');
+    }
+  };
   const [currentProject, setCurrentProject] = useState(null);
   const [initialAIPrompt, setInitialAIPrompt] = useState(null); // Store initial AI prompt from project creation
 
@@ -7082,8 +7097,23 @@ Would you like to sign out?
         onOpenExisting={handleOpenExisting}
         user={user}
         onSignOut={handleSignOut}
-        onOpenRenderStudio={() => setAppState('render-studio')}
+        onOpenRenderStudio={openRenderStudio}
+        onOpenAdmin={() => {
+          if (user?.email === 'visionatedigital@gmail.com') setAppState('admin-credits');
+          else alert('Admin only');
+        }}
       />
+    );
+  }
+
+  if (appState === 'render-studio-loading') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-studiosix-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin w-12 h-12 border-4 border-studiosix-500 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-white">Preparing AI Render Studio…</p>
+        </div>
+      </div>
     );
   }
 
@@ -7091,6 +7121,10 @@ Would you like to sign out?
     return (
       <RenderStudioPage onBack={() => setAppState('project-menu')} />
     );
+  }
+
+  if (appState === 'admin-credits') {
+    return <AdminCreditsPage />;
   }
 
   // Main BIM application

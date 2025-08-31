@@ -7,11 +7,17 @@ import {
   ArrowUpTrayIcon,
   PencilSquareIcon,
   ShareIcon,
-  PaperClipIcon
+  PaperClipIcon,
+  PhoneIcon,
+  CheckCircleIcon,
+  XCircleIcon
 } from '@heroicons/react/24/outline';
 import aiRenderService from '../services/aiRenderService';
 import aiSettingsService from '../services/AISettingsService';
 import subscriptionService from '../services/SubscriptionService';
+import paystackService from '../services/PaystackService';
+
+const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 
 const RenderStudioPage = ({ onBack }) => {
   const [prompt, setPrompt] = useState('');
@@ -25,7 +31,201 @@ const RenderStudioPage = ({ onBack }) => {
   const [editSecondaryImage, setEditSecondaryImage] = useState(null);
   const [progress, setProgress] = useState(0);
   const [renderError, setRenderError] = useState(null);
+  const [showTopUp, setShowTopUp] = useState(false);
+  const [topUpAmount, setTopUpAmount] = useState(10);
+  const [topUpTab, setTopUpTab] = useState('packages'); // 'custom' | 'packages'
+  const [fx, setFx] = useState({ code: 'USD', rate: 1, symbol: '$', locale: (typeof navigator !== 'undefined' ? navigator.language : 'en-US') });
+  const [paymentMethod, setPaymentMethod] = useState('card'); // 'card' | 'mtn'
+  const [mtnNumber, setMtnNumber] = useState('');
+  const [mmPolling, setMmPolling] = useState(false);
+  const [mmStatus, setMmStatus] = useState('');
+  const [mmPaymentId, setMmPaymentId] = useState(null);
+  const [mmUiState, setMmUiState] = useState('idle'); // 'idle' | 'awaiting' | 'success' | 'failed'
   const fileInputRef = useRef(null);
+  React.useEffect(() => {
+    const open = () => setShowTopUp(true);
+    window.addEventListener('open-token-topup', open);
+    return () => window.removeEventListener('open-token-topup', open);
+  }, []);
+
+  const snaps = [5, 10, 20, 50, 100];
+  const amountToRenders = (amt) => {
+    if (amt >= 100) return 160; // extrapolate with best tier rate (~$0.625)
+    if (amt >= 50) return 80;   // ~$0.625 each
+    if (amt >= 20) return 30;   // ~$0.67 each
+    if (amt >= 10) return 12;   // ~$0.83 each
+    return 5;                   // $5 → 5 renders
+  };
+
+  // Detect local currency and fetch exchange rates (USD base)
+  React.useEffect(() => {
+    const detectCurrency = () => {
+      try {
+        const loc = (typeof navigator !== 'undefined' ? (navigator.language || (navigator.languages && navigator.languages[0])) : 'en-US') || 'en-US';
+        const tz = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch { return ''; } })();
+        const upper = String(loc).toUpperCase();
+        let code = 'USD';
+        // Prefer country from time zone if available
+        if (/KAMPALA/i.test(tz)) code = 'UGX';
+        else if (/NAIROBI/i.test(tz)) code = 'KES';
+        else if (/LAGOS|WEST\s+CENTRAL\s+AFRICA|AFRICA\/LAGOS/i.test(tz)) code = 'NGN';
+        else if (/JOHANNESBURG|AFRICA\/JOHANNESBURG/i.test(tz)) code = 'ZAR';
+        // Fallback to language region
+        else if (/-UG/.test(upper)) code = 'UGX';
+        else if (/-KE/.test(upper)) code = 'KES';
+        else if (/-NG/.test(upper)) code = 'NGN';
+        else if (/-ZA/.test(upper)) code = 'ZAR';
+        else if (/-GB/.test(upper)) code = 'GBP';
+        else if (/-EU/.test(upper)) code = 'EUR';
+        else if (/-FR|\-DE|\-ES|\-IT|\-NL|\-PT|\-IE/.test(upper)) code = 'EUR';
+        else if (/-CA/.test(upper)) code = 'CAD';
+        else if (/-AU/.test(upper)) code = 'AUD';
+        else if (/-IN/.test(upper)) code = 'INR';
+        const symbol = new Intl.NumberFormat(loc, { style: 'currency', currency: code }).formatToParts(1).find(p => p.type === 'currency')?.value || '';
+        return { code, symbol, locale: loc };
+      } catch {
+        return { code: 'USD', symbol: '$', locale: 'en-US' };
+      }
+    };
+
+    const { code, symbol, locale } = detectCurrency();
+    const fallbackRates = { USD: 1, EUR: 0.92, GBP: 0.78, ZAR: 18.2, NGN: 1500, KES: 129, UGX: 3780, CAD: 1.36, AUD: 1.5, INR: 83.2 };
+    const applyRate = (rates) => setFx({ 
+      code, symbol, locale,
+      rate: (rates && rates[code]) || fallbackRates[code] || 1,
+      usdToZar: (rates && rates.ZAR) || fallbackRates.ZAR || 18
+    });
+    // Fetch live rates (best effort)
+    fetch('https://open.er-api.com/v6/latest/USD').then(r => r.json()).then(j => {
+      applyRate(j?.rates || null);
+    }).catch(() => applyRate(null));
+  }, []);
+
+  const formatLocal = (amountUSD) => {
+    try {
+      const v = amountUSD * (fx.rate || 1);
+      return new Intl.NumberFormat(fx.locale, { style: 'currency', currency: fx.code, maximumFractionDigits: 0 }).format(v);
+    } catch {
+      return `${fx.symbol}${Math.round(amountUSD * (fx.rate || 1))}`;
+    }
+  };
+
+  const handleStartTopUp = async () => {
+    try {
+      // Determine method
+      if (paymentMethod === 'mtn') {
+        // Accept local 0XXXXXXXXX (10 digits) and normalize to local format for test API
+        const localOk = /^0\d{9}$/.test(String(mtnNumber));
+        if (!localOk) {
+          alert('Enter a valid MTN number in local format (e.g., 0772123456)');
+          return;
+        }
+        const ugxMap = { 5: 18500, 10: 37000, 20: 74000, 50: 185000, 100: 370000 };
+        const amountUGX = ugxMap[topUpAmount] || 37000;
+        const r = await fetch(`${API_BASE}/api/mobilemoney/request`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contact: mtnNumber, amount: amountUGX, message: `StudioSix ${amountToRenders(topUpAmount)} renders` })
+        });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'Mobile money init failed');
+        const pid = j.data?.payment_id;
+        setMmPaymentId(pid);
+        setMmStatus(j.data?.status || 'pending');
+        setMmPolling(true);
+        setMmUiState('awaiting');
+        // Poll for up to 2 minutes
+        const started = Date.now();
+        const poll = async () => {
+          if (!pid) return;
+          try {
+            const pr = await fetch(`${API_BASE}/api/mobilemoney/status/${encodeURIComponent(pid)}`);
+            const pj = await pr.json();
+            if (pj?.ok) {
+              const st = pj.data?.status || 'pending';
+              setMmStatus(st);
+              if (st === 'success' || st === 'successful' || st === 'failed') {
+                setMmPolling(false);
+                if (st === 'success' || st === 'successful') {
+                  try {
+                    await fetch(`${API_BASE}/api/mobilemoney/credit-after-poll`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Id': subscriptionService.currentUserId || ''
+                      },
+                      body: JSON.stringify({ paymentId: pid })
+                    });
+                  } catch {}
+                  setMmUiState('success');
+                }
+                else setMmUiState('failed');
+                return;
+              }
+            }
+            // Also check if our server has seen the callback already
+            try {
+              const cr = await fetch(`${API_BASE}/api/mobilemoney/callback-status/${encodeURIComponent(pid)}`);
+              const cj = await cr.json();
+              if (cj?.ok && (cj.status === 'successful' || cj.status === 'failed')) {
+                setMmPolling(false);
+                if (cj.status === 'successful') {
+                  try {
+                    await fetch(`${API_BASE}/api/mobilemoney/credit-after-poll`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Id': subscriptionService.currentUserId || ''
+                      },
+                      body: JSON.stringify({ paymentId: pid })
+                    });
+                  } catch {}
+                  setMmUiState('success');
+                } else {
+                  setMmUiState('failed');
+                }
+                return;
+              }
+            } catch {}
+          } catch {}
+          if (Date.now() - started < 120000) setTimeout(poll, 5000); else setMmPolling(false);
+        };
+        setTimeout(poll, 5000);
+      } else {
+        await paystackService.loadPaystackScript();
+        let email = 'user@example.com';
+        try {
+          const profile = await (subscriptionService.getDatabaseProfile ? subscriptionService.getDatabaseProfile() : Promise.resolve(null));
+          email = profile?.email || email;
+        } catch {}
+        // Convert USD to ZAR for Paystack (account in Rands). Fallback to ~18 if offline
+        const amountZAR = Math.round(topUpAmount * (Number(process.env.REACT_APP_USD_TO_ZAR) || fx.usdToZar || 18));
+        const result = await paystackService.payWithPopup({
+          email,
+          amount: amountZAR,
+          currency: 'ZAR',
+          plan: 'render_tokens_topup',
+          billing_cycle: 'one_time',
+          metadata: {
+            kind: 'render_tokens',
+            tokens: amountToRenders(topUpAmount),
+            ui: 'render_studio_modal'
+          }
+        });
+        if (result.success) {
+          await subscriptionService.recordUsage('image_render', { amount: 0, description: `Top-up ${amountToRenders(topUpAmount)} renders purchased` });
+          subscriptionService.addRenderCredits(amountToRenders(topUpAmount));
+          alert(`Payment successful. You purchased ${amountToRenders(topUpAmount)} renders.`);
+          setShowTopUp(false);
+        } else {
+          console.warn('Payment cancelled');
+        }
+      }
+    } catch (e) {
+      console.error('Top-up failed:', e);
+      alert('Payment failed. Please try again.');
+    }
+  };
   // Settings
   const settings = aiSettingsService.getRenderSettings();
   const [quality, setQuality] = useState(settings.quality || 'standard');
@@ -381,6 +581,153 @@ const RenderStudioPage = ({ onBack }) => {
           </div>
         </div>
       </div>
+      {showTopUp && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-[560px] max-w-[92vw] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between bg-gradient-to-r from-studiosix-700/40 to-studiosix-800/40">
+              <div>
+                <div className="text-white font-semibold">Buy Render Tokens</div>
+                <div className="text-xs text-slate-300">Commitment‑free. Only pay for what you use.</div>
+              </div>
+              <button onClick={() => setShowTopUp(false)} className="text-slate-300 hover:text-white p-2 rounded-lg hover:bg-slate-700/50">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-5">
+              {/* Tabs */}
+              <div className="inline-flex bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden">
+                <button onClick={() => setTopUpTab('custom')} className={`px-4 py-2 text-sm ${topUpTab==='custom' ? 'bg-studiosix-600 text-white' : 'text-slate-300 hover:text-white'}`}>Custom</button>
+                <button onClick={() => setTopUpTab('packages')} className={`px-4 py-2 text-sm ${topUpTab==='packages' ? 'bg-studiosix-600 text-white' : 'text-slate-300 hover:text-white'}`}>Packages</button>
+              </div>
+
+              {/* Custom Tab Content */}
+              {topUpTab === 'custom' && (
+                <>
+                  <div>
+                    <label className="text-sm text-slate-300">Select amount</label>
+                    <div className="mt-3 px-2">
+                      <input
+                        type="range"
+                        min={5}
+                        max={100}
+                        step={1}
+                        value={topUpAmount}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          const snap = snaps.find(s => Math.abs(s - v) <= 2);
+                          setTopUpAmount(snap ?? v);
+                        }}
+                        className="w-full accent-studiosix-500"
+                      />
+                      {/* Token counts under slider */}
+                      <div className="flex justify-between text-xs text-slate-400 mt-1">
+                        {snaps.map(s => (
+                          <span key={s}>{amountToRenders(s)}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between bg-slate-800/60 rounded-xl p-4 border border-slate-700">
+                    <div>
+                      <div className="text-slate-200 text-sm">Amount</div>
+                      <div className="text-white text-2xl font-bold">${topUpAmount}</div>
+                      <div className="text-xs text-slate-400 mt-1">≈ {formatLocal(topUpAmount)}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-slate-200 text-sm">Renders</div>
+                      <div className="text-2xl font-bold text-studiosix-400">{amountToRenders(topUpAmount)}</div>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* Packages Tab Content */}
+              {topUpTab === 'packages' && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[5,10,20,50].map(v => (
+                    <button key={v} onClick={() => setTopUpAmount(v)} className={`relative text-left p-4 rounded-xl border ${topUpAmount===v ? 'border-studiosix-500 bg-studiosix-600/10' : 'border-slate-700 bg-slate-800/60 hover:border-studiosix-500'}`}>
+                      {v===20 && (
+                        <span className="absolute -top-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-black font-semibold">Most popular</span>
+                      )}
+                      <div className="text-slate-300 text-xs">Package</div>
+                      <div className="text-white text-2xl font-bold mt-1">${v}</div>
+                      <div className="text-studiosix-300 text-sm">{amountToRenders(v)} renders</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="space-y-3">
+                <div className="text-sm text-slate-300">Payment method</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setPaymentMethod('card')} className={`relative flex items-center justify-center gap-2 bg-white text-slate-900 border ${paymentMethod==='card' ? 'border-studiosix-500 ring-2 ring-studiosix-500/40' : 'border-slate-300 hover:border-studiosix-500'} rounded-lg py-3`}>
+                    {paymentMethod === 'card' && (
+                      <span className="absolute -top-2 -right-2 w-3 h-3 rounded-full bg-studiosix-500"></span>
+                    )}
+                    <img src="/Payment-Icons/visa.png" alt="Visa" className="h-5"/>
+                    <img src="/Payment-Icons/pngimg.com - mastercard_PNG16.png" alt="Mastercard" className="h-5"/>
+                    <img src="/Payment-Icons/amex.png" alt="Amex" className="h-5"/>
+                    <span className="text-sm">Credit / Debit Card</span>
+                  </button>
+                  <button onClick={() => setPaymentMethod('mtn')} className={`relative flex items-center justify-center gap-2 bg-white text-slate-900 border ${paymentMethod==='mtn' ? 'border-studiosix-500 ring-2 ring-studiosix-500/40' : 'border-slate-300 hover:border-studiosix-500'} rounded-lg py-3`}>
+                    {paymentMethod === 'mtn' && (
+                      <span className="absolute -top-2 -right-2 w-3 h-3 rounded-full bg-studiosix-500"></span>
+                    )}
+                    <img src="/Payment-Icons/69-691715_mtn-mm-logo-generic-mtn-mobile-money-logo.png" alt="MTN Mobile Money" className="h-6"/>
+                    <span className="text-sm">MTN Mobile Money</span>
+                  </button>
+                </div>
+                {paymentMethod==='mtn' && (
+                  <div className="mt-3">
+                    <label className="block text-sm text-slate-300 mb-1">MTN Mobile Money Number (local format e.g. 0772123456)</label>
+                    <input value={mtnNumber} onChange={e=>setMtnNumber(e.target.value)} placeholder="0772123456" className="w-full px-3 py-2 bg-white text-slate-900 rounded border border-slate-300" />
+                    {(mmPolling || mmUiState !== 'idle') && (
+                      <div className="mt-3 p-3 rounded-lg border border-slate-700 bg-slate-800/60">
+                        {mmUiState === 'awaiting' && (
+                          <div className="flex items-start gap-3">
+                            <PhoneIcon className="w-6 h-6 text-studiosix-400" />
+                            <div className="flex-1 text-sm text-slate-200">
+                              <div className="font-semibold">Waiting for confirmation…</div>
+                              <div className="text-slate-300">Approve the prompt on your phone to complete payment.</div>
+                              <div className="mt-2 flex items-center gap-2 text-xs text-slate-400">
+                                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                                <span>Current status: <span className="text-white font-semibold">{mmStatus || 'pending'}</span></span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {mmUiState === 'success' && (
+                          <div className="flex items-start gap-3">
+                            <CheckCircleIcon className="w-6 h-6 text-green-400" />
+                            <div className="flex-1 text-sm text-green-300">
+                              <div className="font-semibold">Payment confirmed</div>
+                              <div>Credits have been added to your account.</div>
+                            </div>
+                          </div>
+                        )}
+                        {mmUiState === 'failed' && (
+                          <div className="flex items-start gap-3">
+                            <XCircleIcon className="w-6 h-6 text-red-400" />
+                            <div className="flex-1 text-sm text-red-300">
+                              <div className="font-semibold">Payment failed</div>
+                              <div>Please try again or use a different method.</div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-700 bg-slate-900/80 flex items-center justify-end">
+              <button onClick={handleStartTopUp} className="px-5 py-2 bg-gradient-to-r from-studiosix-500 to-studiosix-600 hover:from-studiosix-600 hover:to-studiosix-700 text-white rounded-lg font-semibold shadow">
+                Pay ${topUpAmount}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -407,10 +754,10 @@ const RenderUsageBadge = () => {
       <div className="w-28 h-2 bg-gray-700/60 rounded-full overflow-hidden">
         <div className={`h-full ${pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-studiosix-500'}`} style={{ width: usage.limit === -1 ? '100%' : `${pct}%` }} />
       </div>
-      <a href="/pricing" className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs rounded-md shadow flex items-center space-x-1">
-        <span>Upgrade</span>
+      <button onClick={() => window.dispatchEvent(new CustomEvent('open-token-topup'))} className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs rounded-md shadow flex items-center space-x-1">
+        <span>Buy renders</span>
         <span role="img" aria-label="celebrate">🎉</span>
-      </a>
+      </button>
     </div>
   );
 };

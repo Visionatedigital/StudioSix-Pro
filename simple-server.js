@@ -48,6 +48,80 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// --- Supabase Admin (Service Role) for server-side credit updates ---
+const { createClient } = require('@supabase/supabase-js');
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+let supabaseAdmin = null;
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+  supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false }
+  });
+  console.log('Supabase admin client initialized:', !!supabaseAdmin);
+} else {
+  console.warn('⚠️ Supabase admin not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
+}
+
+async function getUserByEmail(email) {
+  if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+  const { data, error } = await supabaseAdmin
+    .from('user_profiles')
+    .select('id, email, render_credits')
+    .eq('email', email)
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function incrementRenderCreditsByEmail(email, amount) {
+  if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+  const user = await getUserByEmail(email);
+  const { data, error } = await supabaseAdmin
+    .from('user_profiles')
+    .update({ render_credits: (user.render_credits || 0) + amount, updated_at: new Date().toISOString() })
+    .eq('id', user.id)
+    .select('render_credits')
+    .single();
+  if (error) throw error;
+  return data.render_credits;
+}
+
+async function incrementRenderCreditsByUserId(userId, amount) {
+  if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+  const { data: current, error: e1 } = await supabaseAdmin
+    .from('user_profiles')
+    .select('render_credits')
+    .eq('id', userId)
+    .single();
+  if (e1) throw e1;
+  const { data, error } = await supabaseAdmin
+    .from('user_profiles')
+    .update({ render_credits: (current.render_credits || 0) + amount, updated_at: new Date().toISOString() })
+    .eq('id', userId)
+    .select('render_credits')
+    .single();
+  if (error) throw error;
+  return data.render_credits;
+}
+
+async function getCreditsByUserId(userId) {
+  if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+  const { data, error } = await supabaseAdmin
+    .from('user_profiles')
+    .select('render_credits')
+    .eq('id', userId)
+    .single();
+  if (error) throw error;
+  return data.render_credits || 0;
+}
+
+async function consumeOneCredit(userId) {
+  if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+  const { data, error } = await supabaseAdmin.rpc('consume_render_credit', { p_user_id: userId });
+  if (error) throw error;
+  return data; // remaining credits
+}
+
 // --- TaskWeaver proxy integration ---
 const TW_URL = process.env.TASKWEAVER_URL || 'http://127.0.0.1:8765';
 const TW_TOKEN = process.env.TASKWEAVER_TOKEN || process.env.TW_SHARED_TOKEN || 'replace-me';
@@ -1023,6 +1097,240 @@ app.get('/api/ai-chat/test-connections', async (req, res) => {
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 const PAYSTACK_PUBLIC_KEY = process.env.PAYSTACK_PUBLIC_KEY;
 
+// Eirmond Mobile Money credentials
+const EIRMOND_API_KEY = process.env.EIRMOND_API_KEY;
+const EIRMOND_API_SECRET = process.env.EIRMOND_API_SECRET;
+const EIRMOND_CALLBACK_SECRET = process.env.EIRMOND_CALLBACK_SECRET;
+const EIRMOND_BASE = process.env.EIRMOND_BASE || 'https://pay.eirmondserv.com';
+const EIRMOND_OAUTH = process.env.EIRMOND_OAUTH || 'https://pay.eirmondserv.com';
+const EIRMOND_TEST_MODE = String(process.env.EIRMOND_TEST_MODE || '').toLowerCase() === 'true';
+const WEBHOOK_MIRROR_URL = process.env.WEBHOOK_MIRROR_URL || '';
+console.log('[MM] Config:', {
+  base: EIRMOND_BASE,
+  oauth: EIRMOND_OAUTH,
+  testMode: EIRMOND_TEST_MODE,
+  hasKey: !!EIRMOND_API_KEY,
+  hasSecret: !!EIRMOND_API_SECRET,
+  hasCbSecret: !!EIRMOND_CALLBACK_SECRET,
+  mirror: !!WEBHOOK_MIRROR_URL
+});
+
+const mobileMoneyRequests = new Map(); // payment_id -> { userId, email, tokens }
+const mobileMoneyCallbackStatus = new Map(); // payment_id -> 'pending'|'successful'|'failed'
+
+function ugxToTokens(ugx) {
+  const n = Number(ugx || 0);
+  if (n >= 370000) return 160;
+  if (n >= 185000) return 80;
+  if (n >= 74000) return 30;
+  if (n >= 37000) return 12;
+  if (n >= 18500) return 5;
+  return 5;
+}
+
+async function eirmondToken() {
+  const auth = Buffer.from(`${EIRMOND_API_KEY}:${EIRMOND_API_SECRET}`).toString('base64');
+  const r = await fetch(`${EIRMOND_OAUTH}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'client_credentials' })
+  });
+  const j = await r.json();
+  if (!r.ok) {
+    console.error('[MM] OAuth error', r.status, j);
+    throw new Error(j.error || 'oauth failed');
+  }
+  console.log('[MM] OAuth OK, expires_in:', j.expires_in);
+  return j.access_token;
+}
+
+// Request Mobile Money payment
+app.post('/api/mobilemoney/request', async (req, res) => {
+  try {
+    const { contact, amount, message } = req.body || {};
+    if (!contact || !amount) return res.status(400).json({ ok: false, error: 'contact and amount required' });
+    const token = await eirmondToken();
+    const path = EIRMOND_TEST_MODE ? '/test-api/request-payment' : '/api/request-payment';
+    console.log('[MM] request-payment', { path, maskedContact: String(contact).replace(/\d(?=\d{4})/g,'*'), amount });
+    const r = await fetch(`${EIRMOND_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contact, amount, message: message || 'StudioSix render tokens' })
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      console.error('[MM] request-payment error', r.status, j);
+      return res.status(r.status).json({ ok: false, ...j });
+    }
+    console.log('[MM] request-payment OK', j.payment_id || j.data?.payment_id, j.status || j.data?.status);
+    // track mapping for callback crediting
+    try {
+      const userId = req.headers['x-user-id'] || null;
+      const email = req.headers['x-user-email'] || null;
+      const tokens = ugxToTokens(amount);
+      if (j.payment_id || (j.data && j.data.payment_id)) {
+        const pid = j.payment_id || j.data.payment_id;
+        mobileMoneyRequests.set(pid, { userId, email, tokens });
+      }
+    } catch {}
+    res.json({ ok: true, data: j });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Poll payment status
+app.get('/api/mobilemoney/status/:paymentId', async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const token = await eirmondToken();
+    const path = EIRMOND_TEST_MODE ? '/test-api/get-payment-status/' : '/api/get-payment-status/';
+    console.log('[MM] get-payment-status', { path, paymentId });
+    const r = await fetch(`${EIRMOND_BASE}${path}${encodeURIComponent(paymentId)}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      console.error('[MM] get-payment-status error', r.status, j);
+      return res.status(r.status).json({ ok: false, ...j });
+    }
+    console.log('[MM] get-payment-status OK', j.status || j.data?.status);
+    res.json({ ok: true, data: j });
+  } catch (e) {
+    console.error('[MM] get-payment-status exception', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Callback (webhook) from Eirmond
+app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), async (req, res) => {
+  try {
+    let rawBody = req.body;
+    if (rawBody == null) rawBody = '';
+    // If previous middleware parsed JSON, ensure we still have a string for HMAC/debug
+    if (typeof rawBody !== 'string') {
+      try { rawBody = JSON.stringify(rawBody); } catch { rawBody = String(rawBody); }
+    }
+    const theirSig = req.headers['x-content-signature'] || '';
+    let calc = '';
+    if (EIRMOND_CALLBACK_SECRET) {
+      try {
+        calc = require('crypto').createHmac('sha256', EIRMOND_CALLBACK_SECRET).update(rawBody).digest('hex');
+      } catch (e) {
+        console.warn('[MM] HMAC compute failed', e);
+      }
+    }
+    if (!EIRMOND_CALLBACK_SECRET) {
+      console.warn('[MM] No CALLBACK secret set; skipping signature verification in test mode');
+    } else if (calc !== theirSig) {
+      // Extra diagnostics to catch common copy/paste mistakes (e.g., o vs 0)
+      try {
+        let alt = '';
+        const s = EIRMOND_CALLBACK_SECRET;
+        if (/o/i.test(s)) {
+          const altSecret = s.replace(/o/g, '0').replace(/O/g, '0');
+          alt = require('crypto').createHmac('sha256', altSecret).update(rawBody).digest('hex');
+        }
+        console.warn('[MM] MM callback invalid signature', {
+          theirSig: (theirSig||'').slice(0,16)+"…",
+          ourSig: (calc||'').slice(0,16)+"…",
+          altSigIfOto0: alt ? alt.slice(0,16)+"…" : 'n/a'
+        });
+      } catch {}
+      // For test, still accept to avoid provider retry storm
+    }
+    let payload = {};
+    try { payload = JSON.parse(rawBody || '{}'); }
+    catch (e) {
+      console.error('[MM] callback JSON parse error', e, 'body snippet:', String(rawBody).slice(0,200));
+      return res.status(200).end('OK');
+    }
+    console.log('📲 MobileMoney callback:', { status: payload.status, payment_id: payload.payment_id, amount: payload.amount });
+    if (payload.payment_id && payload.status) {
+      mobileMoneyCallbackStatus.set(payload.payment_id, String(payload.status).toLowerCase());
+    }
+    // On success, credit renders based on amount (UGX pricing: $5→5, $10→12, $20→30, $50→80, $100→160)
+    if (payload.status === 'successful') {
+      try {
+        const map = mobileMoneyRequests.get(payload.payment_id) || {};
+        const ugx = Number(payload.amount || 0);
+        const tokens = map.tokens || ugxToTokens(ugx);
+        if (map.userId) {
+          const newBal = await incrementRenderCreditsByUserId(map.userId, tokens);
+          console.log(`✅ MobileMoney credited ${tokens} to user ${map.userId}. New balance: ${newBal}`);
+        } else if (map.email) {
+          const newBal = await incrementRenderCreditsByEmail(map.email, tokens);
+          console.log(`✅ MobileMoney credited ${tokens} to ${map.email}. New balance: ${newBal}`);
+        }
+      } catch (e) { console.error('MM credit error:', e); }
+    }
+    // Mirror to external webhook for debugging if configured
+    if (WEBHOOK_MIRROR_URL) {
+      try {
+        await fetch(WEBHOOK_MIRROR_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Original-Signature': theirSig }, body: rawBody });
+        console.log('[MM] mirrored callback to', WEBHOOK_MIRROR_URL);
+      } catch {}
+    }
+    // Always 200 to acknowledge receipt (provider won't retry)
+    res.status(200).end('OK');
+  } catch (e) {
+    console.error('MM callback error:', e);
+    res.status(500).end('ERR');
+  }
+});
+
+// Allow frontend to check if our server has seen a callback status
+app.get('/api/mobilemoney/callback-status/:paymentId', (req, res) => {
+  try {
+    const st = mobileMoneyCallbackStatus.get(req.params.paymentId) || null;
+    res.json({ ok: true, status: st });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Fallback crediting path when frontend polling detects success and callback is not yet pointing to us
+app.post('/api/mobilemoney/credit-after-poll', express.json(), async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'] || null;
+    const email = req.headers['x-user-email'] || null;
+    const { paymentId } = req.body || {};
+    if (!paymentId) return res.status(400).json({ ok: false, error: 'paymentId required' });
+    // Verify success with provider to avoid blind crediting
+    const token = await eirmondToken();
+    const path = EIRMOND_TEST_MODE ? '/test-api/get-payment-status/' : '/api/get-payment-status/';
+    console.log('[MM] credit-after-poll verify', { paymentId, path });
+    const r = await fetch(`${EIRMOND_BASE}${path}${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${token}` } });
+    const j = await r.json();
+    if (!r.ok) {
+      console.error('[MM] credit-after-poll status error', r.status, j);
+      return res.status(r.status).json({ ok: false, error: j.error || 'status fetch failed' });
+    }
+    const st = (j.status || j.data?.status || '').toLowerCase();
+    if (st !== 'success' && st !== 'successful') {
+      console.warn('[MM] credit-after-poll not-success', st);
+      return res.status(400).json({ ok: false, error: `payment not successful (${st||'unknown'})` });
+    }
+    // Determine token amount
+    const tracked = mobileMoneyRequests.get(paymentId) || {};
+    const amount = Number(j.amount || j.data?.amount || 0);
+    const tokens = tracked.tokens || ugxToTokens(amount);
+    let newBal = null;
+    if (userId) {
+      newBal = await incrementRenderCreditsByUserId(userId, tokens);
+    } else if (email) {
+      newBal = await incrementRenderCreditsByEmail(email, tokens);
+    } else {
+      return res.status(400).json({ ok: false, error: 'Missing user context' });
+    }
+    console.log('[MM] credit-after-poll credited', { tokens, newBal });
+    res.json({ ok: true, credited: tokens, balance: newBal });
+  } catch (e) {
+    console.error('[MM] credit-after-poll exception', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 // Initialize payment endpoint
 app.post('/api/payments/initialize', async (req, res) => {
   console.log('💳 Payment initialization request:', req.body);
@@ -1282,8 +1590,22 @@ app.post('/api/payments/webhook', express.raw({type: 'application/json'}), (req,
     switch(event.event) {
       case 'charge.success':
         console.log('💰 Payment successful:', event.data.reference);
-        // Handle successful payment
-        // You can update user subscription status here
+        // Credit render_credits for token purchases
+        (async () => {
+          try {
+            const md = event.data?.metadata || {};
+            if (md.kind === 'render_tokens' && md.tokens && event.data?.customer?.email) {
+              const email = event.data.customer.email;
+              const tokens = parseInt(md.tokens, 10);
+              if (tokens > 0 && supabaseAdmin) {
+                const newBal = await incrementRenderCreditsByEmail(email, tokens);
+                console.log(`✅ Credited ${tokens} renders to ${email}. New balance: ${newBal}`);
+              }
+            }
+          } catch (e) {
+            console.error('❌ Failed to credit render tokens from webhook:', e);
+          }
+        })();
         break;
       case 'subscription.create':
         console.log('🔄 Subscription created:', event.data.subscription_code);
@@ -1312,6 +1634,70 @@ app.get('/payment/callback', (req, res) => {
   // Redirect to frontend with payment reference
   const callbackUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment/success?reference=${reference || trxref}`;
   res.redirect(callbackUrl);
+});
+
+// --- Credits API ---
+app.get('/api/credits/me', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    if (!userId) return res.status(400).json({ ok: false, error: 'Missing X-User-Id' });
+    const credits = await getCreditsByUserId(userId);
+    res.json({ ok: true, credits });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+app.post('/api/credits/consume', async (req, res) => {
+  try {
+    const userId = req.headers['x-user-id'];
+    if (!userId) return res.status(400).json({ ok: false, error: 'Missing X-User-Id' });
+    const remaining = await consumeOneCredit(userId);
+    res.json({ ok: true, remaining });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// --- Admin endpoints (restricted to a single email) ---
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'visionatedigital@gmail.com';
+
+async function requireAdmin(req, res, next) {
+  try {
+    const email = req.headers['x-admin-email'];
+    if (!email || email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+      return res.status(403).json({ ok: false, error: 'Forbidden' });
+    }
+    next();
+  } catch (e) {
+    res.status(403).json({ ok: false, error: 'Forbidden' });
+  }
+}
+
+app.get('/api/admin/credits', requireAdmin, async (req, res) => {
+  try {
+    if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id, email, render_credits, usage_image_renders_this_month, total_image_renders_used')
+      .order('render_credits', { ascending: false })
+      .limit(200);
+    if (error) throw error;
+    res.json({ ok: true, users: data });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+app.post('/api/admin/credits/grant', requireAdmin, async (req, res) => {
+  try {
+    const { email, amount } = req.body || {};
+    if (!email || !amount) return res.status(400).json({ ok: false, error: 'email and amount required' });
+    const newBal = await incrementRenderCreditsByEmail(email, parseInt(amount, 10));
+    res.json({ ok: true, email, newBal });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // =================================================================

@@ -18,8 +18,8 @@ export const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabas
     detectSessionInUrl: true,
     // Use pkce flow type for better security
     flowType: 'pkce',
-    // Redirect URLs for OAuth
-    redirectTo: `${window.location.origin}/auth/callback`
+    // Redirect URL for OAuth (use app root so no special route is required)
+    redirectTo: `${window.location.origin}/`
   }
 }) : null;
 
@@ -96,7 +96,7 @@ export const auth = {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: `${window.location.origin}/`,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',

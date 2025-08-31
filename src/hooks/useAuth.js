@@ -93,12 +93,18 @@ export const AuthProvider = ({ children }) => {
     // Get initial session
     const getInitialSession = async () => {
       try {
+        // Safety timeout: never hang the UI
+        const safety = setTimeout(() => {
+          console.warn('Auth init safety timeout reached; unblocking UI');
+          setLoading(false);
+        }, 6000);
         // First check for manual auth session
         const manualUser = manualAuthService.getCurrentUser();
         if (manualUser) {
           console.log('🔐 Found manual auth session:', manualUser.email);
           setUser(manualUser);
           setSession({ user: manualUser, manual: true });
+          clearTimeout(safety);
           setLoading(false);
           return;
         }
@@ -110,9 +116,9 @@ export const AuthProvider = ({ children }) => {
         setSession(session);
         setUser(user);
         
-        // Initialize subscription data if user is authenticated
+        // Initialize subscription data if user is authenticated (non-blocking)
         if (user) {
-          await initializeUserSubscription(user);
+          initializeUserSubscription(user).catch((e) => console.warn('Subscription init failed (non-blocking):', e));
         }
         
         console.log('🔐 Initial auth state:', { user: user?.email, session: !!session, manual: false });
@@ -120,6 +126,8 @@ export const AuthProvider = ({ children }) => {
         console.error('Failed to get initial session:', error);
         setError(error.message);
       } finally {
+        // Clear any safety timeout
+        try { /* eslint-disable no-undef */ clearTimeout(safety); /* eslint-enable */ } catch {}
         setLoading(false);
       }
     };
@@ -137,9 +145,9 @@ export const AuthProvider = ({ children }) => {
           setSession(session);
           setUser(session?.user ?? null);
           
-          // Initialize subscription data for new authenticated users
+          // Initialize subscription data for new authenticated users (non-blocking)
           if (session?.user && event === 'SIGNED_IN') {
-            await initializeUserSubscription(session.user);
+            initializeUserSubscription(session.user).catch((e) => console.warn('Subscription init failed (non-blocking):', e));
           }
           
           // Emit auth state change event for other services

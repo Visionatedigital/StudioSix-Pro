@@ -287,27 +287,20 @@ You focus on consultation and guidance rather than direct tool manipulation.`
   /**
    * Check if user has exceeded usage limits (subscription-based)
    */
-  checkUsageLimits(actionType = 'ai_chat', actionDetails = {}) {
-    // Check subscription-based limits
-    const canPerform = subscriptionService.canPerformAction(actionType, actionDetails);
-    
+  async checkUsageLimits(actionType = 'ai_chat', actionDetails = {}) {
+    // Check subscription-based limits using Supabase-backed service
+    const canPerform = await subscriptionService.canPerformAction(actionType, actionDetails);
     if (!canPerform) {
-      const tier = subscriptionService.getCurrentTier();
-      const subscription = subscriptionService.getSubscription();
-      
+      const tier = await subscriptionService.getCurrentTier();
+      const subscription = await subscriptionService.getSubscription();
       if (actionType === 'ai_chat') {
-        const remaining = tier.limits.aiTokensPerMonth - subscription.usage.aiTokensThisMonth;
         throw new Error(`Monthly AI token limit exceeded. Used: ${subscription.usage.aiTokensThisMonth}/${tier.limits.aiTokensPerMonth}. Upgrade to ${subscriptionService.getNextTier(tier.id)} for more tokens.`);
       }
-      
       if (actionType === 'image_render') {
-        const remaining = tier.limits.imageRendersPerMonth - subscription.usage.imageRendersThisMonth;
         throw new Error(`Monthly render limit exceeded. Used: ${subscription.usage.imageRendersThisMonth}/${tier.limits.imageRendersPerMonth}. Upgrade to ${subscriptionService.getNextTier(tier.id)} for more renders.`);
       }
-      
       throw new Error(`Usage limit exceeded for ${actionType}. Please upgrade your plan.`);
     }
-    
     return true;
   }
 
@@ -348,7 +341,7 @@ You focus on consultation and guidance rather than direct tool manipulation.`
       
       // Estimate token usage for limit checking
       const estimatedTokens = this.estimateTokens(message + systemPrompt);
-      this.checkUsageLimits('ai_chat', { 
+      await this.checkUsageLimits('ai_chat', { 
         model: effectiveModel, 
         tokens: estimatedTokens 
       });
@@ -535,7 +528,7 @@ You focus on consultation and guidance rather than direct tool manipulation.`
   async createImageRender(prompt, resolution = '1024x1024', format = 'jpg') {
     try {
       // Check subscription limits
-      this.checkUsageLimits('image_render');
+      await this.checkUsageLimits('image_render');
       
       // Check resolution access
       const tier = subscriptionService.getCurrentTier();
