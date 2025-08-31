@@ -17,8 +17,9 @@ import aiCommandExecutor from './AICommandExecutor'; // Added import for aiComma
 
 class AIService {
   constructor() {
-    // Use simple AI proxy server to avoid CORS issues
-    this.proxyUrl = process.env.REACT_APP_AI_PROXY_URL || 'http://localhost:8080';
+    // Use centralized API base
+    const { getApiBase } = require('../config/apiBase');
+    this.proxyUrl = process.env.REACT_APP_AI_PROXY_URL || getApiBase();
     this.aiChatEndpoint = `${this.proxyUrl}/api/ai-chat`;
     this.testConnectionsEndpoint = `${this.proxyUrl}/api/ai-chat/test-connections`;
     this.agentRunEndpoint = `${this.proxyUrl}/api/agent/run`;

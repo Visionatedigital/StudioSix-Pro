@@ -24,7 +24,8 @@ const BASE_URL = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}`;
  */
 class SupabaseLiveExplorer {
   constructor() {
-    this.backendUrl = 'http://localhost:8080';
+    const { getApiBase } = require('../config/apiBase');
+    this.backendUrl = getApiBase();
     this.discoveryCache = new Map();
     this.cacheExpiry = 10 * 60 * 1000; // 10 minutes
   }

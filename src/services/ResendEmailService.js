@@ -36,7 +36,8 @@ class ResendEmailService {
     try {
       console.log('📧 Sending confirmation email via backend to:', email);
       
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+      const { getApiBase } = require('../config/apiBase');
+      const backendUrl = getApiBase();
       const response = await fetch(`${backendUrl}/api/send-email`, {
         method: 'POST',
         headers: {
@@ -80,7 +81,8 @@ class ResendEmailService {
     try {
       console.log('📧 Sending welcome email via backend to:', email);
       
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+      const { getApiBase } = require('../config/apiBase');
+      const backendUrl = getApiBase();
       const response = await fetch(`${backendUrl}/api/send-welcome-email`, {
         method: 'POST',
         headers: {

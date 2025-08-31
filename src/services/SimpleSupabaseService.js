@@ -8,7 +8,8 @@
 const SUPABASE_URL = 'https://zwrooqvwxdwvnuhpepta.supabase.co';
 const BUCKET_NAME = 'models_fbx';
 const BASE_URL = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}`;
-const PROXY_URL = 'http://localhost:8080/api'; // Your backend proxy
+import { getApiBase } from '../config/apiBase';
+const PROXY_URL = `${getApiBase()}/api`; // Backend proxy
 
 class SimpleSupabaseService {
   constructor() {

@@ -6,13 +6,12 @@
 // Compute API base URL, avoiding stale 8081
 function computeApiBaseUrl() {
   try {
-    const envBase = process.env.REACT_APP_API_BASE_URL;
-    let base = envBase && envBase.trim() ? envBase.trim() : window.location.origin;
-    if (base.includes(':3000')) base = base.replace(':3000', ':8080');
-    if (base.includes(':8081')) base = base.replace(':8081', ':8080');
+    // Prefer centralized config
+    const { getApiBase } = require('../config/apiBase');
+    const base = getApiBase();
     return base;
   } catch (e) {
-    return 'http://127.0.0.1:8080';
+    return '';
   }
 }
 
@@ -44,8 +43,9 @@ class AIRenderService {
         body: JSON.stringify({ prompt, imageDataUrl, secondaryImageDataUrl, quality, imageSize, model })
       });
     } catch (e) {
-      // Fallback to explicit localhost
-      url = 'http://127.0.0.1:8080/api/ai/google-generate';
+      // Fallback to same-origin base
+      const base = computeApiBaseUrl();
+      url = `${base}/api/ai/google-generate`;
       res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

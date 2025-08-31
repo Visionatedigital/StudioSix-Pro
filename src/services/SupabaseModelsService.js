@@ -26,7 +26,8 @@ class SupabaseModelsService {
     this.baseUrl = null;
     this.bucketName = 'models_fbx';
     this.supabaseUrl = 'https://zwrooqvwxdwvnuhpepta.supabase.co';
-    this.backendUrl = 'http://localhost:8080';
+    const { getApiBase } = require('../config/apiBase');
+    this.backendUrl = getApiBase();
     this.manifestCache = null;
     this.manifestCacheTime = null;
     this.cacheExpiry = 15 * 60 * 1000; // 15 minutes - smart scraper cache

@@ -376,7 +376,8 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
       formData.append('fileType', extension);
 
       // Upload to backend for CAD processing
-      const response = await fetch('http://localhost:8002/upload-bim-file', {
+      const { getUploadBase } = require('../config/apiBase');
+      const response = await fetch(`${getUploadBase()}/upload-bim-file`, {
         method: 'POST',
         body: formData,
       });

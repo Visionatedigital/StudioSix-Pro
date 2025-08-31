@@ -617,7 +617,8 @@ const NativeAIChat = ({
       };
 
       // Call autonomous agent API (backend server)
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+      const { getApiBase, getWebSocketBase } = require('../config/apiBase');
+      const backendUrl = getApiBase();
       const response = await fetch(`${backendUrl}/api/agent/run`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -688,7 +689,8 @@ const NativeAIChat = ({
   // Setup WebSocket for autonomous agent progress
   const setupAutonomousWebSocket = useCallback((runId) => {
     try {
-      const wsUrl = `ws://localhost:8081/ws/agent?runId=${runId}`;
+      const { getWebSocketBase } = require('../config/apiBase');
+      const wsUrl = `${getWebSocketBase()}/ws/agent?runId=${runId}`;
       const ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
@@ -826,7 +828,8 @@ const NativeAIChat = ({
     if (!pendingApproval) return;
     
     try {
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8080';
+      const { getApiBase } = require('../config/apiBase');
+      const backendUrl = getApiBase();
       await fetch(`${backendUrl}/api/agent/approve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
