@@ -16,6 +16,7 @@ import aiRenderService from '../services/aiRenderService';
 import aiSettingsService from '../services/AISettingsService';
 import subscriptionService from '../services/SubscriptionService';
 import paystackService from '../services/PaystackService';
+import PayPalService from '../services/PayPalService';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -192,34 +193,40 @@ const RenderStudioPage = ({ onBack }) => {
         };
         setTimeout(poll, 5000);
       } else {
-        await paystackService.loadPaystackScript();
+        // PayPal card checkout (USD)
         let email = 'user@example.com';
         try {
           const profile = await (subscriptionService.getDatabaseProfile ? subscriptionService.getDatabaseProfile() : Promise.resolve(null));
           email = profile?.email || email;
         } catch {}
-        // Convert USD to ZAR for Paystack (account in Rands). Fallback to ~18 if offline
-        const amountZAR = Math.round(topUpAmount * (Number(process.env.REACT_APP_USD_TO_ZAR) || fx.usdToZar || 18));
-        const result = await paystackService.payWithPopup({
-          email,
-          amount: amountZAR,
-          currency: 'ZAR',
-          plan: 'render_tokens_topup',
-          billing_cycle: 'one_time',
-          metadata: {
-            kind: 'render_tokens',
-            tokens: amountToRenders(topUpAmount),
-            ui: 'render_studio_modal'
-          }
-        });
-        if (result.success) {
-          await subscriptionService.recordUsage('image_render', { amount: 0, description: `Top-up ${amountToRenders(topUpAmount)} renders purchased` });
-          subscriptionService.addRenderCredits(amountToRenders(topUpAmount));
-          alert(`Payment successful. You purchased ${amountToRenders(topUpAmount)} renders.`);
-          setShowTopUp(false);
+        const clientId = process.env.REACT_APP_PAYPAL_CLIENT_ID || '';
+        await PayPalService.loadSdk(clientId);
+        const orderId = await PayPalService.createOrder(topUpAmount, amountToRenders(topUpAmount), subscriptionService.currentUserId || '', email);
+        // Use PayPal popup flow if available
+        if (window.paypal && window.paypal.Buttons) {
+          await new Promise((resolve, reject) => {
+            const container = document.createElement('div');
+            container.id = 'paypal-buttons-container';
+            document.body.appendChild(container);
+            const buttons = window.paypal.Buttons({
+              createOrder: () => orderId,
+              onApprove: async (data, actions) => {
+                try { await PayPalService.captureOrder(orderId); resolve(); } catch (e) { reject(e); }
+              },
+              onCancel: () => reject(new Error('cancelled')),
+              onError: (err) => reject(err)
+            });
+            try { buttons.render('#paypal-buttons-container'); } catch (e) { reject(e); }
+          });
         } else {
-          console.warn('Payment cancelled');
+          // Fallback: try immediate capture (server-created order with redirect links)
+          await PayPalService.captureOrder(orderId);
         }
+        // Success
+        await subscriptionService.recordUsage('image_render', { amount: 0, description: `Top-up ${amountToRenders(topUpAmount)} renders purchased` });
+        subscriptionService.addRenderCredits(amountToRenders(topUpAmount));
+        alert(`Payment successful. You purchased ${amountToRenders(topUpAmount)} renders.`);
+        setShowTopUp(false);
       }
     } catch (e) {
       console.error('Top-up failed:', e);
@@ -793,11 +800,11 @@ const RenderSaleBanner = () => {
         style={{ imageRendering: 'auto', objectPosition: 'center 35%' }}
       />
       {/* Independent sticker above countdown (fixed width to avoid jitter) */}
-      <div className="absolute right-4 bottom-16 w-[360px] flex justify-center pointer-events-none">
+      <div className="absolute right-4 bottom-6 w-[360px] flex justify-center pointer-events-none">
         <img
           src="/Launchday%20Banner/—Pngtree—up%20to%2050%20off%20png_6660909.png"
           alt="50% OFF"
-          className="h-20 w-auto drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)]"
+          className="h-24 w-auto drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)]"
           style={{ imageRendering: 'auto' }}
         />
       </div>

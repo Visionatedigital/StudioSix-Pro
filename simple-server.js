@@ -1097,6 +1097,179 @@ app.get('/api/ai-chat/test-connections', async (req, res) => {
 const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
 const PAYSTACK_PUBLIC_KEY = process.env.PAYSTACK_PUBLIC_KEY;
 
+// ---------------- PayPal (Card) Integration -----------------
+const PAYPAL_MODE = (process.env.PAYPAL_MODE || 'live').toLowerCase();
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || process.env.REACT_APP_PAYPAL_CLIENT_ID;
+const PAYPAL_SECRET = process.env.PAYPAL_SECRET;
+const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID || '';
+const PAYPAL_API_BASE = PAYPAL_MODE === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+
+async function paypalAccessToken() {
+  if (!PAYPAL_CLIENT_ID || !PAYPAL_SECRET) throw new Error('PayPal credentials missing');
+  const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString('base64');
+  const r = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${basic}` },
+    body: 'grant_type=client_credentials',
+  });
+  const j = await r.json();
+  if (!r.ok) {
+    console.error('[PayPal] oauth error', r.status, j);
+    throw new Error(j.error || 'paypal oauth failed');
+  }
+  return j.access_token;
+}
+
+function usdToTokens(usd) {
+  const n = Number(usd || 0);
+  if (n >= 100) return 160;
+  if (n >= 50) return 80;
+  if (n >= 20) return 30;
+  if (n >= 10) return 12;
+  if (n >= 5) return 5;
+  return Math.max(1, Math.floor(n));
+}
+
+const paypalOrders = new Map(); // orderId -> { tokens, userId, email }
+
+// Create PayPal order
+app.post('/api/payments/paypal/create-order', async (req, res) => {
+  try {
+    const { amountUSD, tokens, userId, email } = req.body || {};
+    const value = Number(amountUSD || 0).toFixed(2);
+    if (!amountUSD || Number(amountUSD) <= 0) return res.status(400).json({ ok: false, error: 'amountUSD required' });
+    if (!PAYPAL_CLIENT_ID || !PAYPAL_SECRET) return res.status(500).json({ ok: false, error: 'PayPal not configured' });
+    const access = await paypalAccessToken();
+    const hostBase = `${req.protocol}://${req.get('host')}`;
+    const returnUrl = `${hostBase}/payment/paypal/return`;
+    const cancelUrl = `${hostBase}/payment/paypal/cancel`;
+    const body = {
+      intent: 'CAPTURE',
+      purchase_units: [
+        {
+          amount: { currency_code: 'USD', value },
+          custom_id: JSON.stringify({ kind: 'render_tokens', tokens: tokens || usdToTokens(amountUSD), userId, email })
+        }
+      ],
+      application_context: {
+        brand_name: 'StudioSix Pro',
+        landing_page: 'LOGIN',
+        user_action: 'PAY_NOW',
+        shipping_preference: 'NO_SHIPPING',
+        return_url: returnUrl,
+        cancel_url: cancelUrl
+      }
+    };
+    const r = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${access}` },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      console.error('[PayPal] create order error', r.status, j);
+      return res.status(r.status).json({ ok: false, error: j });
+    }
+    const id = j.id;
+    paypalOrders.set(id, { tokens: tokens || usdToTokens(amountUSD), userId, email });
+    res.json({ ok: true, id, links: j.links || [] });
+  } catch (e) {
+    console.error('[PayPal] create-order exception', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Capture PayPal order
+app.post('/api/payments/paypal/capture', async (req, res) => {
+  try {
+    const { orderId } = req.body || {};
+    if (!orderId) return res.status(400).json({ ok: false, error: 'orderId required' });
+    const access = await paypalAccessToken();
+    const r = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${access}` }
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      console.error('[PayPal] capture error', r.status, j);
+      return res.status(r.status).json({ ok: false, error: j });
+    }
+    const status = j.status || j.purchase_units?.[0]?.payments?.captures?.[0]?.status;
+    if (String(status).toUpperCase() === 'COMPLETED') {
+      try {
+        let meta = null;
+        const pu = (j.purchase_units && j.purchase_units[0]) || {};
+        if (pu.custom_id) {
+          try { meta = JSON.parse(pu.custom_id); } catch {}
+        }
+        const tracked = paypalOrders.get(orderId) || {};
+        const tokens = meta?.tokens || tracked.tokens || usdToTokens(pu.amount?.value || 0);
+        const userId = meta?.userId || tracked.userId || null;
+        const email = meta?.email || tracked.email || null;
+        if (tokens && (userId || email)) {
+          if (userId) {
+            await incrementRenderCreditsByUserId(userId, tokens);
+          } else if (email) {
+            await incrementRenderCreditsByEmail(email, tokens);
+          }
+          console.log(`[PayPal] Credited ${tokens} tokens for order ${orderId}`);
+        }
+      } catch (e) { console.warn('[PayPal] credit error', e); }
+    }
+    res.json({ ok: true, data: j });
+  } catch (e) {
+    console.error('[PayPal] capture exception', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Optional: PayPal webhook verification
+app.post('/api/payments/paypal/webhook', async (req, res) => {
+  try {
+    const transmissionId = req.headers['paypal-transmission-id'];
+    const transmissionTime = req.headers['paypal-transmission-time'];
+    const certUrl = req.headers['paypal-cert-url'];
+    const authAlgo = req.headers['paypal-auth-algo'];
+    const transmissionSig = req.headers['paypal-transmission-sig'];
+    const webhookId = PAYPAL_WEBHOOK_ID;
+    const body = req.body;
+    if (!webhookId) { console.warn('[PayPal] WEBHOOK_ID not set'); return res.status(200).end('OK'); }
+    const access = await paypalAccessToken();
+    const verifyRes = await fetch(`${PAYPAL_API_BASE}/v1/notifications/verify-webhook-signature`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${access}` },
+      body: JSON.stringify({ auth_algo: authAlgo, cert_url: certUrl, transmission_id: transmissionId, transmission_sig: transmissionSig, transmission_time: transmissionTime, webhook_id: webhookId, webhook_event: body })
+    });
+    const verify = await verifyRes.json();
+    if (verify.verification_status !== 'SUCCESS') {
+      console.warn('[PayPal] webhook verification failed', verify);
+      return res.status(400).end('INVALID');
+    }
+    const event = body || {};
+    if (event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
+      try {
+        let meta = null;
+        const pu = event.resource?.supplementary_data?.related_ids ? null : (event.resource?.purchase_units?.[0] || {});
+        // Some events include custom_id at resource level
+        const custom = event.resource?.custom_id || pu?.custom_id || null;
+        if (custom) { try { meta = JSON.parse(custom); } catch {} }
+        const tokens = meta?.tokens || usdToTokens(event.resource?.amount?.value || 0);
+        const userId = meta?.userId || null;
+        const email = meta?.email || null;
+        if (tokens && (userId || email)) {
+          if (userId) await incrementRenderCreditsByUserId(userId, tokens);
+          else if (email) await incrementRenderCreditsByEmail(email, tokens);
+          console.log('[PayPal] webhook credited', tokens);
+        }
+      } catch (e) { console.warn('[PayPal] webhook credit error', e); }
+    }
+    res.status(200).end('OK');
+  } catch (e) {
+    console.error('[PayPal] webhook exception', e);
+    res.status(500).end('ERR');
+  }
+});
+
 // Eirmond Mobile Money credentials
 const EIRMOND_API_KEY = process.env.EIRMOND_API_KEY;
 const EIRMOND_API_SECRET = process.env.EIRMOND_API_SECRET;
