@@ -33,7 +33,7 @@ const SlabTool = ({
     depth: 5.0,
     thickness: 0.2,
     shape: 'rectangular', // 'rectangular', 'circular', 'polygon'
-    material: 'concrete',
+    material: 'wood',
     offset: 0.0,
     polygonPoints: [] // For polygon shapes
   });
@@ -359,7 +359,7 @@ const SlabTool = ({
           depth: 5.0,
           thickness: 0.2,
           shape: 'rectangular',
-          material: 'concrete',
+          material: 'wood',
           offset: 0.0,
           polygonPoints: []
         });

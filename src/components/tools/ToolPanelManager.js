@@ -148,16 +148,16 @@ const ToolPanelManager = ({
         />
       </DraggableToolPanel>
 
-      {/* Window Tool */}
+      {/* Window Tool (do not auto-open on select; open only when editing a window) */}
       <DraggableToolPanel
-        isActive={selectedTool === 'window'}
+        isActive={!!(selectedObject && (selectedObject.type === 'window' || selectedObject.type === 'Window'))}
         width={toolConfig.window.width}
         height={toolConfig.window.height}
         className={`window-tool-panel ${baseClassName} ${themeClassName}`}
         style={{ overflowY: 'auto' }}
       >
         <WindowTool
-          isActive={selectedTool === 'window'}
+          isActive={!!(selectedObject && (selectedObject.type === 'window' || selectedObject.type === 'Window'))}
           selectedObject={selectedObject}
           onCreateWindow={onCreateWindow}
           onUpdateWindow={onUpdateWindow}

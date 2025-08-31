@@ -719,7 +719,6 @@ class StandaloneCADEngine {
       
     }, 300); // 300ms delay for stability
   }
-
   /**
    * Auto-extend wall endpoints to snap to nearby corners
    * ENHANCED: Helps ensure walls connect properly at corners
@@ -815,13 +814,18 @@ class StandaloneCADEngine {
    * Advanced reinforced concrete slab with structural properties and analysis
    */
   createSlabGeometry(params) {
-    console.log('🏗️ Creating professional slab system with params:', params);
+    const safeParams = { ...params };
+    if (!safeParams.material) {
+      safeParams.material = 'wood';
+    }
+    
+    console.log('🏗️ Creating professional slab system with params:', safeParams);
     
     const { 
       width = 5, 
       depth = 5, 
       thickness = 0.2, 
-      material = 'concrete', 
+      material = safeParams.material, 
       shape = 'rectangular',
       startPoint = null,
       endPoint = null,
@@ -831,7 +835,7 @@ class StandaloneCADEngine {
       reinforcement = {},
       loadBearing = true,
       offset = 0.0
-    } = params;
+    } = safeParams;
     
     // Calculate actual dimensions and position
     let actualWidth = width;
@@ -1437,7 +1441,6 @@ class StandaloneCADEngine {
     // Simplified hollow core - real implementation would create actual voids
     return new THREE.BoxGeometry(width, thickness, depth);
   }
-
   /**
    * Create column geometry and meshes
    */
@@ -2211,7 +2214,6 @@ class StandaloneCADEngine {
     
     return frameGroup;
   }
-
   /**
    * Create door panels based on door type
    */
@@ -2968,7 +2970,6 @@ class StandaloneCADEngine {
       splitPoint: projectedPoint
     };
   }
-
   /**
    * Merge two adjacent walls into one
    */
@@ -3751,7 +3752,6 @@ class StandaloneCADEngine {
     
     return Math.acos(Math.max(-1, Math.min(1, dot / (mag1 * mag2))));
   }
-
   /**
    * Classify junction type based on geometry
    */
@@ -4529,7 +4529,6 @@ class StandaloneCADEngine {
       return 'butt'; // Default butt joint
     }
   }
-
   /**
    * Apply joinery to all walls based on detected intersections - CAD STYLE
    * FIXED: Added debouncing to prevent infinite loops
@@ -5317,7 +5316,6 @@ class StandaloneCADEngine {
     
     return segments;
   }
-
   /**
    * Debug function to test door creation from console
    */
@@ -6111,7 +6109,6 @@ class StandaloneCADEngine {
     
     return indicatorGroup.children.length > 0 ? indicatorGroup : null;
   }
-
   /**
    * Create furniture geometry
    */
@@ -6907,7 +6904,6 @@ class StandaloneCADEngine {
 
     return bimData;
   }
-
   /**
    * Get wall-element relationships for a specific wall
    */
@@ -7707,7 +7703,6 @@ class StandaloneCADEngine {
     
     return cleaned;
   }
-
   /**
    * Dispose of all resources
    */

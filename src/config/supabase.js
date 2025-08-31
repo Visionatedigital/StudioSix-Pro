@@ -12,16 +12,28 @@ const isSupabaseConfigured = supabaseUrl && supabaseAnonKey &&
 // Create Supabase client only if properly configured
 export const supabase = isSupabaseConfigured ? createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    // Configure auth settings
+    // Configure auth settings for persistent login across refreshes
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
-    // Use pkce flow type for better security
+    // Explicitly persist to localStorage with a stable key to avoid ref/key drift
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+    storageKey: 'sb-studiosix-auth-token',
+    // Use PKCE OAuth flow and redirect to app root
     flowType: 'pkce',
-    // Redirect URL for OAuth (use app root so no special route is required)
     redirectTo: `${window.location.origin}/`
   }
 }) : null;
+
+if (typeof window !== 'undefined') {
+  try {
+    console.log('🔐 Supabase client init', {
+      configured: isSupabaseConfigured,
+      storageKey: 'sb-studiosix-auth-token',
+      existingSessionKeys: Object.keys(window.localStorage || {}).filter(k => /sb-.*-auth-token$/.test(k) || k === 'sb-studiosix-auth-token')
+    });
+  } catch {}
+}
 
 // Configuration status
 export const isAuthConfigured = isSupabaseConfigured;

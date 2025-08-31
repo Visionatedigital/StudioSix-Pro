@@ -109,9 +109,11 @@ export const AuthProvider = ({ children }) => {
           return;
         }
 
-        // Then check Supabase session
+        // Then check Supabase session (persisted in localStorage)
+        try { console.log('🔐 LocalStorage auth keys', Object.keys(localStorage).filter(k => /sb-.*-auth-token$/.test(k) || k === 'sb-studiosix-auth-token')); } catch {}
         const session = await auth.getCurrentSession();
         const user = await auth.getCurrentUser();
+        console.log('🔐 Supabase getSession/getUser', { hasSession: !!session, userEmail: user?.email, sessionObj: session });
         
         setSession(session);
         setUser(user);
@@ -138,6 +140,7 @@ export const AuthProvider = ({ children }) => {
     if (isAuthConfigured) {
       const { data: { subscription } } = auth.onAuthStateChange(async (event, session) => {
         console.log('🔐 Supabase auth state changed:', event, session?.user?.email);
+        try { console.log('🔐 Persisted keys now', Object.keys(localStorage).filter(k => /sb-.*-auth-token$/.test(k) || k === 'sb-studiosix-auth-token')); } catch {}
         
         // Only update if we don't have a manual session
         const manualUser = manualAuthService.getCurrentUser();

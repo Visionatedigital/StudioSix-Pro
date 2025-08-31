@@ -455,6 +455,12 @@ const CAD2DViewport = ({
   
   // Professional door placement workflow state
   const [doorPlacementStep, setDoorPlacementStep] = useState(0); // 0: none, 1: positioning, 2: swing direction
+  const [doorSwingDirection, setDoorSwingDirection] = useState('right'); // 'left' or 'right'
+  const [doorPlacementData, setDoorPlacementData] = useState(null);
+  // Window placement lightweight mode
+  const [windowWidthM, setWindowWidthM] = useState(1.2);
+  const [isTypingWindowWidth, setIsTypingWindowWidth] = useState(false);
+
   // SVG Block resize interaction state
   const [activeResize, setActiveResize] = useState(null); // { id, startX, startY, origScaleX, origScaleY, origHalfW, origHalfH }
   const [activeDrag, setActiveDrag] = useState(null); // { id, startX, startY, origPos }
@@ -485,9 +491,6 @@ const CAD2DViewport = ({
       origPos: { x: target.position?.x || 0, z: target.position?.z || 0 }
     });
   }, [objects]);
-
-  const [doorPlacementData, setDoorPlacementData] = useState(null);
-  const [doorSwingDirection, setDoorSwingDirection] = useState('right'); // 'left' or 'right'
 
   const viewportTheme = theme;
 
@@ -583,7 +586,6 @@ const CAD2DViewport = ({
       svgRef.current.style.cursor = 'default';
     }
   }, [selectedTool]);
-
   // Calculate proper wall intersection points for corner joinery
   const calculateWallIntersections = useCallback((points, wallThickness) => {
     if (points.length <= 2) return points;
@@ -792,14 +794,12 @@ const CAD2DViewport = ({
     setDraftCurrentPoint(null);
     setDraftPreview(null);
   };
-
   // Function to reset door placement workflow
   const resetDoorPlacement = () => {
     setDoorPlacementStep(0);
     setDoorPlacementData(null);
     setDoorSwingDirection('right');
   };
-
   // Update wall edge detector when objects change
   useEffect(() => {
     if (objects.length > 0) {
@@ -1057,14 +1057,14 @@ const CAD2DViewport = ({
     }
     
     // Enable wall selection mode for door/window tools and wall tool
-    const isWallMode = isWallPlacementTool(selectedTool) || selectedTool === 'wall';
+    const isWallMode = isWallPlacementTool(selectedTool) || selectedTool === 'wall' || selectedTool === 'window';
     setWallSelectionMode(isWallMode);
     
     if (isWallMode) {
       // Mark all walls as selectable when entering wall selection mode
       const wallIds = new Set(objects.filter(obj => obj.type === 'wall').map(obj => obj.id));
       setSelectableWalls(wallIds);
-      if (selectedTool === 'door') {
+      if (selectedTool === 'door' || selectedTool === 'window') {
         window.console.warn('🚪 Wall selection mode enabled for door placement. Walls available:', wallIds.size);
       }
     } else {
@@ -1173,7 +1173,6 @@ const CAD2DViewport = ({
     
     return nearestWall;
   }, [objects]);
-
   // Handle SVG mouse down for drafting or selection
   const handleSvgMouseDown = useCallback((event) => {
     window.console.warn('🖱️ SVG MOUSE DOWN EVENT START:', {
@@ -1232,11 +1231,11 @@ const CAD2DViewport = ({
       }
     }
 
-    if (clickedObject) {
+    if (clickedObject && selectedTool !== 'window') {
       // Select object using unified system
       window.console.warn('🎯 CLICKED ON OBJECT:', clickedObject.id, clickedObject.type);
       handleElementSelection(clickedObject);
-    } else if (wallSelectionMode && selectedTool === 'door') {
+    } else if (wallSelectionMode && (selectedTool === 'door' || selectedTool === 'window')) {
       window.console.warn('🎯 WALL SELECTION MODE + HOVERED WALL EDGE PATH');
       // Handle professional door/window placement workflow
       window.console.warn('🚪 Wall edge clicked for', selectedTool, 'placement');
@@ -1251,8 +1250,28 @@ const CAD2DViewport = ({
       };
       
       const dims = objectDimensions[selectedTool] || objectDimensions.door;
-        
-        if (selectedTool === 'door') {
+      
+      if (selectedTool === 'window') {
+        const clickWallEdge = findWallSurfaceAtPoint(queryPoint, objects);
+        if (clickWallEdge) {
+          const windowId = standaloneCADEngine.createObject('window', {
+            width: windowWidthM,
+            height: 1.4,
+            thickness: 0.05,
+            wallId: clickWallEdge.wallId,
+            position: {
+              x: clickWallEdge.closestPoint.x,
+              y: 1.4 / 2,
+              z: clickWallEdge.closestPoint.y
+            },
+            insertionMode: 'insert_in_wall'
+          });
+          window.console.warn('🪟 Window placed:', windowId);
+          return;
+        }
+      }
+      
+      if (selectedTool === 'door') {
         // For doors, detect wall surface at click point
         const clickWallEdge = findWallSurfaceAtPoint(queryPoint, objects);
         window.console.warn('🚪 Wall surface at click:', !!clickWallEdge);
@@ -1412,7 +1431,12 @@ const CAD2DViewport = ({
       console.log(`🖱️ 2D Viewport: Mouse down with tool "${selectedTool}"`);
       
       if (isDraftingTool(selectedTool)) {
-        let worldPos = to3D(clickPos);
+        if (selectedTool === 'window') {
+          // Bypass generic drafting for window tool
+          // Placement is handled in wallSelectionMode branch above
+          return;
+        }
+         let worldPos = to3D(clickPos);
         
         // Apply automatic angle snapping for wall drawing (same as mouse move logic)
         if (selectedTool === 'wall' && draftStartPoint) {
@@ -1578,12 +1602,20 @@ const CAD2DViewport = ({
             setDraftCurrentPoint(worldPos);
           }
         } else if (!isDrafting) {
+          if (selectedTool === 'window') {
+            // Skip generic start drafting for window tool
+            return;
+          }
           // Non-wall tools: Start regular drafting mode
           console.log('🎨 2D Viewport: Starting drafting mode for', selectedTool);
           setIsDrafting(true);
           setDraftStartPoint(worldPos);
           setDraftCurrentPoint(worldPos);
         } else {
+          if (selectedTool === 'window') {
+            // Skip generic complete drafting for window tool
+            return;
+          }
           // Second click: Complete the drafting
           console.log('✅ 2D Viewport: Completing drafting for', selectedTool);
           console.log('📍 2D Viewport: End point:', worldPos);
@@ -1604,7 +1636,7 @@ const CAD2DViewport = ({
                 width: width,
                 depth: depth,
                 thickness: 0.2, // Standard slab thickness
-                material: 'concrete',
+                material: 'wood',
                 shape: 'rectangular',
                 startPoint: draftStartPoint,
                 endPoint: worldPos
@@ -1755,7 +1787,6 @@ const CAD2DViewport = ({
       }
     }
   }, [selectedTool, objects, to2D, to3D, zoom, isDraftingTool, isDrafting, draftStartPoint, handleElementSelection, onGroundClick, pendingCADBlock, completeSVGPlacement, onToolChange]);
-
   // Handle mouse move for panning and drafting preview
   const handleSvgMouseMove = useCallback((event) => {
     // Handle active resize first
@@ -1834,7 +1865,7 @@ const CAD2DViewport = ({
       
       // Set cursor style for CAD block placement
       svgRef.current.style.cursor = 'crosshair';
-    } else if (selectedTool === 'door' || (wallSelectionMode && !isDrafting)) {
+    } else if (selectedTool === 'door' || selectedTool === 'window' || (wallSelectionMode && !isDrafting)) {
       // Handle door tool cursor tracking and wall edge detection for door/window placement
       if (!svgRef.current) return;
       const rect = svgRef.current.getBoundingClientRect();
@@ -1845,8 +1876,8 @@ const CAD2DViewport = ({
         y: event.clientY - rect.top
       };
       
-      // Update cursor position for door tool preview with validation
-      if (selectedTool === 'door' && isFinite(mousePos.x) && isFinite(mousePos.y)) {
+      // Update cursor position for door/window tool preview with validation
+      if ((selectedTool === 'door' || selectedTool === 'window') && isFinite(mousePos.x) && isFinite(mousePos.y)) {
         setCursorPosition(mousePos);
       }
       
@@ -1855,7 +1886,7 @@ const CAD2DViewport = ({
       
       // Find nearby wall surfaces for door placement tools
       if (isWallPlacementTool(selectedTool)) {
-        if (selectedTool === 'door') {
+        if (selectedTool === 'door' || selectedTool === 'window') {
           // For doors, find wall surfaces instead of edges
           
           let wallSurface = null;
@@ -2277,7 +2308,6 @@ const CAD2DViewport = ({
       }));
     }
   }, [zoom, viewCenter, to3D]);
-
   // Render drafting preview
   const renderDraftPreview = useCallback(() => {
     // Handle continuous wall drawing preview
@@ -2456,7 +2486,6 @@ const CAD2DViewport = ({
 
     return null;
   }, [draftPreview, draftStartPoint, draftCurrentPoint, to2D, viewportTheme]);
-
   // Render dynamic wall gap that moves with cursor during door placement
   const renderDynamicWallGap = useCallback((wallSurface, doorWidth, doorPos2D, wallRotation) => {
     try {
@@ -2924,7 +2953,6 @@ const CAD2DViewport = ({
     
     return cornerPoint;
   }, []);
-
   // Helper function to check if two edges overlap (making them internal)
   const edgesOverlap = useCallback((edge1, edge2, tolerance = 2) => {
     // Check if edges are parallel and overlapping
@@ -3254,7 +3282,6 @@ const CAD2DViewport = ({
     console.log('  ✅ Wall polygon created successfully');
     return result;
   }, [zoom]);
-
   // Apply miter joints to connected walls - PROFESSIONAL CAD GEOMETRY (WITH DEBUGGING)
   const applyMiterJoints = useCallback((wallPolygons, wallGroup) => {
     console.log('\n🔧 MITER JOINTS: Processing', wallPolygons.length, 'wall polygons');
@@ -3574,7 +3601,6 @@ const CAD2DViewport = ({
   }, []);
 
   // Note: Removed createInteriorBoundary function - now using simpler individual polygon approach for closed rooms
-
   // Use polygon boolean operations to create unified wall geometry - PROFESSIONAL CAD (WITH DEBUGGING)
   const unifyWallPolygons = useCallback((miteredPolygons) => {
     if (miteredPolygons.length === 0) {
@@ -4029,7 +4055,6 @@ const CAD2DViewport = ({
       );
     }).filter(Boolean);
   }, [selectedObjects, hoveredWalls, onObjectClick, renderMaterialPattern, to2D, zoom]);
-
   // Smart Wall Grouping: Separate distinct architectural structures
   const createSmartWallGroups = useCallback((walls) => {
     try {
@@ -4149,7 +4174,6 @@ const CAD2DViewport = ({
     
     return wallJoineryGroups;
   }, [createSmartWallGroups, createProfessionalWallJoinery]);
-
   // Render architectural wall with proper styling
   const renderArchitecturalWall = useCallback((object, pos2d, props, isSelected, transform) => {
     const material = object.params?.material || object.material || 'concrete';
@@ -4379,8 +4403,9 @@ const CAD2DViewport = ({
     
     // Enhanced material pattern based on slab type
     const getMaterialPattern = () => {
-      const material = object.material || 'concrete';
+      const material = (object.material || object.params?.material || 'concrete');
       const patternId = `${material}-${object.id}`;
+      console.log('🎨 SLAB PATTERN CHECK', { id: object.id, material, patternId });
       
       switch (material) {
         case 'concrete':
@@ -4398,15 +4423,25 @@ const CAD2DViewport = ({
               <rect x="8" y="8" width="8" height="8" fill="#e5e7eb" opacity="0.3"/>
             </pattern>
           );
-        case 'wood':
+        case 'wood': {
+          // Use real wood parquet JPEG as a tiled SVG pattern
+          const textureUrl = '/textures/slab/Wood%20flooring.jpeg';
+          console.log('🎨 SLAB WOOD TEXTURE URL', textureUrl);
           return (
-            <pattern id={patternId} patternUnits="userSpaceOnUse" width="12" height="12">
-              <rect width="12" height="12" fill="#d97706" opacity="0.2"/>
-              <line x1="0" y1="6" x2="12" y2="6" stroke="#92400e" strokeWidth="1" opacity="0.3"/>
-              <line x1="0" y1="3" x2="12" y2="3" stroke="#92400e" strokeWidth="0.5" opacity="0.2"/>
-              <line x1="0" y1="9" x2="12" y2="9" stroke="#92400e" strokeWidth="0.5" opacity="0.2"/>
+            <pattern id={patternId} patternUnits="userSpaceOnUse" width="64" height="64">
+              <image
+                href={textureUrl}
+                xlinkHref={textureUrl}
+                x="0"
+                y="0"
+                width="64"
+                height="64"
+                preserveAspectRatio="xMidYMid slice"
+                onError={(e) => console.warn('⚠️ Wood texture image failed to load in SVG', textureUrl, e)}
+              />
             </pattern>
           );
+        }
         case 'marble':
           return (
             <pattern id={patternId} patternUnits="userSpaceOnUse" width="20" height="20">
@@ -4464,7 +4499,10 @@ const CAD2DViewport = ({
       }
     };
     
+    const resolvedMaterial = (object.material || object.params?.material || 'concrete');
     const materialPattern = getMaterialPattern();
+    const patternRef = `${resolvedMaterial}-${object.id}`;
+    console.log('🎨 SLAB FILL REF', { id: object.id, resolvedMaterial, patternRef });
     
     return (
       <g key={object.id} transform={transform}>
@@ -4481,7 +4519,7 @@ const CAD2DViewport = ({
           y={pos2d.y - height/2}
           width={width}
           height={height}
-          fill={materialPattern ? `url(#${object.material || 'concrete'}-${object.id})` : props.color}
+          fill={materialPattern ? `url(#${patternRef})` : props.color}
           fillOpacity={0.7}
           stroke={strokeColor}
           strokeWidth={strokeWidth}
@@ -4694,7 +4732,6 @@ const CAD2DViewport = ({
       </g>
     );
   }, [viewportTheme, onObjectClick]);
-
   // Render object as 2D shape
   const renderObject2D = useCallback((object) => {
     // SIMPLE DEBUG: Log every object being processed
@@ -4930,7 +4967,7 @@ const CAD2DViewport = ({
       return renderStair2D(object, pos2d, props, isSelected);
     }
     
-    if (object.type === 'slab') {
+    if (object.type === 'slab' || object.type === 'Slab') {
       console.log(`🏗️ SLAB RENDER DEBUG: Found slab object ${object.id}, calling renderSlab2D`);
       console.log(`🏗️ SLAB RENDER DEBUG: Slab props:`, props);
       console.log(`🏗️ SLAB RENDER DEBUG: Slab pos2d:`, pos2d);
@@ -5315,8 +5352,7 @@ const CAD2DViewport = ({
 
   /**
  * Render individual Three.js mesh geometry as SVG elements
- */
-const renderMesh2DGeometry = useCallback((object, mesh, pos2d, rotation, index) => {
+ */const renderMesh2DGeometry = useCallback((object, mesh, pos2d, rotation, index) => {
   const geometry = mesh.geometry;
   const material = mesh.material;
 
@@ -5689,7 +5725,6 @@ const renderCADEngineMesh2D = useCallback((object) => {
       </g>
     );
   }, [architect3DService, to2D, theme, architect3DPreviewData, zoom, previewTick]);
-
   return (
     <div 
       className={`cad-2d-viewport relative w-full h-full ${className}`}
@@ -5738,7 +5773,7 @@ const renderCADEngineMesh2D = useCallback((object) => {
         <rect width="100%" height="100%" fill="url(#grid)" />
         
         
-        {/* CAD Objects */}
+        {/* CAD Objects (walls below) */}
         {(() => {
           try {
           // Concise log; toggle with window.A3D_DEBUG
@@ -5838,11 +5873,6 @@ const renderCADEngineMesh2D = useCallback((object) => {
         {/* Wall edge highlights for door/window placement */}
         {renderWallEdgeHighlights()}
         
-        {/* Wall placement preview for doors/windows - DISABLED, using door-specific preview instead */}
-        {/* {renderWallPlacementPreview()} */}
-        
-        {/* Connection indicators are now handled in the continuous preview */}
-        
         {/* Draft preview */}
         {renderDraftPreview()}
         
@@ -5852,8 +5882,44 @@ const renderCADEngineMesh2D = useCallback((object) => {
         {/* 🏗️ ARCHITECT3D: Render wall preview */}
         {renderArchitect3DPreview()}
         
-        {/* Professional door placement preview */}
+        {/* Overlays (previews and editors) above objects */}
         {renderDoorPlacementPreview()}
+        {/* Window cursor preview */}
+        {selectedTool === 'window' && (() => {
+          const pos = cursorPosition ? to2D({ x: cursorPosition.x, y: 0, z: cursorPosition.y }) : { x: 400, y: 300 };
+          const widthPx = Math.max(20, windowWidthM * 100 * zoom);
+          const heightPx = Math.max(8, 8 * zoom);
+          const angleDeg = hoveredWallEdge ? (hoveredWallEdge.edge?.angle || 0) * 180 / Math.PI : 0;
+          const transform = `rotate(${angleDeg} ${pos.x} ${pos.y})`;
+          return (
+            <g className="window-cursor" transform={transform}>
+              <rect x={pos.x - widthPx/2} y={pos.y - heightPx/2} width={widthPx} height={heightPx} fill="#ffffff" stroke="#111827" strokeWidth={1.5} opacity={0.9} />
+              <line x1={pos.x - widthPx/2} y1={pos.y} x2={pos.x + widthPx/2} y2={pos.y} stroke="#111827" strokeWidth={1} opacity={0.9} />
+            </g>
+          );
+        })()}
+        {/* Window width editor */}
+        {selectedTool === 'window' && (() => {
+          const pos = cursorPosition ? to2D({ x: cursorPosition.x, y: 0, z: cursorPosition.y }) : { x: 400, y: 300 };
+          // Position the editor a bit below the cursor so it doesn't steal pointer move events
+          return (
+            <foreignObject x={pos.x + 16} y={pos.y + 42} width={140} height={50}>
+              <div xmlns="http://www.w3.org/1999/xhtml" style={{ pointerEvents: 'auto' }}>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.2"
+                  max="8"
+                  value={windowWidthM}
+                  onChange={(e) => setWindowWidthM(parseFloat(e.target.value) || 0.2)}
+                  className="px-2 py-0.5 text-xs rounded bg-white/90 text-gray-900 border border-gray-400"
+                  style={{ width: 90 }}
+                />
+                <span className="ml-1 text-xs" style={{ color: '#94a3b8' }}>m</span>
+              </div>
+            </foreignObject>
+          );
+        })()}
         
         {/* 2D CAD Block Ghost Preview */}
         {pendingCADBlock && cadBlockGhostContent && (

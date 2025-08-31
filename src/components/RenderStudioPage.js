@@ -593,7 +593,8 @@ const RenderStudioPage = ({ onBack }) => {
                 <XMarkIcon className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-6 space-y-5">
+            <RenderSaleBanner />
+            <div className="p-6 space-y-5 pt-4">
               {/* Tabs */}
               <div className="inline-flex bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden">
                 <button onClick={() => setTopUpTab('custom')} className={`px-4 py-2 text-sm ${topUpTab==='custom' ? 'bg-studiosix-600 text-white' : 'text-slate-300 hover:text-white'}`}>Custom</button>
@@ -645,16 +646,21 @@ const RenderStudioPage = ({ onBack }) => {
               {/* Packages Tab Content */}
               {topUpTab === 'packages' && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[5,10,20,50].map(v => (
+                  {[5,10,20,50].map(v => {
+                    const crossed = Math.round(v * 1.6);
+                    return (
                     <button key={v} onClick={() => setTopUpAmount(v)} className={`relative text-left p-4 rounded-xl border ${topUpAmount===v ? 'border-studiosix-500 bg-studiosix-600/10' : 'border-slate-700 bg-slate-800/60 hover:border-studiosix-500'}`}>
                       {v===20 && (
                         <span className="absolute -top-2 right-2 text-[10px] px-2 py-0.5 rounded-full bg-amber-500 text-black font-semibold">Most popular</span>
                       )}
                       <div className="text-slate-300 text-xs">Package</div>
-                      <div className="text-white text-2xl font-bold mt-1">${v}</div>
+                      <div className="flex items-end gap-2 mt-1">
+                        <div className="text-white text-2xl font-bold">${v}</div>
+                        <div className="text-slate-400 text-base line-through opacity-70 mb-1">${crossed}</div>
+                      </div>
                       <div className="text-studiosix-300 text-sm">{amountToRenders(v)} renders</div>
                     </button>
-                  ))}
+                  )})}
                 </div>
               )}
               <div className="space-y-3">
@@ -763,5 +769,40 @@ const RenderUsageBadge = () => {
 };
 
 export default RenderStudioPage;
+
+// Sale banner with countdown to 7 Sep 2025
+const RenderSaleBanner = () => {
+  const [now, setNow] = React.useState(Date.now());
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const deadline = new Date('2025-09-07T23:59:59Z').getTime();
+  const remaining = Math.max(0, deadline - now);
+  const days = Math.floor(remaining / (1000*60*60*24));
+  const hours = Math.floor((remaining % (1000*60*60*24)) / (1000*60*60));
+  const minutes = Math.floor((remaining % (1000*60*60)) / (1000*60));
+  const seconds = Math.floor((remaining % (1000*60)) / 1000);
+  return (
+    <div className="relative h-28 w-full overflow-hidden">
+      {/* Show the banner image clearly, lightly scaled to show 'Launch Day' */}
+      <img
+        src="/Launchday%20Banner/Generated%20Image%20August%2031,%202025%20-%2011_29PM.jpeg"
+        alt="Launch Day"
+        className="absolute inset-0 w-[120%] h-full object-cover left-1/2 -translate-x-1/2"
+        style={{ imageRendering: 'auto', objectPosition: 'center 35%' }}
+      />
+      {/* Countdown placed on lower right (over white area) */}
+      <div className="absolute right-4 bottom-2">
+        <div className="flex items-baseline gap-2 select-none">
+          <span className="text-blue-900 font-extrabold text-base" style={{fontFamily:'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Poppins, sans-serif'}}>Ends in</span>
+          <span className="text-blue-900 font-black text-2xl tracking-tight" style={{fontFamily:'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Poppins, sans-serif'}}>
+            {String(days).padStart(2,'0')}d {String(hours).padStart(2,'0')}h {String(minutes).padStart(2,'0')}m {String(seconds).padStart(2,'0')}s
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 

@@ -16,7 +16,7 @@ class EventManager {
     this.eventHistory = new Map(); // runId -> events[]
     this.maxHistorySize = 100;
     
-    console.log('📡 EventManager: Initialized for real-time agent communication');
+    // console.info('EventManager: initialized');
   }
 
   /**
@@ -50,7 +50,7 @@ class EventManager {
 
     this.progress(runId, startEvent);
     
-    console.log(`📡 EventManager: Started run ${runId} for user ${userId}`);
+    // console.info('EventManager: run started', runId);
     return runId;
   }
 
@@ -80,10 +80,7 @@ class EventManager {
     this.broadcast(runId, event);
 
     // Log important events
-    if (['start', 'plan', 'critic', 'replan', 'done', 'error'].includes(event.type)) {
-      console.log(`📡 EventManager: ${runId.slice(0, 8)} - ${event.type}`, 
-                  this.scrub(event.summary || event.reason || event.status));
-    }
+    // quiet per-event logging by default
   }
 
   /**
@@ -109,34 +106,41 @@ class EventManager {
     // Clean up approvals
     this.approvals.delete(runId);
     
-    console.log(`📡 EventManager: Run ${runId.slice(0, 8)} completed: ${payload.status}`);
+    // console.info('EventManager: run completed', runId, payload.status);
   }
 
   /**
    * Attach a listener (WebSocket or callback)
    */
   attach(runId, listener) {
+    // Ensure a listener set exists for this runId (SSE-only flows won't call startRun)
+    if (!this.listeners.has(runId)) {
+      this.listeners.set(runId, new Set());
+    }
     const listenersSet = this.listeners.get(runId);
-    if (listenersSet) {
-      listenersSet.add(listener);
-      
-      // Send history to new listener if it's a WebSocket
-      if (listener.send && this.eventHistory.has(runId)) {
-        const history = this.eventHistory.get(runId);
-        try {
-          listener.send(JSON.stringify({
-            type: 'history',
-            runId,
-            events: history,
-            ts: Date.now()
-          }));
-        } catch (error) {
-          console.warn('📡 EventManager: Failed to send history:', error);
-        }
+    listenersSet.add(listener);
+
+    // Initialize history container if missing
+    if (!this.eventHistory.has(runId)) {
+      this.eventHistory.set(runId, []);
+    }
+
+    // Send history to new listener if it's a WebSocket
+    if (listener.send && this.eventHistory.has(runId)) {
+      const history = this.eventHistory.get(runId);
+      try {
+        listener.send(JSON.stringify({
+          type: 'history',
+          runId,
+          events: history,
+          ts: Date.now()
+        }));
+      } catch (error) {
+        // console.warn('EventManager: failed to send history', error);
       }
     }
-    
-    console.log(`📡 EventManager: Attached listener to run ${runId.slice(0, 8)}`);
+
+    // console.debug('EventManager: listener attached', runId);
   }
 
   /**
@@ -171,7 +175,7 @@ class EventManager {
           listener(message);
         }
       } catch (error) {
-        console.warn('📡 EventManager: Failed to send to listener:', error);
+        // console.warn('EventManager: failed to send to listener', error);
         failedConnections.push(listener);
       }
     });
@@ -432,9 +436,6 @@ class EventManager {
 const eventManager = new EventManager();
 
 // Make available for debugging
-if (typeof window !== 'undefined') {
-  window.eventManager = eventManager;
-  console.log('📡 EventManager available at window.eventManager');
-}
+if (typeof window !== 'undefined') { window.eventManager = eventManager; }
 
 export default eventManager;

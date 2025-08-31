@@ -22,8 +22,9 @@ class AIService {
     this.proxyUrl = process.env.REACT_APP_AI_PROXY_URL || getApiBase();
     this.aiChatEndpoint = `${this.proxyUrl}/api/ai-chat`;
     this.testConnectionsEndpoint = `${this.proxyUrl}/api/ai-chat/test-connections`;
-    this.agentRunEndpoint = `${this.proxyUrl}/api/agent/run`;
-    this.agentEventsEndpoint = `${this.proxyUrl}/api/agent/events`;
+    // Route through token-aware aliases to avoid 403 issues
+    this.agentRunEndpoint = `${this.proxyUrl}/api/tw/run`;
+    this.agentEventsEndpoint = `${this.proxyUrl}/api/tw/events`;
     this.agentToolResultEndpoint = `${this.proxyUrl}/api/agent/tool-result`; // Added new endpoint
     
     // Listen for settings changes to update behavior
@@ -152,20 +153,26 @@ You focus on consultation and guidance rather than direct tool manipulation.`
   attachTaskWeaver(runId) {
     try {
       const url = `${this.agentEventsEndpoint}?runId=${encodeURIComponent(runId)}`;
-      console.log('[TW] EventSource opening', url);
+      console.info('[TW] stream opening');
       const evt = new EventSource(url);
       evt.onopen = () => {
-        console.log('[TW] EventSource open', { runId });
+        console.info('[TW] stream open');
       };
       evt.onmessage = (ev) => {
-        try { const data = JSON.parse(ev.data); console.log('[TW] evt:message', data?.type || 'message'); eventManager.progress(runId, data); } catch { /* heartbeat or ping */ }
+        try {
+          const data = JSON.parse(ev.data);
+          // console.debug('[TW] evt:message', data?.type || 'message');
+          eventManager.progress(runId, data);
+        } catch {
+          /* heartbeat or ping */
+        }
       };
       evt.addEventListener('plan', (ev) => {
-        try { const data = JSON.parse(ev.data); console.log('[TW] evt:plan'); eventManager.progress(runId, data); } catch {}
+        try { const data = JSON.parse(ev.data); eventManager.progress(runId, data); } catch {}
       });
       evt.addEventListener('act', async (ev) => {
         let payload = null;
-        try { payload = JSON.parse(ev.data); console.log('[TW] evt:act', payload?.status, payload?.tool); } catch { payload = null; }
+        try { payload = JSON.parse(ev.data); } catch { payload = null; }
         if (payload && payload.status === 'start' && payload.tool) {
           // Execute locally via our executor, then report result back
           try {
@@ -189,17 +196,23 @@ You focus on consultation and guidance rather than direct tool manipulation.`
         try { eventManager.progress(runId, payload || {}); } catch {}
       });
       evt.addEventListener('critic', (ev) => {
-        try { const data = JSON.parse(ev.data); console.log('[TW] evt:critic'); eventManager.progress(runId, data); } catch {}
+        try { const data = JSON.parse(ev.data); eventManager.progress(runId, data); } catch {}
       });
       evt.addEventListener('replan', (ev) => {
-        try { const data = JSON.parse(ev.data); console.log('[TW] evt:replan'); eventManager.progress(runId, data); } catch {}
+        try { const data = JSON.parse(ev.data); eventManager.progress(runId, data); } catch {}
+      });
+      evt.addEventListener('assistant', (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          eventManager.progress(runId, { type: 'assistant', content: data.content });
+        } catch {}
       });
       evt.addEventListener('done', (ev) => {
-        try { const data = JSON.parse(ev.data); console.log('[TW] evt:done'); eventManager.done(runId, data); } catch {}
+        try { const data = JSON.parse(ev.data); eventManager.done(runId, data); } catch {}
         evt.close();
       });
-      evt.onerror = (err) => {
-        console.warn('[TW] EventSource error', err);
+      evt.onerror = () => {
+        console.warn('[TW] stream error');
         try { eventManager.progress(runId, { type: 'error', title: 'Agent stream error' }); } catch {}
         evt.close();
       };
@@ -402,7 +415,8 @@ You focus on consultation and guidance rather than direct tool manipulation.`
       
       // Record precise token usage for billing
       const inputTokens = data.usage?.prompt_tokens || this.estimateTokens(message + systemPrompt);
-      const outputTokens = data.usage?.completion_tokens || this.estimateTokens(data.message);
+      const llmText = data.message || data.response || '';
+      const outputTokens = data.usage?.completion_tokens || this.estimateTokens(llmText);
       
       const cost = tokenUsageService.recordAIUsage(effectiveModel, inputTokens, outputTokens, {
         mode: effectiveMode,
@@ -421,7 +435,7 @@ You focus on consultation and guidance rather than direct tool manipulation.`
       });
       
       return {
-        message: data.message,
+        message: llmText,
         model: data.model,
         provider: data.provider,
         usage: {

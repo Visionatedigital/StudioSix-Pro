@@ -189,11 +189,42 @@ const NativeAIChat = ({
         }, selectedModel);
 
         // Attach to TaskWeaver event stream via EventManager and reflect in chat
+        // Removed hardcoded acknowledgement to keep LLM-first assistant reply as the first visible message
+        const processed = new Set();
+        let sawAssistantOrPlan = false; // guard to end thinking if backend is quiet
+        const timeoutId = setTimeout(() => {
+          if (!sawAssistantOrPlan) {
+            console.warn('[Chat] No assistant/plan within 3s, showing gentle nudge');
+            setMessages(prev => [...prev, {
+              id: `tw_timeout_${Date.now()}`,
+              type: 'ai',
+              message: '⏳ Still preparing a plan…',
+              timestamp: new Date().toISOString(),
+              subtle: true,
+              success: true
+            }]);
+            setIsProcessing(false);
+          }
+        }, 3000);
         const listener = (ev) => {
           try {
             if (!ev || !ev.type) return;
+            if (ev.id && processed.has(ev.id)) return; // de-dupe by event id if present
+            if (ev.id) processed.add(ev.id);
+            // Visible debug for user while testing
+            try { console.log('[Chat EVT]', ev.type, ev); } catch {}
             if (ev.type === 'plan') {
+              sawAssistantOrPlan = true;
+              clearTimeout(timeoutId);
+              setIsProcessing(false);
+              // Show a visible plan summary plus a subtle log
               setMessages(prev => [...prev, {
+                id: `planv_${Date.now()}`,
+                type: 'ai',
+                message: ev.summary ? `📋 Plan: ${ev.summary}` : '📋 Plan created.',
+                timestamp: new Date().toISOString(),
+                success: true
+              },{
                 id: `plan_${Date.now()}`,
                 type: 'ai',
                 message: `📋 Plan: ${ev.summary || 'Plan created.'}`,
@@ -201,28 +232,69 @@ const NativeAIChat = ({
                 success: true,
                 subtle: true
               }]);
-            } else if (ev.type === 'act' && ev.status === 'start') {
+            } else if (ev.type === 'assistant' && ev.content) {
+              sawAssistantOrPlan = true;
+              clearTimeout(timeoutId);
+              setIsProcessing(false);
+              // Natural-language assistant message
               setMessages(prev => [...prev, {
-                id: `act_${Date.now()}`,
+                id: `assist_${Date.now()}`,
                 type: 'ai',
-                message: `⚡ Executing ${ev.tool}`,
+                message: ev.content,
                 timestamp: new Date().toISOString(),
-                success: true,
-                subtle: true
+                success: true
               }]);
+            } else if (ev.type === 'act' && ev.status === 'start') {
+              const now = Date.now();
+              // Visible execution UI card
+              setMessages(prev => [...prev,
+                {
+                  id: `exec_${now}`,
+                  type: 'execution',
+                  step: {
+                    id: `step_${now}`,
+                    title: ev.tool || 'Executing',
+                    description: ev.args ? JSON.stringify(ev.args) : 'Running tool...',
+                    status: 'executing'
+                  }
+                },
+                {
+                  id: `act_${now}`,
+                  type: 'ai',
+                  message: `⚡ Executing ${ev.tool}`,
+                  timestamp: new Date().toISOString(),
+                  success: true,
+                  subtle: true
+                }
+              ]);
             } else if (ev.type === 'act' && ev.status === 'result') {
               const ok = ev.result?.ok !== false;
-              setMessages(prev => [...prev, {
-                id: `act_res_${Date.now()}`,
-                type: 'ai',
-                message: ok ? `✅ ${ev.tool} completed` : `❌ ${ev.tool} failed` ,
-                timestamp: new Date().toISOString(),
-                success: ok,
-                subtle: true
-              }]);
+              const now = Date.now();
+              setMessages(prev => [...prev,
+                {
+                  id: `exec_res_${now}`,
+                  type: 'execution',
+                  step: {
+                    id: `step_${now}`,
+                    title: ev.tool || 'Tool',
+                    description: ok ? 'Completed successfully' : (ev.result?.error?.title || 'Failed'),
+                    status: ok ? 'completed' : 'failed',
+                    result: ev.result
+                  }
+                },
+                {
+                  id: `act_res_${now}`,
+                  type: 'ai',
+                  message: ok ? `✅ ${ev.tool} completed` : `❌ ${ev.tool} failed` ,
+                  timestamp: new Date().toISOString(),
+                  success: ok,
+                  subtle: true
+                }
+              ]);
             } else if (ev.type === 'done') {
+              const now = Date.now();
               setMessages(prev => [...prev, {
-                id: `done_${Date.now()}`,
+                id: `done_${now}`,
                 type: 'ai',
                 message: ev.status === 'success' ? '✅ Done' : `❌ ${ev.status}`,
                 timestamp: new Date().toISOString(),
@@ -240,7 +312,7 @@ const NativeAIChat = ({
         eventManager.attach(runId, listener);
         runListenersRef.current.set(runId, listener);
 
-        setIsProcessing(false);
+        setIsProcessing(true); // keep spinner until first assistant/plan or timeout
         return;
       } catch (e) {
         // No fallback: surface TaskWeaver error only
