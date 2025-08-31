@@ -1,3 +1,5 @@
+import { getApiBase } from '../config/apiBase';
+
 /**
  * Simple Supabase Models Service - Direct bucket access
  * 
@@ -8,7 +10,6 @@
 const SUPABASE_URL = 'https://zwrooqvwxdwvnuhpepta.supabase.co';
 const BUCKET_NAME = 'models_fbx';
 const BASE_URL = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}`;
-import { getApiBase } from '../config/apiBase';
 const PROXY_URL = `${getApiBase()}/api`; // Backend proxy
 
 class SimpleSupabaseService {
