@@ -1104,6 +1104,15 @@ const PAYPAL_SECRET = process.env.PAYPAL_SECRET;
 const PAYPAL_WEBHOOK_ID = process.env.PAYPAL_WEBHOOK_ID || '';
 const PAYPAL_API_BASE = PAYPAL_MODE === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
 
+// Expose client ID to frontend (read-only)
+app.get('/api/payments/paypal/client-id', (req, res) => {
+  try {
+    res.json({ ok: true, clientId: PAYPAL_CLIENT_ID || '' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
 async function paypalAccessToken() {
   if (!PAYPAL_CLIENT_ID || !PAYPAL_SECRET) throw new Error('PayPal credentials missing');
   const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString('base64');

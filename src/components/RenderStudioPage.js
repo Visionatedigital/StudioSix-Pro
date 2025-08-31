@@ -200,7 +200,13 @@ const RenderStudioPage = ({ onBack }) => {
           email = profile?.email || email;
         } catch {}
         const clientId = process.env.REACT_APP_PAYPAL_CLIENT_ID || '';
-        await PayPalService.loadSdk(clientId);
+        try {
+          await PayPalService.loadSdk(clientId);
+        } catch (e) {
+          console.error('[PayPal] SDK load error', e);
+          alert('PayPal is temporarily unavailable. Please try again shortly.');
+          return;
+        }
         const orderId = await PayPalService.createOrder(topUpAmount, amountToRenders(topUpAmount), subscriptionService.currentUserId || '', email);
         // Use PayPal popup flow if available
         if (window.paypal && window.paypal.Buttons) {

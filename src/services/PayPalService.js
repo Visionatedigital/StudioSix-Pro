@@ -2,12 +2,19 @@ const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 
 const PayPalService = {
   async loadSdk(clientId) {
+    if (!clientId) {
+      try {
+        const r = await fetch(`${API_BASE}/api/payments/paypal/client-id`);
+        const j = await r.json();
+        if (j.ok && j.clientId) clientId = j.clientId;
+      } catch {}
+    }
     if (window.paypal) return;
     await new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&components=buttons,hosted-fields&intent=capture&currency=USD&enable-funding=card`;
       s.onload = resolve;
-      s.onerror = reject;
+      s.onerror = (e) => reject(new Error('PayPal SDK failed to load'));
       document.head.appendChild(s);
     });
   },
