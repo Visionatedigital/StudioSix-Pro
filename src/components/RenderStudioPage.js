@@ -792,16 +792,18 @@ const RenderSaleBanner = () => {
         className="absolute inset-0 w-[120%] h-full object-cover left-1/2 -translate-x-1/2"
         style={{ imageRendering: 'auto', objectPosition: 'center 35%' }}
       />
-      {/* 50% OFF sticker above the countdown */}
-      <img
-        src="/Launchday%20Banner/—Pngtree—yellow%20discount%2050%20off%20vector_21005101.png"
-        alt="50% OFF"
-        className="absolute right-4 bottom-16 h-10 w-auto drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
-        style={{ imageRendering: 'auto' }}
-      />
+      {/* Independent sticker above countdown (fixed width to avoid jitter) */}
+      <div className="absolute right-4 bottom-16 w-[360px] flex justify-center pointer-events-none">
+        <img
+          src="/Launchday%20Banner/—Pngtree—up%20to%2050%20off%20png_6660909.png"
+          alt="50% OFF"
+          className="h-20 w-auto drop-shadow-[0_6px_10px_rgba(0,0,0,0.45)]"
+          style={{ imageRendering: 'auto' }}
+        />
+      </div>
       {/* Countdown placed on lower right (over white area) */}
-      <div className="absolute right-4 bottom-2">
-        <div className="flex items-baseline gap-2 select-none">
+      <div className="absolute right-4 bottom-2 w-[360px]">
+        <div className="flex items-baseline gap-2 select-none justify-center">
           <span className="text-blue-900 font-extrabold text-base" style={{fontFamily:'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Poppins, sans-serif'}}>Ends in</span>
           <span className="text-blue-900 font-black text-2xl tracking-tight" style={{fontFamily:'ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter, Poppins, sans-serif'}}>
             {String(days).padStart(2,'0')}d {String(hours).padStart(2,'0')}h {String(minutes).padStart(2,'0')}m {String(seconds).padStart(2,'0')}s
