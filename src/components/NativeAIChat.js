@@ -177,7 +177,7 @@ const NativeAIChat = ({
     lastUserMessageRef.current = message;
 
     // NEW: Route Agent vs Ask modes using local UI state
-    const isAgentMode = true; // Force TaskWeaver backend regardless of UI toggle; UI retained for consistency
+    const isAgentMode = true; // Force TaskWeaver backend exclusively
 
     if (isAgentMode) {
       try {
@@ -198,7 +198,8 @@ const NativeAIChat = ({
                 type: 'ai',
                 message: `📋 Plan: ${ev.summary || 'Plan created.'}`,
                 timestamp: new Date().toISOString(),
-                success: true
+                success: true,
+                subtle: true
               }]);
             } else if (ev.type === 'act' && ev.status === 'start') {
               setMessages(prev => [...prev, {
@@ -206,7 +207,8 @@ const NativeAIChat = ({
                 type: 'ai',
                 message: `⚡ Executing ${ev.tool}`,
                 timestamp: new Date().toISOString(),
-                success: true
+                success: true,
+                subtle: true
               }]);
             } else if (ev.type === 'act' && ev.status === 'result') {
               const ok = ev.result?.ok !== false;
@@ -215,7 +217,8 @@ const NativeAIChat = ({
                 type: 'ai',
                 message: ok ? `✅ ${ev.tool} completed` : `❌ ${ev.tool} failed` ,
                 timestamp: new Date().toISOString(),
-                success: ok
+                success: ok,
+                subtle: true
               }]);
             } else if (ev.type === 'done') {
               setMessages(prev => [...prev, {
@@ -240,10 +243,16 @@ const NativeAIChat = ({
         setIsProcessing(false);
         return;
       } catch (e) {
-        // Fallback to sequential execution if agent backend unavailable
-        console.warn('Agent backend unavailable, falling back to sequential:', e.message);
+        // No fallback: surface TaskWeaver error only
         setIsProcessing(false);
-        return handleSequentialExecution(message);
+        setMessages(prev => [...prev, {
+          id: `tw_err_${Date.now()}`,
+          type: 'ai',
+          message: `❌ TaskWeaver error: ${e.message}`,
+          timestamp: new Date().toISOString(),
+          success: false
+        }]);
+        return;
       }
     }
 
@@ -663,10 +672,10 @@ const NativeAIChat = ({
         autonomousFallbackTriggeredRef.current = false;
         if (autonomousFallbackTimerRef.current) clearTimeout(autonomousFallbackTimerRef.current);
         autonomousFallbackTimerRef.current = setTimeout(() => {
+          // Disable autonomous fallback to sequential
           if (!autonomousSocket && !autonomousFallbackTriggeredRef.current) {
             autonomousFallbackTriggeredRef.current = true;
-            console.info('ℹ️ Autonomous WS not available, falling back to sequential execution');
-            handleSequentialExecution(lastUserMessageRef.current);
+            console.info('ℹ️ Autonomous WS not available. No fallback while TaskWeaver-only mode is active.');
           }
         }, 2500);
       }
@@ -706,8 +715,7 @@ const NativeAIChat = ({
           const idleMs = Date.now() - autonomousLastEventRef.current;
           if (!autonomousFallbackTriggeredRef.current && idleMs > 3000) {
             autonomousFallbackTriggeredRef.current = true;
-            console.info('ℹ️ Autonomous WS idle, falling back to sequential');
-            handleSequentialExecution(lastUserMessageRef.current);
+            console.info('ℹ️ Autonomous WS idle. No fallback while TaskWeaver-only mode is active.');
           }
         }, 3500);
       };
@@ -725,10 +733,7 @@ const NativeAIChat = ({
       ws.onclose = () => {
         console.log('📡 Disconnected from autonomous agent WebSocket');
         setAutonomousSocket(null);
-        if (!autonomousFallbackTriggeredRef.current && activeAutonomousRun) {
-          autonomousFallbackTriggeredRef.current = true;
-          handleSequentialExecution(lastUserMessageRef.current);
-        }
+        // Do not fallback to sequential
       };
       
       ws.onerror = (error) => {
@@ -1021,6 +1026,7 @@ const NativeAIChat = ({
     const isExecution = message.type === 'execution';
     const isAnimated = message.type === 'ai_animated';
     const isCompletion = message.type === 'ai_completion';
+    const isSubtle = !!message.subtle;
     
     // For completion summary messages, render with CompletionSummary component
     if (isCompletion) {
@@ -1084,6 +1090,17 @@ const NativeAIChat = ({
       );
     }
     
+    // Subtle TaskWeaver plan/act logs
+    if (isSubtle) {
+      return (
+        <div key={message.id} className="flex justify-start mb-2">
+          <div className="max-w-[85%] px-3 py-2 rounded-lg border border-gray-700/40 bg-slate-900/30 text-gray-300 text-sm animate-[fadeIn_180ms_ease-out] opacity-80">
+            <span className="opacity-80">{message.message}</span>
+          </div>
+        </div>
+      );
+    }
+
     // Use the original InteractiveChatMessage component for AI and user messages
     return (
       <div key={message.id}>
