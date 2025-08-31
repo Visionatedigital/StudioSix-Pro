@@ -647,7 +647,7 @@ const RenderStudioPage = ({ onBack }) => {
               {topUpTab === 'packages' && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[5,10,20,50].map(v => {
-                    const crossed = Math.round(v * 1.6);
+                    const crossed = Math.round(v * 2); // show original price (50% off)
                     return (
                     <button key={v} onClick={() => setTopUpAmount(v)} className={`relative text-left p-4 rounded-xl border ${topUpAmount===v ? 'border-studiosix-500 bg-studiosix-600/10' : 'border-slate-700 bg-slate-800/60 hover:border-studiosix-500'}`}>
                       {v===20 && (
@@ -656,7 +656,7 @@ const RenderStudioPage = ({ onBack }) => {
                       <div className="text-slate-300 text-xs">Package</div>
                       <div className="flex items-end gap-2 mt-1">
                         <div className="text-white text-2xl font-bold">${v}</div>
-                        <div className="text-slate-400 text-base line-through opacity-70 mb-1">${crossed}</div>
+                        <div className="text-slate-400 text-lg line-through opacity-80 mb-1">${crossed}</div>
                       </div>
                       <div className="text-studiosix-300 text-sm">{amountToRenders(v)} renders</div>
                     </button>
@@ -791,6 +791,13 @@ const RenderSaleBanner = () => {
         alt="Launch Day"
         className="absolute inset-0 w-[120%] h-full object-cover left-1/2 -translate-x-1/2"
         style={{ imageRendering: 'auto', objectPosition: 'center 35%' }}
+      />
+      {/* 50% OFF sticker above the countdown */}
+      <img
+        src="/Launchday%20Banner/—Pngtree—yellow%20discount%2050%20off%20vector_21005101.png"
+        alt="50% OFF"
+        className="absolute right-4 bottom-16 h-10 w-auto drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
+        style={{ imageRendering: 'auto' }}
       />
       {/* Countdown placed on lower right (over white area) */}
       <div className="absolute right-4 bottom-2">
