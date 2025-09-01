@@ -102,10 +102,10 @@ module.exports = {
 
       return middlewares;
     },
-    // Removed all security headers to allow Supabase images to load
-    // headers: {
-    //   'Cross-Origin-Embedder-Policy': 'require-corp',
-    //   'Cross-Origin-Opener-Policy': 'same-origin',
-    // },
+    // Relax COOP and CORP so third-party SDKs (PayPal) can load; omit COEP header entirely
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+      'Cross-Origin-Resource-Policy': 'cross-origin'
+    },
   },
 }; 

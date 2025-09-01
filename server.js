@@ -27,17 +27,46 @@ console.log('Build directory found successfully');
 
 // Security middleware
 app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https:", "wss:"],
+      scriptSrc: [
+        "'self'",
+        "'unsafe-inline'",
+        "'unsafe-eval'",
+        "https://www.paypal.com",
+        "https://*.paypal.com",
+        "https://www.paypalobjects.com",
+        "https://*.paypalobjects.com"
+      ],
+      imgSrc: [
+        "'self'",
+        "data:",
+        "https:",
+        "https://www.paypalobjects.com",
+        "https://*.paypalobjects.com"
+      ],
+      connectSrc: [
+        "'self'",
+        "https:",
+        "wss:",
+        "https://www.paypal.com",
+        "https://*.paypal.com",
+        "https://www.paypalobjects.com",
+        "https://*.paypalobjects.com"
+      ],
       fontSrc: ["'self'", "data:"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
-      frameSrc: ["'none'"],
+      frameSrc: [
+        "'self'",
+        "https://www.paypal.com",
+        "https://*.paypal.com"
+      ],
       workerSrc: ["'self'", "blob:"],
       childSrc: ["'self'", "blob:"]
     }

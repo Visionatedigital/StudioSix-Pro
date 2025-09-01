@@ -13,6 +13,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const helmet = require('helmet');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 // Initialize OpenAI client ONLY if API key is configured to avoid startup crash in production
 let openai = null;
@@ -42,6 +43,54 @@ app.use(cors({
     'https://studiosix.ai'
   ],
   credentials: true
+}));
+
+// Security headers: allow PayPal SDK/iframes and disable COEP to avoid blocking third-party scripts
+app.use(helmet({
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: [
+        "'self'",
+        "'unsafe-inline'",
+        "'unsafe-eval'",
+        "https://www.paypal.com",
+        "https://*.paypal.com",
+        "https://www.paypalobjects.com",
+        "https://*.paypalobjects.com"
+      ],
+      imgSrc: [
+        "'self'",
+        "data:",
+        "https:",
+        "https://www.paypalobjects.com",
+        "https://*.paypalobjects.com"
+      ],
+      connectSrc: [
+        "'self'",
+        "https:",
+        "wss:",
+        "https://www.paypal.com",
+        "https://*.paypal.com",
+        "https://www.paypalobjects.com",
+        "https://*.paypalobjects.com"
+      ],
+      fontSrc: ["'self'", "data:"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: [
+        "'self'",
+        "https://www.paypal.com",
+        "https://*.paypal.com"
+      ],
+      workerSrc: ["'self'", "blob:"],
+      childSrc: ["'self'", "blob:"]
+    }
+  }
 }));
 
 // Enable JSON parsing for API endpoints (large payloads for base64 images)
@@ -1349,10 +1398,12 @@ app.post('/api/mobilemoney/request', async (req, res) => {
     try {
       const userId = req.headers['x-user-id'] || null;
       const email = req.headers['x-user-email'] || null;
+      console.log('[MM] req headers', { reqHeaders: req });
       const tokens = ugxToTokens(amount);
       if (j.payment_id || (j.data && j.data.payment_id)) {
         const pid = j.payment_id || j.data.payment_id;
         mobileMoneyRequests.set(pid, { userId, email, tokens });
+        console.log('[MM] request-payment OK', { mobileMoneyRequests: mobileMoneyRequests });
       }
     } catch {}
     res.json({ ok: true, data: j });
@@ -1387,24 +1438,48 @@ app.get('/api/mobilemoney/status/:paymentId', async (req, res) => {
 // Callback (webhook) from Eirmond
 app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), async (req, res) => {
   try {
+    const debugSteps = [];
+    const debugData = {};
+    const debugFlag = (req.query && (req.query.debug === '1' || req.query.debug === 'true')) || req.headers['x-debug-mm'] === '1';
+    debugSteps.push('enter');
+    console.log('[MM DBG] enter', { contentType: req.headers['content-type'] });
+    debugData.headers = Object.assign({}, req.headers);
     let rawBody = req.body;
     if (rawBody == null) rawBody = '';
     // If previous middleware parsed JSON, ensure we still have a string for HMAC/debug
     if (typeof rawBody !== 'string') {
       try { rawBody = JSON.stringify(rawBody); } catch { rawBody = String(rawBody); }
     }
-    const theirSig = req.headers['x-content-signature'] || '';
+    debugSteps.push(`raw:${typeof rawBody}:${String(rawBody).length}`);
+    console.log('[MM DBG] raw length', String(rawBody).length);
+    debugData.rawBodyLength = String(rawBody).length;
+    debugData.rawBodySnippet = String(rawBody).slice(0, 500);
+    //process.exit(0);
+    const theirSig = (req.headers['x-content-signature'] || '').toString();
     let calc = '';
     if (EIRMOND_CALLBACK_SECRET) {
       try {
         calc = require('crypto').createHmac('sha256', EIRMOND_CALLBACK_SECRET).update(rawBody).digest('hex');
       } catch (e) {
         console.warn('[MM] HMAC compute failed', e);
+        debugSteps.push('hmac-fail');
+        res.set('X-Debug-MM', debugSteps.join('|'));
+        if (debugFlag) {
+          return res.status(400).json({ ok: false, error: 'HMAC validation failed', debug: debugSteps, details: debugData });
+        }
+        return res.status(400).end('HMAC validation failed');
       }
     }
+    const theirSigNorm = (theirSig || '').trim().toLowerCase();
+    const calcNorm = (calc || '').trim().toLowerCase();
+    if (EIRMOND_CALLBACK_SECRET) {
+      console.log('[MM DBG] sig prefixes', (theirSigNorm||'').slice(0,8), (calcNorm||'').slice(0,8));
+    }
+    debugData.signature = { theirSig, ourSig: calc, theirSigNorm, ourSigNorm: calcNorm, secretSet: !!EIRMOND_CALLBACK_SECRET };
     if (!EIRMOND_CALLBACK_SECRET) {
       console.warn('[MM] No CALLBACK secret set; skipping signature verification in test mode');
-    } else if (calc !== theirSig) {
+      debugSteps.push('no-secret');
+    } else if (calcNorm !== theirSigNorm) {
       // Extra diagnostics to catch common copy/paste mistakes (e.g., o vs 0)
       try {
         let alt = '';
@@ -1414,35 +1489,74 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
           alt = require('crypto').createHmac('sha256', altSecret).update(rawBody).digest('hex');
         }
         console.warn('[MM] MM callback invalid signature', {
-          theirSig: (theirSig||'').slice(0,16)+"…",
-          ourSig: (calc||'').slice(0,16)+"…",
+          theirSig: (theirSigNorm||'').slice(0,16)+"…",
+          ourSig: (calcNorm||'').slice(0,16)+"…",
           altSigIfOto0: alt ? alt.slice(0,16)+"…" : 'n/a'
         });
-      } catch {}
+        debugData.signature.altSigIfOto0 = alt;
+      } catch {
+        debugSteps.push('sig-err');
+        res.set('X-Debug-MM', debugSteps.join('|'));
+        if (debugFlag) {
+          return res.status(400).json({ ok: false, error: 'Invalid HMAC.', debug: debugSteps, details: debugData });
+        }
+        return res.status(400).end('Invalid HMAC.');
+      }
       // For test, still accept to avoid provider retry storm
+      debugSteps.push('sig-mismatch-accepted');
+    } else {
+      debugSteps.push('sig-ok');
     }
     let payload = {};
     try { payload = JSON.parse(rawBody || '{}'); }
     catch (e) {
       console.error('[MM] callback JSON parse error', e, 'body snippet:', String(rawBody).slice(0,200));
-      return res.status(200).end('OK');
+      debugSteps.push('json-err');
+      res.set('X-Debug-MM', debugSteps.join('|'));
+      if (debugFlag) {
+        return res.status(200).json({ ok: false, error: 'Invalid JSON provided.', debug: debugSteps, details: debugData });
+      }
+      return res.status(200).end('Invalid JSON provided.');
     }
     console.log('📲 MobileMoney callback:', { status: payload.status, payment_id: payload.payment_id, amount: payload.amount });
+    console.error('[MM DBG] test 2:');
     if (payload.payment_id && payload.status) {
+      debugSteps.push('store-status');
       mobileMoneyCallbackStatus.set(payload.payment_id, String(payload.status).toLowerCase());
     }
+    console.error('[MM DBG] test 3:');
     // On success, credit renders based on amount (UGX pricing: $5→5, $10→12, $20→30, $50→80, $100→160)
-    if (payload.status === 'successful') {
+    const stLower = String(payload.status || '').toLowerCase();
+    if (stLower === 'successful' || stLower === 'success') {
       try {
+        debugSteps.push('credit-try');
+        console.log('[MM DBG] credit-try', { mobileMoneyRequests: mobileMoneyRequests.get(payload.payment_id) });
         const map = mobileMoneyRequests.get(payload.payment_id) || {};
+        console.log('[MM DBG] map', { map });
+
+        console.log('[MM DBG] mm requests map', { mobileMoneyRequests: mobileMoneyRequests });
         const ugx = Number(payload.amount || 0);
         const tokens = map.tokens || ugxToTokens(ugx);
+        debugData.map = map;
+        debugData.tokens = tokens;
         if (map.userId) {
+          console.log('[MM DBG] credit by userId', { userId: map.userId, tokens });
+          let oldBal = null;
+          try { oldBal = await getCreditsByUserId(map.userId); } catch {}
           const newBal = await incrementRenderCreditsByUserId(map.userId, tokens);
           console.log(`✅ MobileMoney credited ${tokens} to user ${map.userId}. New balance: ${newBal}`);
+          debugSteps.push('credit-user-ok');
+          debugData.credit = { by: 'userId', userId: map.userId, tokens, oldBal, newBal };
         } else if (map.email) {
+          console.log('[MM DBG] credit by email', { email: map.email, tokens });
+          let oldBal = null;
+          try { const u = await getUserByEmail(map.email); oldBal = (u && u.render_credits) || 0; } catch {}
           const newBal = await incrementRenderCreditsByEmail(map.email, tokens);
           console.log(`✅ MobileMoney credited ${tokens} to ${map.email}. New balance: ${newBal}`);
+          debugSteps.push('credit-email-ok');
+          debugData.credit = { by: 'email', email: map.email, tokens, oldBal, newBal };
+        }else{
+          console.log('[MM DBG] userId and email not found. Map is empty', { map });
         }
       } catch (e) { console.error('MM credit error:', e); }
     }
@@ -1451,9 +1565,24 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
       try {
         await fetch(WEBHOOK_MIRROR_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Original-Signature': theirSig }, body: rawBody });
         console.log('[MM] mirrored callback to', WEBHOOK_MIRROR_URL);
+        debugSteps.push('mirror-ok');
+        debugData.mirrored = true;
       } catch {}
     }
     // Always 200 to acknowledge receipt (provider won't retry)
+    debugSteps.push('respond-200');
+    res.set('X-Debug-MM', debugSteps.join('|'));
+    if (debugFlag) {
+      return res.status(200).json({
+        ok: true,
+        debug: debugSteps,
+        details: debugData,
+        status: payload && payload.status,
+        payment_id: payload && payload.payment_id,
+        amount: payload && payload.amount
+      });
+    }
+    console.error('[MM DBG] end of callback:', debugSteps, debugData);
     res.status(200).end('OK');
   } catch (e) {
     console.error('MM callback error:', e);

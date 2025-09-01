@@ -116,6 +116,12 @@ const RenderStudioPage = ({ onBack }) => {
     if (isPaying) return; // prevent duplicate windows
     try {
       setIsPaying(true);
+      // Best-effort fetch of user email for server-side credit mapping
+      let emailForHeaders = '';
+      try {
+        const profile = await (subscriptionService.getDatabaseProfile ? subscriptionService.getDatabaseProfile() : Promise.resolve(null));
+        emailForHeaders = (profile && profile.email) ? profile.email : '';
+      } catch {}
       // Determine method
       if (paymentMethod === 'mtn') {
         // Accept local 0XXXXXXXXX (10 digits) and normalize to local format for test API
@@ -128,7 +134,11 @@ const RenderStudioPage = ({ onBack }) => {
         const amountUGX = ugxMap[topUpAmount] || 37000;
         const r = await fetch(`${API_BASE}/api/mobilemoney/request`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-User-Id': subscriptionService.currentUserId || '',
+            'X-User-Email': emailForHeaders || ''
+          },
           body: JSON.stringify({ contact: mtnNumber, amount: amountUGX, message: `StudioSix ${amountToRenders(topUpAmount)} renders` })
         });
         const j = await r.json();
@@ -156,7 +166,8 @@ const RenderStudioPage = ({ onBack }) => {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Id': subscriptionService.currentUserId || ''
+                        'X-User-Id': subscriptionService.currentUserId || '',
+                        'X-User-Email': emailForHeaders || ''
                       },
                       body: JSON.stringify({ paymentId: pid })
                     });
@@ -179,7 +190,8 @@ const RenderStudioPage = ({ onBack }) => {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Id': subscriptionService.currentUserId || ''
+                        'X-User-Id': subscriptionService.currentUserId || '',
+                        'X-User-Email': emailForHeaders || ''
                       },
                       body: JSON.stringify({ paymentId: pid })
                     });
@@ -203,16 +215,16 @@ const RenderStudioPage = ({ onBack }) => {
           email = profile?.email || email;
         } catch {}
         const clientId = process.env.REACT_APP_PAYPAL_CLIENT_ID || '';
+        let sdkLoaded = true;
         try {
           await PayPalService.loadSdk(clientId);
         } catch (e) {
-          console.error('[PayPal] SDK load error', e);
-          alert('PayPal is temporarily unavailable. Please try again shortly.');
-          return;
+          console.warn('[PayPal] SDK load error (will fallback to redirect)', e);
+          sdkLoaded = false;
         }
-        const orderId = await PayPalService.createOrder(topUpAmount, amountToRenders(topUpAmount), subscriptionService.currentUserId || '', email);
+        const order = await PayPalService.createOrder(topUpAmount, amountToRenders(topUpAmount), subscriptionService.currentUserId || '', email);
         // Use PayPal popup flow if available
-        if (window.paypal && window.paypal.Buttons) {
+        if (sdkLoaded && window.paypal && window.paypal.Buttons) {
           await new Promise((resolve, reject) => {
             // Clean any previous overlay/container
             try { const prev = document.getElementById('studiosix-payment-overlay'); if (prev) prev.remove(); } catch {}
@@ -261,9 +273,9 @@ const RenderStudioPage = ({ onBack }) => {
             const cleanup = () => { try { const el = document.getElementById('studiosix-payment-overlay'); if (el) el.remove(); } catch {} };
 
             const buttons = window.paypal.Buttons({
-              createOrder: () => orderId,
+              createOrder: () => order.id,
               onApprove: async () => {
-                try { await PayPalService.captureOrder(orderId); cleanup(); resolve(); } catch (e) { cleanup(); reject(e); }
+                try { await PayPalService.captureOrder(order.id); cleanup(); resolve(); } catch (e) { cleanup(); reject(e); }
               },
               onCancel: () => { cleanup(); reject(new Error('cancelled')); },
               onError: (err) => { cleanup(); reject(err); }
@@ -271,8 +283,13 @@ const RenderStudioPage = ({ onBack }) => {
             try { buttons.render('#paypal-buttons-container'); } catch (e) { cleanup(); reject(e); }
           });
         } else {
-          // Fallback: try immediate capture (server-created order with redirect links)
-          await PayPalService.captureOrder(orderId);
+          // Fallback: redirect to PayPal approval URL if Buttons SDK blocked
+          if (order && order.approveUrl) {
+            window.location.assign(order.approveUrl);
+            return; // wait for return/cancel redirect
+          }
+          // If no approve link, try immediate capture (rare)
+          await PayPalService.captureOrder(order.id);
         }
         // Success
         await subscriptionService.recordUsage('image_render', { amount: 0, description: `Top-up ${amountToRenders(topUpAmount)} renders purchased` });
