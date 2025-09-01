@@ -230,15 +230,16 @@ const RenderStudioPage = ({ onBack }) => {
             overlay.style.backdropFilter = 'blur(6px)';
             // Inner panel
             const panel = document.createElement('div');
-            panel.style.background = 'linear-gradient(180deg, rgba(30,41,59,.95), rgba(15,23,42,.95))';
-            panel.style.border = '1px solid rgba(148,163,184,.25)';
+            // Use white panel for better contrast with PayPal's dark form text
+            panel.style.background = '#ffffff';
+            panel.style.border = '1px solid rgba(15,23,42,.12)';
             panel.style.borderRadius = '16px';
             panel.style.boxShadow = '0 20px 60px rgba(0,0,0,.5)';
             panel.style.padding = '20px';
             panel.style.width = 'min(520px, 92vw)';
             // Title
             const title = document.createElement('div');
-            title.style.color = '#fff';
+            title.style.color = '#0f172a';
             title.style.fontWeight = '600';
             title.style.marginBottom = '10px';
             title.innerText = 'Debit or Credit Card — Secure Checkout';
@@ -251,7 +252,7 @@ const RenderStudioPage = ({ onBack }) => {
             const note = document.createElement('div');
             note.style.marginTop = '12px';
             note.style.fontSize = '12px';
-            note.style.color = 'rgba(226,232,240,.8)';
+            note.style.color = '#334155';
             note.innerText = 'Powered by PayPal. No PayPal account required.';
             panel.appendChild(note);
             overlay.appendChild(panel);
