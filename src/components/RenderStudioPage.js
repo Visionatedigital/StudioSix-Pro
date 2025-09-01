@@ -37,6 +37,7 @@ const RenderStudioPage = ({ onBack }) => {
   const [topUpTab, setTopUpTab] = useState('packages'); // 'custom' | 'packages'
   const [fx, setFx] = useState({ code: 'USD', rate: 1, symbol: '$', locale: (typeof navigator !== 'undefined' ? navigator.language : 'en-US') });
   const [paymentMethod, setPaymentMethod] = useState('card'); // 'card' | 'mtn'
+  const [isPaying, setIsPaying] = useState(false); // guard against double clicks & show overlay
   const [mtnNumber, setMtnNumber] = useState('');
   const [mmPolling, setMmPolling] = useState(false);
   const [mmStatus, setMmStatus] = useState('');
@@ -112,7 +113,9 @@ const RenderStudioPage = ({ onBack }) => {
   };
 
   const handleStartTopUp = async () => {
+    if (isPaying) return; // prevent duplicate windows
     try {
+      setIsPaying(true);
       // Determine method
       if (paymentMethod === 'mtn') {
         // Accept local 0XXXXXXXXX (10 digits) and normalize to local format for test API
@@ -211,18 +214,60 @@ const RenderStudioPage = ({ onBack }) => {
         // Use PayPal popup flow if available
         if (window.paypal && window.paypal.Buttons) {
           await new Promise((resolve, reject) => {
+            // Clean any previous overlay/container
+            try { const prev = document.getElementById('studiosix-payment-overlay'); if (prev) prev.remove(); } catch {}
+            try { const prevBtn = document.getElementById('paypal-buttons-container'); if (prevBtn) prevBtn.remove(); } catch {}
+            // Create full-screen overlay
+            const overlay = document.createElement('div');
+            overlay.id = 'studiosix-payment-overlay';
+            overlay.style.position = 'fixed';
+            overlay.style.inset = '0';
+            overlay.style.zIndex = '9999';
+            overlay.style.display = 'flex';
+            overlay.style.alignItems = 'center';
+            overlay.style.justifyContent = 'center';
+            overlay.style.background = 'rgba(2,6,23,0.75)'; // slate-950/75
+            overlay.style.backdropFilter = 'blur(6px)';
+            // Inner panel
+            const panel = document.createElement('div');
+            panel.style.background = 'linear-gradient(180deg, rgba(30,41,59,.95), rgba(15,23,42,.95))';
+            panel.style.border = '1px solid rgba(148,163,184,.25)';
+            panel.style.borderRadius = '16px';
+            panel.style.boxShadow = '0 20px 60px rgba(0,0,0,.5)';
+            panel.style.padding = '20px';
+            panel.style.width = 'min(520px, 92vw)';
+            // Title
+            const title = document.createElement('div');
+            title.style.color = '#fff';
+            title.style.fontWeight = '600';
+            title.style.marginBottom = '10px';
+            title.innerText = 'Debit or Credit Card — Secure Checkout';
+            panel.appendChild(title);
+            // Container for PayPal Buttons/Hosted Fields
             const container = document.createElement('div');
             container.id = 'paypal-buttons-container';
-            document.body.appendChild(container);
+            panel.appendChild(container);
+            // Helper text
+            const note = document.createElement('div');
+            note.style.marginTop = '12px';
+            note.style.fontSize = '12px';
+            note.style.color = 'rgba(226,232,240,.8)';
+            note.innerText = 'Powered by PayPal. No PayPal account required.';
+            panel.appendChild(note);
+            overlay.appendChild(panel);
+            document.body.appendChild(overlay);
+
+            const cleanup = () => { try { const el = document.getElementById('studiosix-payment-overlay'); if (el) el.remove(); } catch {} };
+
             const buttons = window.paypal.Buttons({
               createOrder: () => orderId,
-              onApprove: async (data, actions) => {
-                try { await PayPalService.captureOrder(orderId); resolve(); } catch (e) { reject(e); }
+              onApprove: async () => {
+                try { await PayPalService.captureOrder(orderId); cleanup(); resolve(); } catch (e) { cleanup(); reject(e); }
               },
-              onCancel: () => reject(new Error('cancelled')),
-              onError: (err) => reject(err)
+              onCancel: () => { cleanup(); reject(new Error('cancelled')); },
+              onError: (err) => { cleanup(); reject(err); }
             });
-            try { buttons.render('#paypal-buttons-container'); } catch (e) { reject(e); }
+            try { buttons.render('#paypal-buttons-container'); } catch (e) { cleanup(); reject(e); }
           });
         } else {
           // Fallback: try immediate capture (server-created order with redirect links)
@@ -237,6 +282,8 @@ const RenderStudioPage = ({ onBack }) => {
     } catch (e) {
       console.error('Top-up failed:', e);
       alert('Payment failed. Please try again.');
+    } finally {
+      setIsPaying(false);
     }
   };
   // Settings
