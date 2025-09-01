@@ -276,8 +276,8 @@ class UserDatabaseService {
       // If Supabase isn't configured or the ID is not a UUID, skip DB write
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUserId);
       if (!isAuthConfigured || !isUuid) {
-        console.log('📊 Skipping DB recordUsage (no Supabase or non-UUID user). Falling back to local.');
-        return true; // treat as success; local logic will handle display
+        console.log('📊 Skipping DB recordUsage (no Supabase or non-UUID user). Requesting local fallback.');
+        return false; // signal caller to perform local fallback increment
       }
 
       console.log('📊 Recording usage:', { targetUserId, usageType, amount, metadata });

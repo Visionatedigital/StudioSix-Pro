@@ -261,8 +261,9 @@ const RenderStudioPage = ({ onBack }) => {
     // Enforce monthly render limit via subscription, but allow demo bypass and never hang UI
     let allowed = true;
     try {
-      allowed = await subscriptionService.canPerformAction('image_render', { amount: 1 });
-      console.log('[RenderStudio] canPerformAction(image_render) =>', allowed);
+      const check = await subscriptionService.canPerformAction('image_render', { amount: 1 });
+      allowed = (check === undefined) ? true : !!check;
+      console.log('[RenderStudio] canPerformAction(image_render) =>', allowed, '(raw:', check, ')');
     } catch (err) { console.warn('[RenderStudio] canPerformAction error', err); allowed = true; }
     if (!allowed) {
       const isDemo = await (subscriptionService.isUnlimitedDemoUser?.() || Promise.resolve(false));
