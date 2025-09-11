@@ -481,7 +481,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
   };
 
   return (
-    <div className="h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-studiosix-950 relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-studiosix-950 relative overflow-hidden">
       {/* Project Initialization Loading Overlay */}
       {isInitializingProject && (
         <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md z-50 flex items-center justify-center">
@@ -526,10 +526,10 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
         <div className="absolute bottom-20 left-20 w-72 h-72 bg-studiosix-400/5 rounded-full blur-3xl"></div>
       </div>
 
-      <div className="relative z-10 h-full flex">
+      <div className="relative z-10 min-h-full flex flex-col lg:flex-row">
         {/* Header */}
-        <div className="absolute top-0 left-0 right-0 z-20">
-          <div className="glass-light px-6 py-4 border-b border-gray-700/50">
+        <div className="sticky top-0 z-20">
+          <div className="glass-light px-4 lg:px-6 py-3 lg:py-4 border-b border-gray-700/50">
             <div className="flex items-center justify-between max-w-7xl mx-auto">
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-lg">
@@ -647,14 +647,14 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
         )}
 
         {/* Main content */}
-        <div className="flex-1 pt-24 px-6 pb-6">
-          <div className="max-w-7xl mx-auto h-full flex gap-8">
+        <div className="flex-1 pt-20 lg:pt-24 px-4 lg:px-6 pb-6">
+          <div className="max-w-7xl mx-auto h-full flex flex-col lg:flex-row gap-6 lg:gap-8">
             
             {/* Left side - Project templates */}
             <div className="flex-1">
-              <div className="mb-8">
-                <h2 className="text-3xl font-bold text-white mb-3">Start a New Project</h2>
-                <p className="text-gray-400 text-lg mb-6">Choose a template to get started quickly, or create a custom project with AI assistance.</p>
+              <div className="mb-6 lg:mb-8">
+                <h2 className="text-2xl lg:text-3xl font-bold text-white mb-3">Start a New Project</h2>
+                <p className="text-gray-400 text-base lg:text-lg mb-6">Choose a template to get started quickly, or create a custom project with AI assistance.</p>
                 
                 {/* AI Prompt Box */}
                 <AnimatedPromptBox 
@@ -671,7 +671,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
               </div>
 
 
-              <div className="grid grid-cols-2 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 lg:gap-6">
                 {PROJECT_TEMPLATES.map((template) => {
                   const Icon = template.icon;
                   const isSelected = selectedTemplate?.id === template.id;
@@ -742,12 +742,12 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
             </div>
 
             {/* Right side - Recent projects & options */}
-            <div className="w-96">
+            <div className="w-full lg:w-96">
               {/* Add top margin to align with project templates grid */}
-              <div className="mt-16"></div>
+              <div className="mt-6 lg:mt-16"></div>
               
               {/* Quick actions (moved above Recent Projects) */}
-              <div className="glass p-6 rounded-xl border border-gray-700/50 mb-4">
+              <div className="glass p-6 rounded-xl border border-gray-700/50 mb-4 hidden lg:block">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
                   <CommandLineIcon className="w-5 h-5 mr-2 text-studiosix-400" />
                   Quick Actions
@@ -840,7 +840,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
                 </h3>
                 
                 {/* Fixed height container to maintain layout balance */}
-                <div className="h-80 flex flex-col">
+                <div className="h-auto lg:h-80 flex flex-col">
                   <div className="flex-1 flex flex-col space-y-3 overflow-hidden">
                     {loadingProjects ? (
                       // Loading state - centered
