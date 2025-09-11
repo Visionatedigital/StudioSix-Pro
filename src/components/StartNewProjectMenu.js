@@ -24,6 +24,7 @@ import {
 } from '@heroicons/react/24/outline';
 import recentProjectsManager from '../utils/RecentProjectsManager';
 import AnimatedPromptBox from './AnimatedPromptBox';
+import RenderTeaserOverlay from './RenderTeaserOverlay';
 import autoSaveService from '../services/AutoSaveService';
 
 const PROJECT_TEMPLATES = [
@@ -87,6 +88,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
   const [recoveredProjects, setRecoveredProjects] = useState([]);
   const [showRecoveryBanner, setShowRecoveryBanner] = useState(false);
   const [openingProjectId, setOpeningProjectId] = useState(null);
+  const [showTeaser, setShowTeaser] = useState(false);
   
   // File upload state
   const [isUploading, setIsUploading] = useState(false);
@@ -170,6 +172,15 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
     };
 
     loadProjectsAndCheckRecovery();
+  }, [user]);
+
+  // Always show Render Teaser shortly after every sign-in
+  useEffect(() => {
+    if (user) {
+      const id = setTimeout(() => setShowTeaser(true), 1200);
+      return () => clearTimeout(id);
+    }
+    setShowTeaser(false);
   }, [user]);
 
   const handleTemplateSelect = (template) => {
@@ -1095,6 +1106,17 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
           </div>
         )}
       </div>
+      {/* Teaser Overlay (always on sign-in) */}
+      <RenderTeaserOverlay
+        isOpen={showTeaser}
+        onClose={() => setShowTeaser(false)}
+        beforeSrc={"/RenderTeaser/25d49624077cddfa71c9857058dd3163.jpg"}
+        afterSrc={"/RenderTeaser/studio-six-render-1757502714857.png"}
+        onTryRenderStudio={() => {
+          setShowTeaser(false);
+          if (typeof onOpenRenderStudio === 'function') onOpenRenderStudio();
+        }}
+      />
     </div>
   );
 };
