@@ -528,7 +528,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
 
       <div className="relative z-10 min-h-full flex flex-col lg:flex-row">
         {/* Header */}
-        <div className="sticky top-0 z-20">
+        <div className="sticky lg:absolute top-0 left-0 right-0 z-20">
           <div className="glass-light px-4 lg:px-6 py-3 lg:py-4 border-b border-gray-700/50">
             <div className="flex items-center justify-between max-w-7xl mx-auto">
               <div className="flex items-center space-x-3">
@@ -647,7 +647,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
         )}
 
         {/* Main content */}
-        <div className="flex-1 pt-20 lg:pt-24 px-4 lg:px-6 pb-6">
+        <div className="flex-1 pt-20 lg:pt-28 px-4 lg:px-6 pb-6">
           <div className="max-w-7xl mx-auto h-full flex flex-col lg:flex-row gap-6 lg:gap-8">
             
             {/* Left side - Project templates */}
@@ -661,83 +661,6 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
                   onSubmit={handlePromptSubmit}
                   className="mb-8"
                 />
-                {/* Quick Actions (mobile only) */}
-                <div className="glass p-6 rounded-xl border border-gray-700/50 mb-6 block lg:hidden">
-                  <h3 className="text-lg font-semibold text-white mb-4 flex items-center">
-                    <CommandLineIcon className="w-5 h-5 mr-2 text-studiosix-400" />
-                    Quick Actions
-                  </h3>
-                  <div className="space-y-3">
-                    {/* Hidden file input */}
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      className="hidden"
-                      accept={acceptedExtensions}
-                      onChange={handleFileSelect}
-                    />
-                    {/* Switch to Render Studio */}
-                    <button
-                      onClick={onOpenRenderStudio}
-                      className="w-full p-3 rounded-lg text-left transition-all duration-200 group border border-amber-500/40 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-lg hover:shadow-xl transform hover:scale-[1.02]"
-                    >
-                      <div className="flex items-center space-x-3">
-                        <CameraIcon className="w-5 h-5 text-white" />
-                        <div>
-                          <p className="text-white text-sm font-semibold">Switch to Render Studio</p>
-                          <p className="text-amber-100/90 text-xs">Jump straight into AI image generation</p>
-                        </div>
-                      </div>
-                    </button>
-                    {/* Import CAD File */}
-                    <button 
-                      onClick={handleFileImport}
-                      disabled={isUploading}
-                      className={`w-full p-3 rounded-lg text-left transition-all duration-200 group ${
-                        isUploading 
-                          ? 'bg-slate-800/50 cursor-not-allowed' 
-                          : 'bg-slate-800/30 hover:bg-slate-700/40'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-3">
-                        {isUploading ? (
-                          <ArrowUpTrayIcon className="w-5 h-5 text-studiosix-400 animate-pulse" />
-                        ) : uploadStatus === 'success' ? (
-                          <CheckCircleIcon className="w-5 h-5 text-green-400" />
-                        ) : uploadStatus === 'error' ? (
-                          <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
-                        ) : (
-                          <DocumentTextIcon className="w-5 h-5 text-gray-400 group-hover:text-studiosix-400" />
-                        )}
-                        <div className="flex-1">
-                          <p className={`text-sm font-medium ${
-                            isUploading ? 'text-gray-300' : 'text-white'
-                          }`}>
-                            {isUploading ? 'Importing CAD File...' : 'Import CAD File'}
-                          </p>
-                          <p className="text-gray-500 text-xs">
-                            {isUploading 
-                              ? `${uploadProgress}% complete` 
-                              : uploadStatus === 'success' 
-                                ? 'Import successful - starting project...'
-                                : uploadStatus === 'error'
-                                  ? 'Import failed - click to retry'
-                                  : 'SketchUp, IFC, DWG, DXF, STEP, etc.'
-                            }
-                          </p>
-                          {isUploading && (
-                            <div className="w-full bg-gray-700 rounded-full h-1 mt-2">
-                              <div 
-                                className="bg-studiosix-500 h-1 rounded-full transition-all duration-300"
-                                style={{ width: `${uploadProgress}%` }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </button>
-                  </div>
-                </div>
               </div>
 
               {/* Separator */}
