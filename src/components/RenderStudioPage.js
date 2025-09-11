@@ -25,6 +25,7 @@ const RenderStudioPage = ({ onBack }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [generatedImage, setGeneratedImage] = useState(null);
+  const [generatedVideo, setGeneratedVideo] = useState(null);
   const [compareSlider, setCompareSlider] = useState(50);
   const [baselineImageForCompare, setBaselineImageForCompare] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -44,20 +45,55 @@ const RenderStudioPage = ({ onBack }) => {
   const [mmPaymentId, setMmPaymentId] = useState(null);
   const [mmUiState, setMmUiState] = useState('idle'); // 'idle' | 'awaiting' | 'success' | 'failed'
   const fileInputRef = useRef(null);
+  const videoInputRef = useRef(null);
   React.useEffect(() => {
     const open = () => setShowTopUp(true);
     window.addEventListener('open-token-topup', open);
     return () => window.removeEventListener('open-token-topup', open);
   }, []);
+  // Mode: image | video
+  const [activeMode, setActiveMode] = useState('image');
+  const [videoRatio, setVideoRatio] = useState('1280:720');
+  const [videoDuration, setVideoDuration] = useState(5); // Runway: 5 or 10 seconds
+  const [videoFps, setVideoFps] = useState(24);
+  const [videoPolling, setVideoPolling] = useState(false);
+  const [videoDurations, setVideoDurations] = useState([]); // ms history for avg
+  const [videoInputMode, setVideoInputMode] = useState('prompt'); // 'prompt' | 'upscale'
+  const [upscaleRes, setUpscaleRes] = useState('2k'); // '2k' | '4k'
+  const [etaMs, setEtaMs] = useState(null); // current estimated duration in ms
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const etaTimerRef = useRef(null);
+  const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
+  // Debug: react to generatedVideo changes to ensure mode switches and repaint happens
+  React.useEffect(() => {
+    if (generatedVideo) {
+      try { setActiveMode('video'); } catch {}
+      try { console.log('[RenderStudio] generatedVideo changed', generatedVideo); } catch {}
+    }
+  }, [generatedVideo]);
+
+  // Only expand when clicking central region of preview (avoid toolbar clicks)
+  const handlePreviewClick = React.useCallback((e) => {
+    if (!(generatedVideo || generatedImage)) return;
+    const container = e.currentTarget;
+    // Ignore clicks from interactive children
+    const interactive = container.querySelector('[data-action-button="1"]');
+    if (interactive && interactive.contains(e.target)) return;
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const left = rect.width * 0.2;
+    const right = rect.width * 0.8;
+    const top = rect.height * 0.2;
+    const bottom = rect.height * 0.8;
+    if (x >= left && x <= right && y >= top && y <= bottom) {
+      setIsPreviewExpanded(true);
+    }
+  }, [generatedVideo, generatedImage]);
 
   const snaps = [5, 10, 20, 50, 100];
-  const amountToRenders = (amt) => {
-    if (amt >= 100) return 160; // extrapolate with best tier rate (~$0.625)
-    if (amt >= 50) return 80;   // ~$0.625 each
-    if (amt >= 20) return 30;   // ~$0.67 each
-    if (amt >= 10) return 12;   // ~$0.83 each
-    return 5;                   // $5 → 5 renders
-  };
+  // Map USD to credits at a fixed rate: $1 = 100 credits
+  const amountToCredits = (amt) => Math.round(Number(amt || 0) * 100);
 
   // Detect local currency and fetch exchange rates (USD base)
   React.useEffect(() => {
@@ -139,7 +175,7 @@ const RenderStudioPage = ({ onBack }) => {
             'X-User-Id': subscriptionService.currentUserId || '',
             'X-User-Email': emailForHeaders || ''
           },
-          body: JSON.stringify({ contact: mtnNumber, amount: amountUGX, message: `StudioSix ${amountToRenders(topUpAmount)} renders` })
+          body: JSON.stringify({ contact: mtnNumber, amount: amountUGX, message: `StudioSix ${amountToCredits(topUpAmount)} credits` })
         });
         const j = await r.json();
         if (!j.ok) throw new Error(j.error || 'Mobile money init failed');
@@ -222,7 +258,7 @@ const RenderStudioPage = ({ onBack }) => {
           console.warn('[PayPal] SDK load error (will fallback to redirect)', e);
           sdkLoaded = false;
         }
-        const order = await PayPalService.createOrder(topUpAmount, amountToRenders(topUpAmount), subscriptionService.currentUserId || '', email);
+        const order = await PayPalService.createOrder(topUpAmount, amountToCredits(topUpAmount), subscriptionService.currentUserId || '', email);
         // Use PayPal popup flow if available
         if (sdkLoaded && window.paypal && window.paypal.Buttons) {
           await new Promise((resolve, reject) => {
@@ -292,9 +328,9 @@ const RenderStudioPage = ({ onBack }) => {
           await PayPalService.captureOrder(order.id);
         }
         // Success
-        await subscriptionService.recordUsage('image_render', { amount: 0, description: `Top-up ${amountToRenders(topUpAmount)} renders purchased` });
-        subscriptionService.addRenderCredits(amountToRenders(topUpAmount));
-        alert(`Payment successful. You purchased ${amountToRenders(topUpAmount)} renders.`);
+        await subscriptionService.recordUsage('image_render', { amount: 0, description: `Top-up ${amountToCredits(topUpAmount)} credits purchased` });
+        subscriptionService.addRenderCredits(amountToCredits(topUpAmount));
+        alert(`Payment successful. You purchased ${amountToCredits(topUpAmount)} credits.`);
         setShowTopUp(false);
       }
     } catch (e) {
@@ -309,35 +345,66 @@ const RenderStudioPage = ({ onBack }) => {
   const [quality, setQuality] = useState(settings.quality || 'standard');
   const [imageSize, setImageSize] = useState(settings.resolution || '1024x1024');
 
-  const handleUploadClick = () => fileInputRef.current?.click();
+  const handleUploadClick = () => {
+    if (activeMode === 'video' && videoInputMode === 'upscale') {
+      videoInputRef.current?.click();
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => setUploadedImage(reader.result);
+    reader.onload = () => {
+      setUploadedImage(reader.result);
+      // Reset outputs on new upload
+      setGeneratedImage(null);
+      setGeneratedVideo(null);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleVideoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      // Reuse uploadedImage state to carry preview thumbnail (browser won't preview video as img)
+      // Keep a data URL of the video for sending to backend
+      setUploadedImage(null);
+      setGeneratedImage(null);
+      setGeneratedVideo(null);
+      // Store video data URL temporarily on window to avoid adding new state shape; simplest integration
+      try { window.__studioSixVideoDataUrl = reader.result; } catch {}
+      setActiveMode('video');
+    };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
   const handleGenerate = async () => {
+    if (activeMode === 'video') {
+      return handleGenerateVideo();
+    }
     if (!prompt.trim()) return;
     if (!uploadedImage) return;
-    // Enforce monthly render limit via subscription, but allow demo bypass and never hang UI
+    // Require 100 credits for image generation
     let allowed = true;
     try {
-      const check = await subscriptionService.canPerformAction('image_render', { amount: 1 });
+      const check = await subscriptionService.canPerformAction('image_render', { amount: 100 });
       allowed = (check === undefined) ? true : !!check;
-      console.log('[RenderStudio] canPerformAction(image_render) =>', allowed, '(raw:', check, ')');
-    } catch (err) { console.warn('[RenderStudio] canPerformAction error', err); allowed = true; }
+    } catch {}
     if (!allowed) {
       const isDemo = await (subscriptionService.isUnlimitedDemoUser?.() || Promise.resolve(false));
-      console.log('[RenderStudio] demo bypass?', isDemo);
       if (!isDemo) {
-        alert('Monthly render limit reached. Please upgrade to continue.');
+        alert('You do not have enough credits to generate image. Buy render credits to continue.');
         return;
       }
     }
+    // Credits checked above; proceed
     setIsGenerating(true);
     setGeneratedImage(null);
     setProgress(0);
@@ -359,16 +426,123 @@ const RenderStudioPage = ({ onBack }) => {
         setBaselineImageForCompare(uploadedImage);
         setProgress(100);
         // Record usage
-        await subscriptionService.recordUsage('image_render', { amount: 1, description: 'Render Studio generation' });
+        await subscriptionService.recordUsage('image_render', { amount: 100, description: 'Render Studio image generation (100 credits)' });
       } else {
         console.warn('[RenderStudio] Generation failed, payload:', result);
         throw new Error(result?.error?.title || 'Generation failed');
       }
     } catch (e) {
       console.error('Render failed:', e);
+      setRenderError('Render generation error');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateVideo = async () => {
+    if (videoInputMode === 'prompt' && !prompt.trim()) return;
+    if (videoInputMode === 'upscale') {
+      if (!window.__studioSixVideoDataUrl) return;
+    } else if (!uploadedImage) return;
+    // Require 5 credits for any video generation (prompt or upscale)
+    let allowed = true;
+    try {
+      const check = await subscriptionService.canPerformAction('video_render', { amount: 250 });
+      allowed = (check === undefined) ? true : !!check;
+    } catch {}
+    if (!allowed) {
+      const isDemo = await (subscriptionService.isUnlimitedDemoUser?.() || Promise.resolve(false));
+      if (!isDemo) {
+        alert('You do not have enough credits to generate video. Buy render credits to continue.');
+        return;
+      }
+    }
+    setIsGenerating(true);
+    setVideoPolling(true);
+    setProgress(0);
+    setRenderError(null);
+    setGeneratedVideo(null);
+    // Initialize ETA from history or defaults (5s→~120s, 10s→~180s)
+    try { if (etaTimerRef.current) clearInterval(etaTimerRef.current); } catch {}
+    const avgMs = (videoDurations.length > 0) ? Math.round(videoDurations.reduce((a,b)=>a+b,0)/videoDurations.length) : null;
+    const defaultEta = (videoDuration >= 10) ? 180000 : 120000;
+    const initialEta = Math.max(30000, Math.min(180000, avgMs || Math.min(defaultEta, 90000)));
+    setEtaMs(initialEta);
+    setElapsedMs(0);
+    const t0 = Date.now();
+    etaTimerRef.current = setInterval(() => {
+      const elapsed = Date.now() - t0;
+      setElapsedMs(elapsed);
+      const est = initialEta;
+      const next = Math.min(95, Math.floor((Math.min(elapsed, est) / est) * 95));
+      setProgress(next);
+    }, 250);
+    try {
+      aiSettingsService.trackUsage('video_render');
+      const startedAt = Date.now();
+
+      // Prefer Runway (powerful model)
+      let result;
+      try {
+        if (videoInputMode === 'upscale') {
+          result = await aiRenderService.generateVideoUpscaleWithRunway({
+            videoDataUrl: window.__studioSixVideoDataUrl
+          });
+        } else {
+          result = await aiRenderService.generateVideoWithRunway({
+        prompt,
+        imageDataUrl: uploadedImage,
+            ratio: videoRatio,
+        durationSec: videoDuration,
+            model: 'gen4_turbo'
+          });
+        }
+      } catch (e) {
+        console.warn('[Runway create error]', e);
+        result = { ok: false, error: e?.message || String(e) };
+      }
+
+      const finishAndRecord = async (asset) => {
+        const elapsed = Date.now() - startedAt;
+        console.log('[RenderStudio] finishAndRecord set video src', asset);
+        setGeneratedVideo(asset);
+        try { setActiveMode('video'); } catch {}
+        setProgress(100);
+        setVideoDurations(prev => [...prev.slice(-9), elapsed]);
+        try { if (etaTimerRef.current) { clearInterval(etaTimerRef.current); etaTimerRef.current = null; } } catch {}
+        console.log(`[RenderStudio] Video generated in ${Math.round(elapsed/1000)}s`);
+        await subscriptionService.recordUsage('video_render', { amount: 250, description: 'Render Studio video generation (250 credits)' });
+      };
+
+      console.log('[RenderStudio] Runway create result', result);
+      if (result && result.ok && (result.videoUrl || result.assetUrl)) {
+        await finishAndRecord(result.videoUrl || result.assetUrl);
+      } else if (result && result.ok && (result.jobId || result.taskId)) {
+        // Poll Runway task
+        for (let i = 0; i < 300; i++) { // up to ~5 minutes at 1s
+          await new Promise(r => setTimeout(r, 1000));
+          const id = result.jobId || result.taskId;
+          const j = await aiRenderService.getRunwayVideoJob(id);
+          console.log('[Runway poll]', id, j?.status, j?.assetUrl ? 'asset' : 'no-asset');
+          if (j?.ok && (j.videoUrl || j.assetUrl)) {
+            await finishAndRecord(j.videoUrl || j.assetUrl);
+            setActiveMode('video');
+            break;
+          }
+          if (j && j.status === 'failed') throw new Error(j?.error || 'Video generation failed');
+          setProgress(p => Math.min(95, Math.max(p, 5 + i)));
+        }
+      } else {
+        // If Runway creation failed immediately, surface its error
+        throw new Error(result?.error || 'Runway video generation failed');
+      }
+    } catch (e) {
+      console.error('Video render failed:', e);
       setRenderError(e?.message || String(e));
     } finally {
       setIsGenerating(false);
+      setVideoPolling(false);
+      try { if (etaTimerRef.current) { clearInterval(etaTimerRef.current); etaTimerRef.current = null; } } catch {}
     }
   };
 
@@ -410,7 +584,7 @@ const RenderStudioPage = ({ onBack }) => {
         setCompareSlider(50);
         setIsEditing(false);
         setProgress(100);
-        await subscriptionService.recordUsage('image_render', { amount: 1, description: 'Render Studio edit' });
+        await subscriptionService.recordUsage('image_render', { amount: 100, description: 'Render Studio edit (100 credits)' });
       } else {
         console.warn('[RenderStudio] Edit failed, payload:', result);
         throw new Error(result?.error?.title || 'Edit failed');
@@ -424,11 +598,11 @@ const RenderStudioPage = ({ onBack }) => {
   };
 
   const handleDownload = () => {
-    const src = generatedImage || uploadedImage;
+    const src = generatedVideo || generatedImage || uploadedImage;
     if (!src) return;
     const link = document.createElement('a');
     link.href = src;
-    link.download = `studio-six-render-${Date.now()}.png`;
+    link.download = `studio-six-render-${Date.now()}.${generatedVideo ? 'mp4' : 'png'}`;
     link.click();
   };
 
@@ -453,89 +627,160 @@ const RenderStudioPage = ({ onBack }) => {
   return (
     <div className="fixed inset-0 z-50 bg-gradient-to-br from-slate-950 via-slate-900 to-studiosix-950">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-800/60 bg-slate-900/60 backdrop-blur-md">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-lg">
-            <img src="/studiosix-icon.svg" alt="StudioSix Icon" className="w-6 h-6" />
+      <div className="px-4 lg:px-6 py-3 lg:py-4 border-b border-gray-800/60 bg-slate-900/60 backdrop-blur-md flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 lg:w-10 lg:h-10 bg-white rounded-lg flex items-center justify-center shadow-lg">
+              <img src="/studiosix-icon.svg" alt="StudioSix Icon" className="w-5 h-5 lg:w-6 lg:h-6" />
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-white">AI Render Studio</h2>
-            <p className="text-sm text-gray-400">Generate images with AI from a reference</p>
+            <div className="leading-tight">
+              <h2 className="text-lg lg:text-xl font-bold text-white">AI Render Studio</h2>
+              <p className="text-xs lg:text-sm text-gray-400">Generate images with AI from a reference</p>
           </div>
         </div>
-        <div className="flex items-center space-x-3">
+          <div className="flex items-center gap-2 lg:gap-3">
           <RenderUsageBadge />
           <button onClick={onBack} className="p-2 text-gray-400 hover:text-white hover:bg-gray-700/50 rounded-lg transition-all duration-200">
-            <XMarkIcon className="w-6 h-6" />
+              <XMarkIcon className="w-5 h-5 lg:w-6 lg:h-6" />
           </button>
         </div>
       </div>
 
       {/* Content */}
-      <div className="h-[calc(100%-64px)] flex">
+      <div className="h-[calc(100%-64px)] flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden px-4 lg:px-6">
         {/* Left controls */}
-        <div className="w-96 border-r border-gray-800/60 p-6 overflow-y-auto">
+        <div className="w-full lg:w-96 border-b lg:border-b-0 lg:border-r border-gray-800/60 p-4 lg:p-6 overflow-y-auto">
           <div className="space-y-6">
+            {/* Mode Tabs */}
+            <div>
+              <div className="inline-flex bg-slate-800/60 border border-slate-700 rounded-lg overflow-hidden mb-3">
+                <button onClick={() => setActiveMode('image')} className={`px-4 py-2 text-sm ${activeMode==='image' ? 'bg-studiosix-600 text-white' : 'text-slate-300 hover:text-white'}`}>Image</button>
+                <button onClick={() => setActiveMode('video')} className={`px-4 py-2 text-sm ${activeMode==='video' ? 'bg-studiosix-600 text-white' : 'text-slate-300 hover:text-white'}`}>Video</button>
+              </div>
+            </div>
+
             {/* Upload */}
             <div>
-              <label className="block text-sm font-semibold text-gray-300 mb-3">Reference Image</label>
+              <label className="block text-sm font-semibold text-gray-300 mb-3">{activeMode==='video' && videoInputMode==='upscale' ? 'Upload Video' : 'Reference Image'}</label>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+              <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={handleVideoChange} />
               <button onClick={handleUploadClick} className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-studiosix-600 hover:bg-studiosix-700 text-white rounded-lg transition-colors">
                 <ArrowUpTrayIcon className="w-5 h-5" />
-                <span>Upload Image</span>
+                <span>{activeMode==='video' && videoInputMode==='upscale' ? 'Upload Video' : 'Upload Image'}</span>
               </button>
-              <p className="text-xs text-gray-500 mt-2">PNG or JPG up to 10MB</p>
+              <p className="text-xs text-gray-500 mt-2">{activeMode==='video' && videoInputMode==='upscale' ? 'MP4, MOV. Max 40s, under 4096px per side' : 'PNG or JPG up to 10MB'}</p>
             </div>
 
             {/* Prompt */}
             <div>
+              <div className="flex items-center space-x-2 mb-3">
+                <button onClick={() => setVideoInputMode('prompt')} className={`px-3 py-1.5 text-xs rounded-md border ${videoInputMode==='prompt' ? 'bg-studiosix-600 text-white border-studiosix-500' : 'bg-slate-800/50 text-gray-300 border-gray-700/60'}`}>Prompt</button>
+                <button onClick={() => setVideoInputMode('upscale')} className={`px-3 py-1.5 text-xs rounded-md border ${videoInputMode==='upscale' ? 'bg-studiosix-600 text-white border-studiosix-500' : 'bg-slate-800/50 text-gray-300 border-gray-700/60'}`}>Upscale</button>
+              </div>
+              {videoInputMode === 'prompt' ? (
+                <>
               <label className="block text-sm font-semibold text-gray-300 mb-3">AI Prompt</label>
               <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={5} placeholder="Describe the scene, style, lighting..."
                 className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-studiosix-500 focus:border-transparent" />
+                </>
+              ) : (
+                <>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Upscale Resolution</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={() => setUpscaleRes('2k')} className={`px-3 py-2 rounded-md border ${upscaleRes==='2k' ? 'border-studiosix-500 bg-studiosix-600/20 text-white' : 'border-gray-700 bg-gray-800/50 text-gray-200'}`}>2K</button>
+                    <button onClick={() => setUpscaleRes('4k')} className={`px-3 py-2 rounded-md border ${upscaleRes==='4k' ? 'border-studiosix-500 bg-studiosix-600/20 text-white' : 'border-gray-700 bg-gray-800/50 text-gray-200'}`}>4K</button>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">We’ll preserve motion and composition and upscale the final clip.</p>
+                </>
+              )}
             </div>
 
-            {/* Settings: Quality & Image Size */}
-            <div className="grid grid-cols-1 gap-4">
-              <div>
-                <label className="block text-sm font-semibold text-gray-300 mb-2">Output Quality</label>
-                <select
-                  value={quality}
-                  onChange={(e) => setQuality(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white focus:ring-2 focus:ring-studiosix-500 focus:border-transparent"
-                >
-                  <option value="draft">Draft</option>
-                  <option value="standard">Standard</option>
-                  <option value="high">High</option>
-                  <option value="ultra">Ultra</option>
-                </select>
+            {/* Settings */}
+            {activeMode === 'image' ? (
+              <div className="grid grid-cols-1 gap-4">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Output Quality</label>
+                  <select
+                    value={quality}
+                    onChange={(e) => setQuality(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white focus:ring-2 focus:ring-studiosix-500 focus:border-transparent"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="standard">Standard</option>
+                    <option value="high">High</option>
+                    <option value="ultra">Ultra</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Image Size</label>
+                  <select
+                    value={imageSize}
+                    onChange={(e) => setImageSize(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white focus:ring-2 focus:ring-studiosix-500 focus:border-transparent"
+                  >
+                    <option value="1024x1024">1024 x 1024 (Square)</option>
+                    <option value="1280x720">1280 x 720 (HD)</option>
+                    <option value="1920x1080">1920 x 1080 (Full HD)</option>
+                    <option value="2048x1152">2048 x 1152</option>
+                  </select>
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-semibold text-gray-300 mb-2">Image Size</label>
-                <select
-                  value={imageSize}
-                  onChange={(e) => setImageSize(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white focus:ring-2 focus:ring-studiosix-500 focus:border-transparent"
-                >
-                  <option value="1024x1024">1024 x 1024 (Square)</option>
-                  <option value="1280x720">1280 x 720 (HD)</option>
-                  <option value="1920x1080">1920 x 1080 (Full HD)</option>
-                  <option value="2048x1152">2048 x 1152</option>
-                </select>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {videoInputMode === 'prompt' ? (
+                  <>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Video Aspect Ratio</label>
+                  <select
+                    value={videoRatio}
+                    onChange={(e) => setVideoRatio(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white focus:ring-2 focus:ring-studiosix-500 focus:border-transparent"
+                  >
+                        <option value="1280:720">1280×720 (16:9)</option>
+                        <option value="720:1280">720×1280 (9:16)</option>
+                        <option value="960:960">960×960 (1:1)</option>
+                        <option value="1104:832">1104×832 (4:3)</option>
+                        <option value="832:1104">832×1104 (3:4)</option>
+                        <option value="1584:672">1584×672 (2.35:1)</option>
+                  </select>
+                </div>
+                <div>
+                      <label className="block text-sm font-semibold text-gray-300 mb-2">Duration</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button onClick={() => setVideoDuration(5)} className={`px-3 py-2 rounded-md border ${videoDuration===5?'border-studiosix-500 bg-studiosix-600/20 text-white':'border-gray-700 bg-gray-800/50 text-gray-200 hover:border-studiosix-500'}`}>5 seconds</button>
+                        <button onClick={() => setVideoDuration(10)} className={`px-3 py-2 rounded-md border ${videoDuration===10?'border-studiosix-500 bg-studiosix-600/20 text-white':'border-gray-700 bg-gray-800/50 text-gray-200 hover:border-studiosix-500'}`}>10 seconds</button>
+                      </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Frame Rate</label>
+                  <select
+                    value={videoFps}
+                    onChange={(e) => setVideoFps(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white focus:ring-2 focus:ring-studiosix-500 focus:border-transparent"
+                  >
+                    <option value={12}>12 fps (draft)</option>
+                    <option value={24}>24 fps (cinematic)</option>
+                    <option value={30}>30 fps</option>
+                  </select>
+                </div>
+                  </>
+                ) : (
+                  <div className="text-xs text-gray-400">Upscale uses Runway's upscale_v1 (4×, max 4096px). Video must be under 40s.</div>
+                )}
               </div>
-            </div>
+            )}
 
             {/* Generate */}
-            <button onClick={handleGenerate} disabled={!uploadedImage || !prompt.trim() || isGenerating}
+            <button onClick={handleGenerate} disabled={(activeMode==='video' && videoInputMode==='upscale' ? !window.__studioSixVideoDataUrl : !uploadedImage) || (activeMode==='video' && videoInputMode==='upscale' ? false : !prompt.trim()) || isGenerating}
               className={`w-full px-6 py-4 rounded-lg font-semibold transition-all duration-200 ${(!uploadedImage || !prompt.trim() || isGenerating) ? 'bg-gray-700/60 text-gray-400 cursor-not-allowed' : 'bg-gradient-to-r from-studiosix-500 to-studiosix-600 hover:from-studiosix-600 hover:to-studiosix-700 text-white shadow-lg hover:shadow-xl'}`}>
               {isGenerating ? (
                 <div className="flex items-center justify-center space-x-2">
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  <span>Generating...</span>
+                  <span>{activeMode === 'video' ? 'Generating video...' : 'Generating...'}</span>
                 </div>
               ) : (
                 <div className="flex items-center justify-center space-x-2">
                   <SparklesIcon className="w-5 h-5" />
-                  <span>Generate</span>
+                  <span>Generate {activeMode === 'video' ? 'Video' : 'Image'}</span>
                 </div>
               )}
             </button>
@@ -546,73 +791,103 @@ const RenderStudioPage = ({ onBack }) => {
                 <div className="w-full bg-gray-700 rounded-full h-2">
                   <div className="bg-studiosix-500 h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
                 </div>
-                <p className="text-xs text-gray-500 mt-1">{Math.round(progress)}% Complete</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  {Math.round(progress)}% Complete
+                  {activeMode === 'video' && videoDurations.length > 0 && (
+                    <>
+                      {' · Avg '} 
+                      {(() => {
+                        const avg = Math.round(videoDurations.reduce((a, b) => a + b, 0) / videoDurations.length / 1000);
+                        return `${avg}s`;
+                      })()}
+                    </>
+                  )}
+                </p>
               </div>
+            )}
+            {renderError && (
+              <div className="text-xs text-red-400">{renderError}</div>
             )}
           </div>
         </div>
 
         {/* Right preview */}
-        <div className="flex-1 p-6 overflow-hidden">
-          <div className="h-full bg-gray-900/40 border border-gray-800/60 rounded-xl flex items-center justify-center relative">
+        <div className="flex-1 p-4 lg:p-6 overflow-hidden">
+          <div className="h-full bg-gray-900/40 border border-gray-800/60 rounded-xl flex items-center justify-center relative cursor-zoom-in" onClick={handlePreviewClick}>
             {!uploadedImage && !generatedImage && (
               <div className="text-center text-gray-400">
                 <CameraIcon className="w-16 h-16 mx-auto mb-4 opacity-60" />
                 <p className="text-lg">Upload a reference to begin</p>
               </div>
             )}
-            {(generatedImage || uploadedImage) && (
+            {(generatedVideo || generatedImage || uploadedImage) && (
               <div className="w-full h-full p-4 flex items-center justify-center">
                 <div className="relative w-full h-full max-w-full max-h-full">
                   {/* Generating overlay */}
                   {isGenerating && (
                     <div className="absolute inset-0 z-30 bg-black/50 backdrop-blur-sm rounded-lg flex flex-col items-center justify-center">
                       <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mb-3"></div>
-                      <div className="text-white text-sm">Generating image...</div>
+                      <div className="text-white text-sm">
+                        {activeMode === 'video' ? (
+                          etaMs ? `Generating video… Est. remaining ${Math.max(0, Math.ceil(((etaMs - Math.min(etaMs, elapsedMs)))/1000))}s` : 'Generating video…'
+                        ) : 'Generating image…'}
+                      </div>
                       <div className="w-1/2 bg-white/20 rounded-full h-1 mt-3">
                         <div className="bg-white/80 h-1 rounded-full transition-all" style={{ width: `${Math.max(5, Math.min(95, progress))}%` }}></div>
                       </div>
                     </div>
                   )}
                   {/* Action buttons (show only when a generated image exists) */}
-                  {generatedImage && (
-                    <div className="absolute top-3 right-3 z-20 flex items-center space-x-2">
-                      <button onClick={handleDownload} className="px-3 py-2 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-lg text-sm flex items-center space-x-1">
+                  {(generatedImage || generatedVideo) && (
+                    <div className="absolute top-3 right-3 z-20 flex items-center space-x-2" data-action-button="1">
+                      <button onClick={(e) => { e.stopPropagation(); handleDownload(); }} className="px-3 py-2 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-lg text-sm flex items-center space-x-1">
                         <ArrowDownTrayIcon className="w-4 h-4" />
                         <span>Download</span>
                       </button>
-                      <button onClick={() => setIsEditing((v) => !v)} className="px-3 py-2 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-lg text-sm flex items-center space-x-1">
-                        <PencilSquareIcon className="w-4 h-4" />
-                        <span>{isEditing ? 'Cancel Edit' : 'Edit Image'}</span>
-                      </button>
-                      <button onClick={handleShare} className="px-3 py-2 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-lg text-sm flex items-center space-x-1">
+                      {generatedImage && activeMode === 'image' && (
+                        <button onClick={(e) => { e.stopPropagation(); setIsEditing((v) => !v); }} className="px-3 py-2 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-lg text-sm flex items-center space-x-1">
+                          <PencilSquareIcon className="w-4 h-4" />
+                          <span>{isEditing ? 'Cancel Edit' : 'Edit Image'}</span>
+                        </button>
+                      )}
+                      <button onClick={(e) => { e.stopPropagation(); handleShare(); }} className="px-3 py-2 bg-gray-800/70 hover:bg-gray-700/80 text-white rounded-lg text-sm flex items-center space-x-1">
                         <ShareIcon className="w-4 h-4" />
                         <span>Share</span>
                       </button>
                     </div>
                   )}
 
-                  {generatedImage && (baselineImageForCompare || uploadedImage) ? (
+                  {activeMode === 'image' && generatedImage && (baselineImageForCompare || uploadedImage) ? (
                     <>
                       <img src={baselineImageForCompare || uploadedImage} alt="Before" className="absolute inset-0 w-full h-full object-contain rounded-lg" />
                       <div className="absolute inset-0 overflow-hidden rounded-lg" style={{ clipPath: `inset(0 ${100 - compareSlider}% 0 0)` }}>
                         <img src={generatedImage} alt="After" className="w-full h-full object-contain" />
                       </div>
                     </>
+                  ) : activeMode === 'video' && (generatedVideo || uploadedImage) ? (
+                    <>
+                      {generatedVideo ? (
+                        <video key={generatedVideo} src={generatedVideo} className="absolute inset-0 w-full h-full object-contain rounded-lg" autoPlay muted loop controls />
+                      ) : (
+                        <img src={uploadedImage} alt="Preview" className="absolute inset-0 w-full h-full object-contain rounded-lg" />
+                      )}
+                    </>
                   ) : (
                     <img src={uploadedImage} alt="Preview" className="absolute inset-0 w-full h-full object-contain rounded-lg" />
                   )}
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={compareSlider}
-                    onChange={(e) => setCompareSlider(Number(e.target.value))}
-                    className="absolute bottom-4 left-1/2 -translate-x-1/2 w-2/3"
-                  />
+                  {activeMode === 'image' && (
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={compareSlider}
+                      onChange={(e) => setCompareSlider(Number(e.target.value))}
+                      className="absolute bottom-4 left-1/2 -translate-x-1/2 w-2/3"
+                    />
+                  )}
 
                   {/* Edit panel */}
-                  {isEditing && (
+                  {activeMode === 'image' && isEditing && (
                     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 bg-gray-900/90 border border-gray-700/70 rounded-xl p-4 w-[640px] max-w-[90vw] backdrop-blur">
                       <label className="block text-xs text-gray-300 mb-2">Describe the change (e.g., "change flooring to marble")</label>
                       <div className="flex space-x-3 items-center">
@@ -660,12 +935,45 @@ const RenderStudioPage = ({ onBack }) => {
           </div>
         </div>
       </div>
+
+      {/* Expanded preview modal */}
+      {isPreviewExpanded && (
+        <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsPreviewExpanded(false)}>
+          <div className="relative w-full max-w-6xl h-[85vh] bg-slate-900 border border-slate-700 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <button onClick={() => setIsPreviewExpanded(false)} className="absolute top-3 right-3 z-10 p-2 bg-slate-800/70 hover:bg-slate-700/80 text-white rounded-lg">
+              <XMarkIcon className="w-5 h-5" />
+            </button>
+            <div className="absolute inset-0 flex items-center justify-center">
+              {activeMode === 'video' && generatedVideo ? (
+                <video src={generatedVideo} className="w-full h-full object-contain" autoPlay muted loop controls />
+              ) : activeMode === 'image' && generatedImage ? (
+                <div className="relative w-full h-full">
+                  <img src={baselineImageForCompare || uploadedImage} alt="Before" className="absolute inset-0 w-full h-full object-contain" />
+                  <div className="absolute inset-0 overflow-hidden" style={{ clipPath: `inset(0 ${100 - compareSlider}% 0 0)` }}>
+                    <img src={generatedImage} alt="After" className="w-full h-full object-contain" />
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={compareSlider}
+                    onChange={(e) => setCompareSlider(Number(e.target.value))}
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2 w-2/3"
+                  />
+                </div>
+              ) : (
+                <div className="text-gray-400">No preview available</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {showTopUp && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="w-[560px] max-w-[92vw] bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
             <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between bg-gradient-to-r from-studiosix-700/40 to-studiosix-800/40">
               <div>
-                <div className="text-white font-semibold">Buy Render Tokens</div>
+                <div className="text-white font-semibold">Buy Render Credits</div>
                 <div className="text-xs text-slate-300">Commitment‑free. Only pay for what you use.</div>
               </div>
               <button onClick={() => setShowTopUp(false)} className="text-slate-300 hover:text-white p-2 rounded-lg hover:bg-slate-700/50">
@@ -699,10 +1007,10 @@ const RenderStudioPage = ({ onBack }) => {
                         }}
                         className="w-full accent-studiosix-500"
                       />
-                      {/* Token counts under slider */}
+                      {/* Credit counts under slider */}
                       <div className="flex justify-between text-xs text-slate-400 mt-1">
                         {snaps.map(s => (
-                          <span key={s}>{amountToRenders(s)}</span>
+                          <span key={s}>{amountToCredits(s)}</span>
                         ))}
                       </div>
                     </div>
@@ -715,8 +1023,8 @@ const RenderStudioPage = ({ onBack }) => {
                       <div className="text-xs text-slate-400 mt-1">≈ {formatLocal(topUpAmount)}</div>
                     </div>
                     <div className="text-right">
-                      <div className="text-slate-200 text-sm">Renders</div>
-                      <div className="text-2xl font-bold text-studiosix-400">{amountToRenders(topUpAmount)}</div>
+                      <div className="text-slate-200 text-sm">Credits</div>
+                      <div className="text-2xl font-bold text-studiosix-400">{amountToCredits(topUpAmount)}</div>
                     </div>
                   </div>
                 </>
@@ -726,7 +1034,6 @@ const RenderStudioPage = ({ onBack }) => {
               {topUpTab === 'packages' && (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[5,10,20,50].map(v => {
-                    const crossed = Math.round(v * 2); // show original price (50% off)
                     return (
                     <button key={v} onClick={() => setTopUpAmount(v)} className={`relative text-left p-4 rounded-xl border ${topUpAmount===v ? 'border-studiosix-500 bg-studiosix-600/10' : 'border-slate-700 bg-slate-800/60 hover:border-studiosix-500'}`}>
                       {v===20 && (
@@ -735,9 +1042,8 @@ const RenderStudioPage = ({ onBack }) => {
                       <div className="text-slate-300 text-xs">Package</div>
                       <div className="flex items-end gap-2 mt-1">
                         <div className="text-white text-2xl font-bold">${v}</div>
-                        <div className="text-slate-400 text-lg line-through opacity-80 mb-1">${crossed}</div>
                       </div>
-                      <div className="text-studiosix-300 text-sm">{amountToRenders(v)} renders</div>
+                      <div className="text-studiosix-300 text-sm">{amountToCredits(v)} credits</div>
                     </button>
                   )})}
                 </div>
@@ -818,29 +1124,31 @@ const RenderStudioPage = ({ onBack }) => {
 };
 
 const RenderUsageBadge = () => {
-  const [usage, setUsage] = React.useState({ used: 0, limit: 0, remaining: 0 });
+  const [credits, setCredits] = React.useState(0);
   React.useEffect(() => {
+    let mounted = true;
     (async () => {
       try {
-        const tier = await subscriptionService.getCurrentTier();
         const sub = await subscriptionService.getSubscription();
-        const limit = tier?.limits?.imageRendersPerMonth ?? 0;
-        const used = sub?.usage?.imageRendersThisMonth ?? 0;
-        setUsage({ used, limit, remaining: limit === -1 ? -1 : Math.max(0, limit - used) });
+        if (!mounted) return;
+        setCredits(typeof sub?.credits === 'number' ? sub.credits : (typeof sub?.renderCredits === 'number' ? sub.renderCredits : 0));
       } catch {}
     })();
+    const unsub = subscriptionService.onSubscriptionChange?.(() => {
+      try {
+        const sub = subscriptionService.subscription;
+        setCredits(typeof sub?.credits === 'number' ? sub.credits : (typeof sub?.renderCredits === 'number' ? sub.renderCredits : 0));
+      } catch {}
+    });
+    return () => { mounted = false; try { unsub && unsub(); } catch {} };
   }, []);
-  const pct = usage.limit === -1 ? 0 : Math.min(100, (usage.used / (usage.limit || 1)) * 100);
   return (
     <div className="flex items-center space-x-3">
-      <div className="text-sm text-gray-300">
-        Renders: <span className="text-white font-semibold">{usage.used}</span> / {usage.limit === -1 ? '∞' : usage.limit}
-      </div>
-      <div className="w-28 h-2 bg-gray-700/60 rounded-full overflow-hidden">
-        <div className={`h-full ${pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-studiosix-500'}`} style={{ width: usage.limit === -1 ? '100%' : `${pct}%` }} />
+      <div className={`text-sm ${credits <= 0 ? 'text-red-400' : 'text-gray-300'}`}>
+        Credits: <span className={`${credits <= 0 ? 'text-red-400' : 'text-white'} font-semibold`}>{credits}</span>
       </div>
       <button onClick={() => window.dispatchEvent(new CustomEvent('open-token-topup'))} className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white text-xs rounded-md shadow flex items-center space-x-1">
-        <span>Buy renders</span>
+        <span>Buy credits</span>
         <span role="img" aria-label="celebrate">🎉</span>
       </button>
     </div>
