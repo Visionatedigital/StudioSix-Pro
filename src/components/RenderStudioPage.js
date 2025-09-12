@@ -1129,6 +1129,8 @@ const RenderUsageBadge = () => {
     let mounted = true;
     (async () => {
       try {
+        // Force-sync from database on first mount
+        await subscriptionService.refreshCreditsFromDatabase?.();
         const sub = await subscriptionService.getSubscription();
         if (!mounted) return;
         setCredits(typeof sub?.credits === 'number' ? sub.credits : (typeof sub?.renderCredits === 'number' ? sub.renderCredits : 0));
@@ -1140,6 +1142,17 @@ const RenderUsageBadge = () => {
         setCredits(typeof sub?.credits === 'number' ? sub.credits : (typeof sub?.renderCredits === 'number' ? sub.renderCredits : 0));
       } catch {}
     });
+    // Also refresh on window focus and visibility changes
+    const onFocus = async () => {
+      try {
+        await subscriptionService.refreshCreditsFromDatabase?.();
+        const sub = await subscriptionService.getSubscription();
+        if (!mounted) return;
+        setCredits(typeof sub?.credits === 'number' ? sub.credits : (typeof sub?.renderCredits === 'number' ? sub.renderCredits : 0));
+      } catch {}
+    };
+    try { window.addEventListener('focus', onFocus); } catch {}
+    try { document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') onFocus(); }); } catch {}
     return () => { mounted = false; try { unsub && unsub(); } catch {} };
   }, []);
   return (

@@ -212,6 +212,12 @@ class SubscriptionService {
       }
     };
     
+    // Centralized credit costs (credits per action)
+    this.creditCosts = {
+      image_render: 100,
+      video_render: 250
+    };
+    
     // Load user subscription
     this.loadUserSubscription();
   }
@@ -348,6 +354,10 @@ class SubscriptionService {
         imageRendersThisMonth: 0,
         lastResetDate: now.toDateString()
       },
+      // Credit wallet (centralized). Free users start with 300 credits.
+      credits: 300,
+      // Back-compat alias; kept in sync with credits
+      renderCredits: 300,
       limits: freeLimits
     };
   }
@@ -371,6 +381,16 @@ class SubscriptionService {
     
     // Update limits to match current tier definition
     subscription.limits = { ...(tier && tier.limits ? tier.limits : { aiTokensPerMonth: 5000, imageRendersPerMonth: 3 }) };
+    // Ensure credits wallet exists
+    if (typeof subscription.credits !== 'number' || isNaN(subscription.credits)) {
+      subscription.credits = (subscription.tierId === 'free') ? 300 : 0;
+    }
+    // Keep legacy renderCredits in sync
+    if (typeof subscription.renderCredits !== 'number' || isNaN(subscription.renderCredits)) {
+      subscription.renderCredits = subscription.credits;
+    } else if (subscription.renderCredits !== subscription.credits) {
+      subscription.renderCredits = subscription.credits;
+    }
     
     return subscription;
   }
@@ -396,6 +416,23 @@ class SubscriptionService {
     try {
       const profile = await this.getDatabaseProfile();
       if (profile && !profile.fallback) {
+        // Sync local wallet credits from database profile if available
+        try {
+          const dbCredits = Number((profile && (profile.render_credits ?? profile.credits)) || 0);
+          if (!Number.isNaN(dbCredits)) {
+            if (!this.subscription) {
+              this.subscription = this.createDefaultSubscription();
+            }
+            const localCredits = Number(this.subscription.credits || 0);
+            if (localCredits !== dbCredits) {
+              this.subscription.credits = dbCredits;
+              this.subscription.renderCredits = dbCredits; // keep legacy alias in sync
+              this.saveUserSubscription();
+              this.notifySubscriptionChange();
+            }
+          }
+        } catch (_) { /* non-fatal */ }
+
         // Use database profile
         return {
           tierId: profile.subscription_tier,
@@ -408,6 +445,9 @@ class SubscriptionService {
             imageRendersThisMonth: profile.usage_image_renders_this_month,
             bimExportsThisMonth: profile.usage_bim_exports_this_month
           },
+          // Expose wallet credits directly from DB for consumers that read from getSubscription()
+          credits: Number((profile && (profile.render_credits ?? profile.credits)) || 0),
+          renderCredits: Number((profile && (profile.render_credits ?? profile.credits)) || 0),
           lifetime: {
             totalTokens: profile.total_ai_tokens_used,
             totalRenders: profile.total_image_renders_used,
@@ -426,6 +466,31 @@ class SubscriptionService {
     
     // Fallback to local storage
     return { ...this.subscription };
+  }
+
+  /**
+   * Force refresh credits from the database and sync local wallet
+   */
+  async refreshCreditsFromDatabase() {
+    try {
+      // Clear cache to force DB fetch
+      try { this.profileCache.clear(); } catch {}
+      const profile = await this.getDatabaseProfile();
+      if (profile && !profile.fallback) {
+        const dbCredits = Number((profile && (profile.render_credits ?? profile.credits)) || 0);
+        if (!Number.isNaN(dbCredits)) {
+          if (!this.subscription) {
+            this.subscription = this.createDefaultSubscription();
+          }
+          if (this.subscription.credits !== dbCredits) {
+            this.subscription.credits = dbCredits;
+            this.subscription.renderCredits = dbCredits;
+            this.saveUserSubscription();
+            this.notifySubscriptionChange();
+          }
+        }
+      }
+    } catch (_) { /* non-fatal */ }
   }
 
   /**
@@ -484,7 +549,16 @@ class SubscriptionService {
     try {
       // Bypass limits for demo allowlist users
       if (await this.isUnlimitedDemoUser()) {
-        if (actionType === 'image_render') return true;
+        if (actionType === 'image_render' || actionType === 'video_render') return true;
+      }
+
+      // Credits-gated actions
+      if (actionType === 'video_render' || actionType === 'image_render') {
+        const perUnit = this.creditCosts[actionType] || 0;
+        const units = Number(actionDetails.units || 1);
+        const needed = Number(actionDetails.amount) || (perUnit * units);
+        const available = (this.subscription && typeof this.subscription.credits === 'number') ? this.subscription.credits : 0;
+        return available >= needed;
       }
       
       // First try database check for accuracy
@@ -514,8 +588,11 @@ class SubscriptionService {
         return (usage.aiTokensThisMonth || 0) + tokensNeeded <= tier.limits.aiTokensPerMonth;
         
       case 'image_render':
-        if (tier.limits.imageRendersPerMonth === -1) return true; // Unlimited
-        return (usage.imageRendersThisMonth || 0) < tier.limits.imageRendersPerMonth;
+        // Fallback to credits check
+        return ((this.subscription?.credits || 0) >= ((this.creditCosts.image_render) || 100));
+      case 'video_render':
+        // Fallback to credits check
+        return ((this.subscription?.credits || 0) >= ((this.creditCosts.video_render) || 250));
         
       case 'model_access':
         const availableModels = tier.limits.availableModels;
@@ -541,7 +618,7 @@ class SubscriptionService {
     try {
       // Skip recording for demo allowlist users (unlimited renders)
       if (await this.isUnlimitedDemoUser()) {
-        if (actionType === 'image_render') return true;
+        if (actionType === 'image_render' || actionType === 'video_render') return true;
       }
       
       const amount = actionDetails.tokens || actionDetails.amount || 1;
@@ -551,6 +628,24 @@ class SubscriptionService {
         description: actionDetails.description || `${actionType} usage`,
         ...actionDetails
       };
+
+      // Handle credits-gated actions locally first
+      if (actionType === 'video_render' || actionType === 'image_render') {
+        const perUnit = this.creditCosts[actionType] || 0;
+        const units = Number(actionDetails.units || 1);
+        const needed = Number(actionDetails.amount) || (perUnit * units);
+        // Attempt DB record (best-effort, may be no-op)
+        try { await userDatabaseService.recordUsage(this.currentUserId, actionType, needed, metadata); } catch (_) {}
+        // Deduct from local wallet
+        const ok = this.deductCredits(needed);
+        // Also increment monthly counters for analytics
+        if (ok && actionType === 'image_render') {
+          try { this.subscription.usage.imageRendersThisMonth = (this.subscription.usage.imageRendersThisMonth || 0) + 1; } catch {}
+        }
+        this.saveUserSubscription();
+        this.notifySubscriptionChange();
+        return ok;
+      }
       
       // Record to database first
       const success = await userDatabaseService.recordUsage(
@@ -587,12 +682,56 @@ class SubscriptionService {
       case 'image_render':
         this.subscription.usage.imageRendersThisMonth += 1;
         break;
+      case 'video_render':
+        // Already handled via credits above
+        break;
     }
     
     this.saveUserSubscription();
     this.notifySubscriptionChange();
     return true;
   }
+
+  /**
+   * Get current render credits balance
+   */
+  getCredits() {
+    return (this.subscription && typeof this.subscription.credits === 'number') ? this.subscription.credits : 0;
+  }
+  // Back-compat alias
+  getRenderCredits() { return this.getCredits(); }
+
+  /**
+   * Add render credits (e.g., after purchase)
+   */
+  addCredits(amount) {
+    const add = Number(amount || 0);
+    if (!this.subscription) return false;
+    this.subscription.credits = Math.max(0, (this.subscription.credits || 0) + add);
+    this.subscription.renderCredits = this.subscription.credits; // keep in sync
+    this.saveUserSubscription();
+    this.notifySubscriptionChange();
+    return true;
+  }
+  // Back-compat alias
+  addRenderCredits(amount) { return this.addCredits(amount); }
+
+  /**
+   * Deduct render credits; returns true if successful
+   */
+  deductCredits(amount) {
+    const need = Number(amount || 0);
+    if (!this.subscription) return false;
+    const have = Number(this.subscription.credits || 0);
+    if (have < need) return false;
+    this.subscription.credits = have - need;
+    this.subscription.renderCredits = this.subscription.credits; // keep in sync
+    this.saveUserSubscription();
+    this.notifySubscriptionChange();
+    return true;
+  }
+  // Back-compat alias
+  deductRenderCredits(amount) { return this.deductCredits(amount); }
 
   /**
    * Check whether the current user is a demo allowlist user
