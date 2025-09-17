@@ -97,6 +97,130 @@ app.use(helmet({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Verbose request logger for AI video routes and related APIs
+app.use((req, res, next) => {
+  if (/^\/api\/(ai\/(wavespeed|runway|google-video)|ai-render)/i.test(req.path)) {
+    const id = Math.random().toString(36).slice(2, 8);
+    const start = Date.now();
+    console.log(`[req ${id}] ${req.method} ${req.path}`);
+    res.on('finish', () => {
+      console.log(`[req ${id}] ${res.statusCode} ${req.method} ${req.path} (${Date.now()-start}ms)`);
+    });
+  }
+  next();
+});
+
+// Helper: fetch with timeout that resolves 'running' fast instead of hanging forever
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => {
+    try { ctrl.abort(); } catch {}
+  }, Math.max(1000, timeoutMs));
+  try {
+    const res = await fetch(url, { ...options, signal: ctrl.signal });
+    return res;
+  } finally {
+    clearTimeout(id);
+  }
+}
+
+// --- Wavespeed background polling cache ---
+const wavespeedTaskCache = new Map(); // id -> { status, assetUrl, updatedAt }
+
+async function pollWavespeedUntilDone(id, apiKey) {
+  if (wavespeedTaskCache.get(id)?.polling) return;
+  wavespeedTaskCache.set(id, { ...(wavespeedTaskCache.get(id) || {}), status: 'running', updatedAt: Date.now(), polling: true });
+  try {
+    try { console.log(`[wavespeed] poll start ${id}`); } catch {}
+    const startedAt = Date.now();
+    const MAX_MS = 120000; // stop polling after 2 minutes
+    for (let attempt = 0; Date.now() - startedAt < MAX_MS; attempt++) {
+      try {
+        const r = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(id)}/result`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${apiKey}` }
+        });
+        const raw = await r.text();
+        let j = {}; try { j = JSON.parse(raw); } catch {}
+        if (r.ok) {
+          const status = j?.status || (j?.ok === true ? 'completed' : 'running');
+          if (attempt % 5 === 0) try { console.log(`[wavespeed] poll attempt ${attempt} ${id} status=${status}`); } catch {}
+          // Robust status detection mirroring GET route
+          const robustStatus = (() => {
+            if (typeof j?.status === 'string') return j.status;
+            if (typeof j?.data?.status === 'string') return j.data.status;
+            if (j?.ok === true || j?.data?.ok === true) return 'completed';
+            if (Array.isArray(j?.outputs) && j.outputs.length > 0) return 'completed';
+            if (Array.isArray(j?.data?.outputs) && j.data.outputs.length > 0) return 'completed';
+            return status;
+          })();
+          // Deep search for a playable URL similar to GET route
+          const findFirstMp4Url = (obj) => {
+            try {
+              const seen = new Set();
+              const stack = [obj];
+              while (stack.length) {
+                const cur = stack.pop();
+                if (!cur || typeof cur !== 'object') continue;
+                if (seen.has(cur)) continue;
+                seen.add(cur);
+                for (const key of Object.keys(cur)) {
+                  const val = cur[key];
+                  if (typeof val === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(val)) return val;
+                  if (val && typeof val === 'object') stack.push(val);
+                  if (Array.isArray(val)) for (const v of val) stack.push(v);
+                }
+              }
+            } catch {}
+            return null;
+          };
+          const assetUrl = (() => {
+            if (typeof j?.videoUrl === 'string') return j.videoUrl;
+            if (typeof j?.assetUrl === 'string') return j.assetUrl;
+            if (typeof j?.url === 'string') return j.url;
+            if (typeof j?.result?.videoUrl === 'string') return j.result.videoUrl;
+            if (typeof j?.result?.url === 'string') return j.result.url;
+            if (Array.isArray(j?.outputs)) {
+              const s = j.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
+              if (s) return s;
+              const o = j.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
+              return o?.url || null;
+            }
+            if (Array.isArray(j?.data?.outputs)) {
+              const s = j.data.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
+              if (s) return s;
+              const o = j.data.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
+              if (o?.url) return o.url;
+            }
+            if (typeof j?.data?.videoUrl === 'string') return j.data.videoUrl;
+            if (typeof j?.data?.url === 'string') return j.data.url;
+            return findFirstMp4Url(j);
+          })();
+          if (robustStatus === 'completed' && assetUrl) {
+            wavespeedTaskCache.set(id, { status: 'completed', assetUrl, updatedAt: Date.now(), polling: false });
+            try { console.log(`[wavespeed] poll completed ${id}`); } catch {}
+            return;
+          }
+          if (robustStatus === 'failed') {
+            wavespeedTaskCache.set(id, { status: 'failed', updatedAt: Date.now(), polling: false });
+            try { console.warn(`[wavespeed] poll failed ${id}`); } catch {}
+            return;
+          }
+        }
+      } catch (e) {
+        try { console.warn(`[wavespeed] poll error (attempt ${attempt}) ${id}`, e?.message || String(e)); } catch {}
+      }
+      wavespeedTaskCache.set(id, { ...(wavespeedTaskCache.get(id) || {}), status: 'running', updatedAt: Date.now(), polling: true });
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    wavespeedTaskCache.set(id, { status: 'timeout', updatedAt: Date.now(), polling: false });
+    try { console.warn(`[wavespeed] poll timeout ${id}`); } catch {}
+  } catch (e) {
+    wavespeedTaskCache.set(id, { status: 'error', error: e?.message || String(e), updatedAt: Date.now(), polling: false });
+    try { console.error(`[wavespeed] poll exception ${id}`, e?.message || String(e)); } catch {}
+  }
+}
+
 // --- Supabase Admin (Service Role) for server-side credit updates ---
 const { createClient } = require('@supabase/supabase-js');
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL;
@@ -110,6 +234,24 @@ if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
 } else {
   console.warn('⚠️ Supabase admin not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
 }
+
+// Lightweight endpoint to fetch current credits by email (for UI fallback refresh)
+app.get('/api/user/credits', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ ok: false, error: 'supabase admin not configured' });
+    const email = String(req.query.email || req.headers['x-user-email'] || '').trim().toLowerCase();
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ ok: false, error: 'valid email required' });
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .select('render_credits')
+      .eq('email', email)
+      .single();
+    if (error) return res.status(500).json({ ok: false, error: error.message || String(error) });
+    return res.json({ ok: true, credits: Number(data?.render_credits || 0) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
 
 async function getUserByEmail(email) {
   if (!supabaseAdmin) throw new Error('Supabase admin not configured');
@@ -209,7 +351,7 @@ app.get('/api/tw/events', async (req, res) => {
   }
 });
 
-// --- Google AI Studio (Gemini) image generation proxy ---
+// --- Google AI Studio (Gemini/Veo) image generation proxy ---
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENAI_API_KEY || '';
 app.post('/api/ai/google-generate', async (req, res) => {
   try {
@@ -283,6 +425,111 @@ app.post('/api/ai/google-generate', async (req, res) => {
   } catch (e) {
     console.error('❌ Google generate failed:', e);
     return res.status(500).json({ ok: false, error: { code: 'E_PROXY', title: 'Proxy failure', hint: String(e) } });
+  }
+});
+
+// --- Vertex AI (Veo) video proxy via predict ---
+// Prefers Vertex service-account OAuth; defaults to env model 'veo-2.0-generate-preview'.
+app.post('/api/ai/google-video', async (req, res) => {
+  try {
+    const { prompt, imageDataUrl, resolution = '1080p', sampleCount = 1 } = req.body || {};
+    const projectId = process.env.VERTEX_PROJECT_ID || 'studiosix-pro';
+    const location = process.env.VERTEX_LOCATION || 'us-central1';
+    const modelPath = process.env.VERTEX_VEO_MODEL || 'publishers/google/models/veo-2.0-generate-preview';
+    if (!prompt) return res.status(400).json({ ok: false, error: 'prompt required' });
+
+    // Build instances
+    const instance = { prompt: String(prompt) };
+    if (imageDataUrl && typeof imageDataUrl === 'string') {
+      const m = /^data:(.*?);base64,(.*)$/.exec(imageDataUrl);
+      if (m) {
+        instance.image = { mimeType: m[1], bytesBase64Encoded: m[2] };
+      }
+    }
+    const body = {
+      instances: [ instance ],
+      parameters: {
+        resolution: resolution,
+        sampleCount: sampleCount
+      }
+    };
+
+    // OAuth token
+    const { GoogleAuth } = require('google-auth-library');
+    const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    const client = await auth.getClient();
+    const token = await client.getAccessToken();
+    const accessToken = (token && token.token) || token;
+
+    const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/${modelPath}:predict`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+        'x-goog-user-project': projectId
+      },
+      body: JSON.stringify(body)
+    });
+    const raw = await r.text();
+    let j = {}; try { j = JSON.parse(raw); } catch {}
+    if (!r.ok) {
+      return res.status(r.status).json({ ok: false, error: j?.error || raw?.slice?.(0,200) });
+    }
+    // If operation-style response
+    if (j && j.name) return res.json({ ok: true, jobId: j.name, vertex: j });
+    // If predictions contain bytes or URIs
+    let videoUrl = null;
+    try {
+      const preds = j.predictions || [];
+      for (const p of preds) {
+        if (p.fileUri) { videoUrl = p.fileUri; break; }
+        if (p.videoUri) { videoUrl = p.videoUri; break; }
+      }
+    } catch {}
+    // Some responses may include videos list
+    if (!videoUrl && j.videos && Array.isArray(j.videos) && j.videos.length > 0) {
+      videoUrl = j.videos[0].gcsUri || j.videos[0].fileUri || null;
+    }
+    return res.json({ ok: true, videoUrl, videos: j.videos, vertex: j });
+  } catch (e) {
+    console.error('❌ vertex-video error', e);
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Poll Vertex long‑running operation by full name (URL-encoded)
+app.get('/api/ai/google-video/:op', async (req, res) => {
+  try {
+    const projectId = process.env.VERTEX_PROJECT_ID || 'studiosix-pro';
+    const location = process.env.VERTEX_LOCATION || 'us-central1';
+    const opName = decodeURIComponent(req.params.op);
+    const { GoogleAuth } = require('google-auth-library');
+    const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    const client = await auth.getClient();
+    const token = await client.getAccessToken();
+    const accessToken = (token && token.token) || token;
+    // If caller passed full name, use it; else use standard operations path
+    const base = `https://${location}-aiplatform.googleapis.com/v1`;
+    const path = opName.startsWith('projects/') ? `/${opName}` : `/projects/${encodeURIComponent(projectId)}/locations/${encodeURIComponent(location)}/operations/${encodeURIComponent(opName)}`;
+    const r = await fetch(base + path, { headers: { 'Authorization': `Bearer ${accessToken}`, 'x-goog-user-project': projectId } });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: j });
+    let videoUrl = null;
+    let videos = null;
+    try {
+      const out = j.response || j.result || {};
+      if (out.fileUri) videoUrl = out.fileUri;
+      if (!videoUrl && out.videoUri) videoUrl = out.videoUri;
+      if (!videoUrl && out.output && out.output.fileUri) videoUrl = out.output.fileUri;
+      if (!videoUrl && Array.isArray(out.videos) && out.videos.length > 0) {
+        videos = out.videos;
+        videoUrl = (out.videos[0] && (out.videos[0].gcsUri || out.videos[0].fileUri)) || null;
+      }
+    } catch {}
+    res.json({ ok: true, status: j.done ? 'completed' : 'running', videoUrl, videos, data: j });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
   }
 });
 
@@ -924,10 +1171,10 @@ if (fs.existsSync(buildPath)) {
   app.use(express.static(buildPath));
   
   // Catch all for SPA routing - serve React app for all routes except /health and /api/*
-  app.get('*', (req, res) => {
-    // Skip serving React app for health check and API routes
+  app.get('*', (req, res, next) => {
+    // Skip serving React app for health check and API routes — hand off to next routes
     if (req.path === '/health' || req.path.startsWith('/api/')) {
-      return;
+      return next();
     }
     
     const indexPath = path.join(buildPath, 'index.html');
@@ -2902,6 +3149,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`StudioSix Pro server is running on port ${PORT}`);
   console.log(`Health check available at: http://localhost:${PORT}/health`);
   console.log(`AI Render available at: http://localhost:${PORT}/api/ai-render`);
+  console.log(`Wavespeed create: POST http://localhost:${PORT}/api/ai/wavespeed/video`);
+  console.log(`Wavespeed poll:   GET  http://localhost:${PORT}/api/ai/wavespeed/video/:id`);
   console.log(`🤖 Autonomous Agent API available at: http://localhost:${PORT}/api/agent/*`);
   console.log(`📡 Agent WebSocket available at: ws://localhost:8081/ws/agent`);
   console.log('Paystack integration:', {
@@ -2931,3 +3180,509 @@ process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
   process.exit(1);
 });
+
+// ... existing code ...
+// Wavespeed Seedance create (image-to-video)
+app.post('/api/ai/wavespeed/video', async (req, res) => {
+  try {
+    const apiKey = process.env.WAVESPEED_API_KEY;
+    if (!apiKey) return res.status(500).json({ ok: false, error: 'WAVESPEED_API_KEY not configured' });
+    const { prompt = '', imageDataUrl, imageUrl, duration = 5, camera_fixed = false, seed = -1, model } = req.body || {};
+    let image = String(imageUrl || '').trim() || null;
+    if (!image && imageDataUrl) {
+      const isDataUri = /^data:(.*?);base64,(.*)$/.exec(String(imageDataUrl));
+      if (!isDataUri) return res.status(400).json({ ok: false, error: 'imageDataUrl must be data:*;base64,*' });
+      // Upload to Supabase to obtain a public HTTPS URL that Wavespeed accepts
+      try {
+        const mime = isDataUri[1] || 'image/png';
+        const b64 = isDataUri[2];
+        const buf = Buffer.from(b64, 'base64');
+        const ext = (/png/i.test(mime) ? 'png' : (/jpeg|jpg/i.test(mime) ? 'jpg' : 'png'));
+        const key = `wavespeed/input/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        if (!supabaseAdmin) {
+          // Fallback in dev: pass data URI directly
+          image = imageDataUrl;
+        } else {
+          const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
+            .from('models')
+            .upload(key, buf, { contentType: mime, upsert: true });
+          if (uploadErr) {
+            image = imageDataUrl; // fallback
+          } else {
+            const { data: publicUrl } = supabaseAdmin.storage
+              .from('models')
+              .getPublicUrl(key);
+            if (publicUrl && publicUrl.publicUrl) {
+              image = publicUrl.publicUrl;
+            } else {
+              image = imageDataUrl; // fallback
+            }
+          }
+        }
+      } catch (e) {
+        // On any upload error, fallback to data URI
+        image = imageDataUrl;
+      }
+    }
+    if (!image) return res.status(400).json({ ok: false, error: 'imageDataUrl or imageUrl required' });
+
+    const body = {
+      camera_fixed: !!camera_fixed,
+      duration: Number(duration) || 5,
+      image,
+      prompt: String(prompt || ''),
+      seed: (Number.isFinite(seed) ? Number(seed) : -1)
+    };
+    // Select endpoint by model; default to 1080p if unspecified
+    const modelPath = (() => {
+      const m = String(model || '').toLowerCase();
+      if (/480p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-480p';
+      if (/720p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-720p';
+      return 'bytedance/seedance-v1-pro-i2v-1080p';
+    })();
+    const r = await fetch(`https://api.wavespeed.ai/api/v3/${modelPath}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body)
+    });
+    const raw = await r.text();
+    let j = {}; try { j = JSON.parse(raw); } catch {}
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: j?.error || j || raw });
+    const requestId = (
+      j?.requestId || j?.request_id || j?.id || j?.jobId || j?.predictionId || j?.prediction_id ||
+      j?.data?.requestId || j?.data?.id || j?.data?.jobId || null
+    );
+    if (requestId) {
+      try { pollWavespeedUntilDone(requestId, apiKey); } catch {}
+    }
+    // Some providers may return a URL immediately
+    const immediateUrl = (typeof j?.videoUrl === 'string' && j.videoUrl) || null;
+    return res.json({ ok: true, requestId, provider: 'wavespeed', videoUrl: immediateUrl || undefined, raw: j });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Wavespeed video proxy must be registered BEFORE the dynamic :id route
+app.get('/api/ai/wavespeed/video/proxy', async (req, res) => {
+  try {
+    const url = String(req.query.url || '');
+    if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error: 'invalid url' });
+
+    const headers = {};
+    const range = req.headers['range'];
+    if (range && typeof range === 'string') headers['Range'] = range;
+    if (!headers['Range']) headers['Range'] = 'bytes=0-';
+    headers['User-Agent'] = headers['User-Agent'] || 'StudioSix-Proxy/1.0 (+node-fetch)';
+
+    const r = await fetch(url, { method: 'GET', headers });
+    if (!r.ok && r.status !== 206) {
+      const txt = await r.text().catch(() => '');
+      return res.status(r.status).json({ ok: false, error: txt || 'fetch failed' });
+    }
+
+    let contentType = r.headers.get('content-type') || 'video/mp4';
+    if (/^binary\/octet-stream/i.test(contentType)) contentType = 'video/mp4';
+    const contentLength = r.headers.get('content-length');
+    const contentRange = r.headers.get('content-range');
+    const acceptRanges = r.headers.get('accept-ranges') || 'bytes';
+
+    res.status(contentRange ? 206 : (r.status || 200));
+    res.setHeader('Content-Type', contentType);
+    if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
+    if (contentRange) res.setHeader('Content-Range', contentRange);
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    if (req.method === 'HEAD') return res.end();
+    if (r.body && r.body.pipe) {
+      r.body.pipe(res);
+    } else {
+      const buf = await r.arrayBuffer();
+      res.end(Buffer.from(buf));
+    }
+  } catch (e) {
+    try { console.warn('[proxy] error', e?.message || String(e)); } catch {}
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Wavespeed result polling
+app.get('/api/ai/wavespeed/video/:id', async (req, res) => {
+  try {
+    const apiKey = process.env.WAVESPEED_API_KEY;
+    if (!apiKey) return res.status(500).json({ ok: false, error: 'WAVESPEED_API_KEY not configured' });
+    const id = req.params.id;
+    // Test hook to validate frontend preview flow without calling provider
+    if (id === 'test') {
+      const assetUrl = 'https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4';
+      const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(assetUrl)}`;
+      return res.json({ ok: true, status: 'completed', assetUrl, videoUrl: proxy, raw: { test: true } });
+    }
+    const cached = wavespeedTaskCache.get(id);
+    if (cached) {
+      const proxy = cached.assetUrl ? `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(cached.assetUrl)}` : null;
+      return res.json({ ok: cached.status !== 'failed', status: cached.status === 'timeout' ? 'running' : cached.status, assetUrl: cached.assetUrl, videoUrl: proxy || cached.assetUrl, cached: true });
+    }
+    try { pollWavespeedUntilDone(id, apiKey); } catch {}
+    // Fast path: if no cache yet, avoid blocking the request; client can poll again
+    if (String(req.query.probe || '') !== '1') {
+      return res.json({ ok: true, status: 'running', cached: false });
+    }
+    const r = await fetchWithTimeout(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(id)}/result`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    }, 8000);
+    const raw = await r.text();
+    let j = {}; try { j = JSON.parse(raw); } catch {}
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: j?.error || j || raw });
+    // Robust status detection: support wrapper { code, message, data: { status } }
+    const status = (() => {
+      if (typeof j?.status === 'string') return j.status;
+      if (typeof j?.data?.status === 'string') return j.data.status;
+      if (j?.ok === true || j?.data?.ok === true) return 'completed';
+      // Some providers use boolean flags
+      if (j?.data && j.data.outputs && Array.isArray(j.data.outputs) && j.data.outputs.length > 0) return 'completed';
+      return 'running';
+    })();
+    const findFirstMp4Url = (obj) => {
+      try {
+        const seen = new Set();
+        const stack = [obj];
+        while (stack.length) {
+          const cur = stack.pop();
+          if (!cur || typeof cur !== 'object') continue;
+          if (seen.has(cur)) continue;
+          seen.add(cur);
+          for (const key of Object.keys(cur)) {
+            const val = cur[key];
+            if (typeof val === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(val)) return val;
+            if (val && typeof val === 'object') stack.push(val);
+            if (Array.isArray(val)) for (const v of val) stack.push(v);
+          }
+        }
+      } catch {}
+      return null;
+    };
+    const assetUrl = (() => {
+      if (typeof j?.videoUrl === 'string') return j.videoUrl;
+      if (typeof j?.assetUrl === 'string') return j.assetUrl;
+      if (typeof j?.url === 'string') return j.url;
+      if (typeof j?.result?.videoUrl === 'string') return j.result.videoUrl;
+      if (typeof j?.result?.url === 'string') return j.result.url;
+      if (Array.isArray(j?.outputs)) {
+        const s = j.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
+        if (s) return s;
+        const o = j.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
+        return o?.url || null;
+      }
+      if (Array.isArray(j?.data?.outputs)) {
+        const s = j.data.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
+        if (s) return s;
+        const o = j.data.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
+        if (o?.url) return o.url;
+      }
+      if (typeof j?.data?.videoUrl === 'string') return j.data.videoUrl;
+      if (typeof j?.data?.url === 'string') return j.data.url;
+      const deep = findFirstMp4Url(j);
+      return deep || null;
+    })();
+    try { console.log(`[wavespeed] result ${id} status=${status} url=${assetUrl ? 'yes' : 'no'}`); } catch {}
+    if (status === 'completed' && assetUrl) {
+      const proxy = assetUrl ? `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(assetUrl)}` : null;
+      return res.json({ ok: true, status: 'completed', assetUrl, videoUrl: proxy || assetUrl, raw: j });
+    }
+    if (status === 'failed') return res.json({ ok: false, status: 'failed', raw: j });
+    return res.json({ ok: true, status: 'running', raw: j });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Stream/proxy a Wavespeed result URL to the client without exposing referer
+app.get('/api/ai/wavespeed/video/proxy', async (req, res) => {
+  try {
+    const url = String(req.query.url || '');
+    if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error: 'invalid url' });
+
+    // Pass through Range header so HTML5 <video> can stream/seek
+    const headers = {};
+    const range = req.headers['range'];
+    if (range && typeof range === 'string') headers['Range'] = range;
+    // If no range provided, some players still expect bytes support; request from start to allow 206
+    if (!headers['Range']) headers['Range'] = 'bytes=0-';
+
+    // Some CDNs require a UA
+    headers['User-Agent'] = headers['User-Agent'] || 'StudioSix-Proxy/1.0 (+node-fetch)';
+
+    const r = await fetch(url, { method: 'GET', headers });
+    if (!r.ok && r.status !== 206) {
+      const txt = await r.text().catch(() => '');
+      return res.status(r.status).json({ ok: false, error: txt || 'fetch failed' });
+    }
+
+    // Propagate streaming headers
+    let contentType = r.headers.get('content-type') || 'video/mp4';
+    // Normalize generic binary type to mp4 for browsers
+    if (/^binary\/octet-stream/i.test(contentType)) contentType = 'video/mp4';
+    const contentLength = r.headers.get('content-length');
+    const contentRange = r.headers.get('content-range');
+    const acceptRanges = r.headers.get('accept-ranges') || 'bytes';
+
+    res.status(contentRange ? 206 : (r.status || 200));
+    res.setHeader('Content-Type', contentType);
+    if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
+    if (contentRange) res.setHeader('Content-Range', contentRange);
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+    res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (req.method === 'HEAD') return res.end();
+
+    if (r.body && r.body.pipe) {
+      r.body.pipe(res);
+    } else {
+      const buf = await r.arrayBuffer();
+      res.end(Buffer.from(buf));
+    }
+  } catch (e) {
+    try { console.warn('[proxy] error', e?.message || String(e)); } catch {}
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Combined start-and-wait endpoint: create a Wavespeed job and wait (poll) up to 5 minutes
+app.post('/api/ai/wavespeed/video/start-and-wait', async (req, res) => {
+  try {
+    const apiKey = process.env.WAVESPEED_API_KEY;
+    if (!apiKey) return res.status(500).json({ ok: false, error: 'WAVESPEED_API_KEY not configured' });
+    const { prompt = '', imageDataUrl, imageUrl, duration = 5, camera_fixed = false, seed = -1, timeoutSec = 300, model } = req.body || {};
+
+    // Normalize image input (re-use logic from create route)
+    let image = String(imageUrl || '').trim() || null;
+    if (!image && imageDataUrl) {
+      const isDataUri = /^data:(.*?);base64,(.*)$/.exec(String(imageDataUrl));
+      if (!isDataUri) return res.status(400).json({ ok: false, error: 'imageDataUrl must be data:*;base64,*' });
+      try {
+        const mime = isDataUri[1] || 'image/png';
+        const b64 = isDataUri[2];
+        const buf = Buffer.from(b64, 'base64');
+        const ext = (/png/i.test(mime) ? 'png' : (/jpeg|jpg/i.test(mime) ? 'jpg' : 'png'));
+        const key = `wavespeed/input/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        if (!supabaseAdmin) {
+          image = imageDataUrl; // fallback in dev
+        } else {
+          const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
+            .from('models')
+            .upload(key, buf, { contentType: mime, upsert: true });
+          if (uploadErr) {
+            image = imageDataUrl; // fallback
+          } else {
+            const { data: publicUrl } = supabaseAdmin.storage
+              .from('models')
+              .getPublicUrl(key);
+            if (publicUrl && publicUrl.publicUrl) image = publicUrl.publicUrl; else image = imageDataUrl;
+          }
+        }
+      } catch (e) {
+        image = imageDataUrl; // fallback on error
+      }
+    }
+    if (!image) return res.status(400).json({ ok: false, error: 'imageDataUrl or imageUrl required' });
+
+    // Create job
+    const createBody = {
+      camera_fixed: !!camera_fixed,
+      duration: Number(duration) || 5,
+      image,
+      prompt: String(prompt || ''),
+      seed: (Number.isFinite(seed) ? Number(seed) : -1)
+    };
+    const modelPath = (() => {
+      const m = String(model || '').toLowerCase();
+      if (/480p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-480p';
+      if (/720p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-720p';
+      return 'bytedance/seedance-v1-pro-i2v-1080p';
+    })();
+    const createRes = await fetch(`https://api.wavespeed.ai/api/v3/${modelPath}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(createBody)
+    });
+    const createRaw = await createRes.text();
+    let createJson = {}; try { createJson = JSON.parse(createRaw); } catch {}
+    try { console.log('[wavespeed] create start-and-wait response', createJson); } catch {}
+    if (!createRes.ok) return res.status(createRes.status).json({ ok: false, error: createJson?.error || createJson || createRaw });
+
+    // Try to extract a request/prediction ID from multiple possible locations
+    let requestId = (
+      createJson?.requestId || createJson?.request_id || createJson?.id || createJson?.jobId || createJson?.predictionId || createJson?.prediction_id ||
+      createJson?.data?.requestId || createJson?.data?.id || createJson?.data?.jobId || null
+    );
+    if (!requestId) {
+      // Deep search for an ID-like value
+      try {
+        const seen = new Set();
+        const stack = [createJson];
+        while (stack.length && !requestId) {
+          const cur = stack.pop();
+          if (!cur || typeof cur !== 'object') continue;
+          if (seen.has(cur)) continue;
+          seen.add(cur);
+          for (const key of Object.keys(cur)) {
+            const val = cur[key];
+            if (typeof val === 'string') {
+              // Match plausible IDs
+              if (/^[a-z0-9]{8,}$/i.test(val)) { requestId = val; break; }
+              // Or extract from prediction URL
+              const m = /\/predictions\/([^\/?#]+)/i.exec(val);
+              if (m && m[1]) { requestId = m[1]; break; }
+            }
+            if (val && typeof val === 'object') stack.push(val);
+            if (Array.isArray(val)) for (const v of val) stack.push(v);
+          }
+        }
+      } catch {}
+    }
+    // If provider already returned a URL or completed outputs, respond immediately
+    const immediateUrl = (typeof createJson?.videoUrl === 'string' && createJson.videoUrl) || null;
+    if (immediateUrl) {
+      const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(immediateUrl)}`;
+      return res.json({ ok: true, status: 'completed', requestId: requestId || null, assetUrl: immediateUrl, videoUrl: proxy });
+    }
+    if ((createJson?.status === 'completed' || createJson?.ok === true) && Array.isArray(createJson?.outputs)) {
+      const first = createJson.outputs.find(u => typeof u === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(u));
+      if (first) {
+        const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(first)}`;
+        return res.json({ ok: true, status: 'completed', requestId: requestId || null, assetUrl: first, videoUrl: proxy });
+      }
+    }
+
+    // Kick background poller and wait up to timeoutSec
+    if (requestId) {
+      try { console.log(`[wavespeed] enqueue background poll ${requestId}`); pollWavespeedUntilDone(requestId, apiKey); } catch {}
+    }
+    const started = Date.now();
+    const maxMs = Math.max(5, Math.min(600, Number(timeoutSec) || 300)) * 1000; // clamp 5s..600s
+    try { console.log(`[wavespeed] start-and-wait begin ${requestId || 'no-id'} for up to ${Math.round(maxMs/1000)}s`); } catch {}
+    while (Date.now() - started < maxMs) {
+      try {
+        const cached = requestId ? wavespeedTaskCache.get(requestId) : null;
+        if (cached && cached.status === 'completed' && cached.assetUrl) {
+          const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(cached.assetUrl)}`;
+          return res.json({ ok: true, status: 'completed', requestId, assetUrl: cached.assetUrl, videoUrl: proxy });
+        }
+        if (cached && cached.status === 'failed') {
+          return res.json({ ok: false, status: 'failed', requestId });
+        }
+        // If provider reports completed with outputs at create-time via data.*
+        if (createJson && createJson.data && (createJson.data.status === 'completed' || createJson.data.ok === true) && Array.isArray(createJson.data.outputs)) {
+          const first = createJson.data.outputs.find(u => typeof u === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(u));
+          if (first) {
+            const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(first)}`;
+            return res.json({ ok: true, status: 'completed', requestId, assetUrl: first, videoUrl: proxy });
+          }
+        }
+        // Fallback: query provider directly if cache not ready yet
+        if (requestId && (!cached || cached.status === 'running')) {
+          const r = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(requestId)}/result`, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+          const raw = await r.text();
+          let j = {}; try { j = JSON.parse(raw); } catch {}
+          if (r.ok) {
+            const status = j?.status || (j?.ok === true ? 'completed' : 'running');
+            try { console.log(`[wavespeed] start-and-wait probe ${requestId} status=${status}`); } catch {}
+            // Reuse deep search similar to GET polling route
+            const findFirstMp4Url = (obj) => {
+              try {
+                const seen = new Set();
+                const stack = [obj];
+                while (stack.length) {
+                  const cur = stack.pop();
+                  if (!cur || typeof cur !== 'object') continue;
+                  if (seen.has(cur)) continue;
+                  seen.add(cur);
+                  for (const key of Object.keys(cur)) {
+                    const val = cur[key];
+                    if (typeof val === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(val)) return val;
+                    if (val && typeof val === 'object') stack.push(val);
+                    if (Array.isArray(val)) for (const v of val) stack.push(v);
+                  }
+                }
+              } catch {}
+              return null;
+            };
+            const assetUrl = (() => {
+              if (typeof j?.videoUrl === 'string') return j.videoUrl;
+              if (typeof j?.assetUrl === 'string') return j.assetUrl;
+              if (typeof j?.url === 'string') return j.url;
+              if (typeof j?.result?.videoUrl === 'string') return j.result.videoUrl;
+              if (typeof j?.result?.url === 'string') return j.result.url;
+              if (Array.isArray(j?.outputs)) {
+                const s = j.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
+                if (s) return s;
+                const o = j.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
+                return o?.url || null;
+              }
+              const deep = findFirstMp4Url(j);
+              return deep || null;
+            })();
+            if (status === 'completed' && assetUrl) {
+              const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(assetUrl)}`;
+              return res.json({ ok: true, status: 'completed', requestId, assetUrl, videoUrl: proxy });
+            }
+            if (status === 'failed') return res.json({ ok: false, status: 'failed', requestId });
+          }
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    try { console.warn(`[wavespeed] start-and-wait timeout ${requestId || 'no-id'}`); } catch {}
+    // If we reach here and never had a job ID, surface a clearer error to the client
+    if (!requestId) return res.status(502).json({ ok: false, error: 'Provider did not return a job ID. Please try again.' });
+    return res.json({ ok: true, status: 'running', requestId, timeout: true });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// --- Runway video upscale (REST) ---
+app.post('/api/ai/runway/upscale', async (req, res) => {
+  try {
+    const apiKey = process.env.RUNWAY_API_KEY || process.env.RUNWAYML_API_SECRET || process.env.RUNWAYML_API_KEY;
+    if (!apiKey) return res.status(500).json({ ok: false, error: 'Runway API key not configured' });
+    const { videoDataUrl, videoUrl, resolution = '2k' } = req.body || {};
+    let uri = String(videoUrl || '').trim() || null;
+    if (!uri && videoDataUrl) {
+      // Allow data URI pass-through
+      if (!/^data:video\//i.test(String(videoDataUrl))) return res.status(400).json({ ok: false, error: 'videoDataUrl must be data:video/*;base64,*' });
+      uri = videoDataUrl;
+    }
+    if (!uri) return res.status(400).json({ ok: false, error: 'videoUrl or videoDataUrl required' });
+
+    const r = await fetch('https://api.runwayml.com/v1/video_upscale', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'X-Runway-Version': '2024-11-06'
+      },
+      body: JSON.stringify({ videoUri: uri, model: 'upscale_v1' })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return res.status(r.status).json({ ok: false, error: j?.error || j });
+    // Response includes task id
+    return res.json({ ok: true, taskId: j?.id || j?.taskId || j?.jobId || null, runway: j });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+// ... existing code ...

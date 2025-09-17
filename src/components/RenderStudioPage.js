@@ -17,6 +17,7 @@ import aiSettingsService from '../services/AISettingsService';
 import subscriptionService from '../services/SubscriptionService';
 import paystackService from '../services/PaystackService';
 import PayPalService from '../services/PayPalService';
+import FloatingWhatsAppButton from './FloatingWhatsAppButton';
 
 const API_BASE = process.env.REACT_APP_BACKEND_URL || '';
 
@@ -51,15 +52,40 @@ const RenderStudioPage = ({ onBack }) => {
     window.addEventListener('open-token-topup', open);
     return () => window.removeEventListener('open-token-topup', open);
   }, []);
+  // Force periodic credits refresh while overlay is open
+  React.useEffect(() => {
+    let id = null;
+    const refresh = async () => {
+      try {
+        await subscriptionService.refreshCreditsFromDatabase?.();
+      } catch {}
+    };
+    id = setInterval(refresh, 15000);
+    return () => { try { clearInterval(id); } catch {} };
+  }, []);
   // Mode: image | video
   const [activeMode, setActiveMode] = useState('image');
   const [videoRatio, setVideoRatio] = useState('1280:720');
   const [videoDuration, setVideoDuration] = useState(5); // Runway: 5 or 10 seconds
   const [videoFps, setVideoFps] = useState(24);
-  const [videoPolling, setVideoPolling] = useState(false);
+  const [videoResolution, setVideoResolution] = useState('1080p');
+  const [tierInfo, setTierInfo] = useState({ id: 'free' });
+  const [isDemoBypass, setIsDemoBypass] = useState(false);
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const tier = await subscriptionService.getCurrentTier?.();
+        setTierInfo({ id: tier?.id || 'free' });
+      } catch { setTierInfo({ id: 'free' }); }
+      try {
+        const bypass = await subscriptionService.isUnlimitedDemoUser?.();
+        setIsDemoBypass(!!bypass);
+      } catch { setIsDemoBypass(false); }
+    })();
+  }, []);
+  const wavespeedPollRef = useRef({ abort: false, timer: null });
   const [videoDurations, setVideoDurations] = useState([]); // ms history for avg
-  const [videoInputMode, setVideoInputMode] = useState('prompt'); // 'prompt' | 'upscale'
-  const [upscaleRes, setUpscaleRes] = useState('2k'); // '2k' | '4k'
+  const [videoInputMode, setVideoInputMode] = useState('prompt');
   const [etaMs, setEtaMs] = useState(null); // current estimated duration in ms
   const [elapsedMs, setElapsedMs] = useState(0);
   const etaTimerRef = useRef(null);
@@ -71,6 +97,38 @@ const RenderStudioPage = ({ onBack }) => {
       try { console.log('[RenderStudio] generatedVideo changed', generatedVideo); } catch {}
     }
   }, [generatedVideo]);
+
+  React.useEffect(() => {
+    return () => {
+      try {
+        wavespeedPollRef.current.abort = true;
+        if (wavespeedPollRef.current.timer) {
+          clearTimeout(wavespeedPollRef.current.timer);
+          wavespeedPollRef.current.timer = null;
+        }
+      } catch {}
+    };
+  }, []);
+
+  // Dev helper: allow triggering overlay with a video URL from the console
+  React.useEffect(() => {
+    try {
+      window.studioSixTestVideo = (url) => {
+        try {
+          if (!url || typeof url !== 'string') return false;
+          setGeneratedVideo(url);
+          setIsPreviewExpanded(true);
+          try { setActiveMode('video'); } catch {}
+          return true;
+        } catch {
+          return false;
+        }
+      };
+    } catch {}
+    return () => {
+      try { delete window.studioSixTestVideo; } catch {}
+    };
+  }, []);
 
   // Only expand when clicking central region of preview (avoid toolbar clicks)
   const handlePreviewClick = React.useCallback((e) => {
@@ -444,10 +502,11 @@ const RenderStudioPage = ({ onBack }) => {
     if (videoInputMode === 'upscale') {
       if (!window.__studioSixVideoDataUrl) return;
     } else if (!uploadedImage) return;
-    // Require 5 credits for any video generation (prompt or upscale)
+    // Require credits for video generation: 5s=200, 10s=400
     let allowed = true;
     try {
-      const check = await subscriptionService.canPerformAction('video_render', { amount: 250 });
+      const amount = (Number(videoDuration) >= 10) ? 400 : 200;
+      const check = await subscriptionService.canPerformAction('video_render', { amount });
       allowed = (check === undefined) ? true : !!check;
     } catch {}
     if (!allowed) {
@@ -457,8 +516,16 @@ const RenderStudioPage = ({ onBack }) => {
         return;
       }
     }
+    // Reset polling state before starting a new job
+    try {
+      wavespeedPollRef.current.abort = false;
+      if (wavespeedPollRef.current.timer) {
+        clearTimeout(wavespeedPollRef.current.timer);
+        wavespeedPollRef.current.timer = null;
+      }
+    } catch {}
     setIsGenerating(true);
-    setVideoPolling(true);
+    try { setIsPreviewExpanded(true); } catch {}
     setProgress(0);
     setRenderError(null);
     setGeneratedVideo(null);
@@ -481,24 +548,22 @@ const RenderStudioPage = ({ onBack }) => {
       aiSettingsService.trackUsage('video_render');
       const startedAt = Date.now();
 
-      // Prefer Runway (powerful model)
+      // Use Wavespeed Seedance
       let result;
       try {
-        if (videoInputMode === 'upscale') {
-          result = await aiRenderService.generateVideoUpscaleWithRunway({
-            videoDataUrl: window.__studioSixVideoDataUrl
-          });
-        } else {
-          result = await aiRenderService.generateVideoWithRunway({
-        prompt,
-        imageDataUrl: uploadedImage,
-            ratio: videoRatio,
-        durationSec: videoDuration,
-            model: 'gen4_turbo'
-          });
-        }
+        // Guard: lock 1080p for Pro/Studio/Enterprise unless demo bypass
+        let selectedRes = videoResolution;
+        const can1080 = (isDemoBypass || tierInfo.id === 'pro' || tierInfo.id === 'studio' || tierInfo.id === 'enterprise');
+        if (selectedRes === '1080p' && !can1080) selectedRes = '720p';
+        const model = selectedRes === '480p' ? 'bytedance/seedance-v1-pro-i2v-480p' : (selectedRes === '720p' ? 'bytedance/seedance-v1-pro-i2v-720p' : 'bytedance/seedance-v1-pro-i2v-1080p');
+        result = await aiRenderService.generateVideoWithWavespeed({
+          prompt,
+          imageDataUrl: uploadedImage,
+          durationSec: videoDuration,
+          model
+        });
       } catch (e) {
-        console.warn('[Runway create error]', e);
+        console.warn('[Wavespeed create error]', e);
         result = { ok: false, error: e?.message || String(e) };
       }
 
@@ -506,43 +571,64 @@ const RenderStudioPage = ({ onBack }) => {
         const elapsed = Date.now() - startedAt;
         console.log('[RenderStudio] finishAndRecord set video src', asset);
         setGeneratedVideo(asset);
+        try { setIsPreviewExpanded(true); } catch {}
         try { setActiveMode('video'); } catch {}
         setProgress(100);
         setVideoDurations(prev => [...prev.slice(-9), elapsed]);
         try { if (etaTimerRef.current) { clearInterval(etaTimerRef.current); etaTimerRef.current = null; } } catch {}
+        try { wavespeedPollRef.current.abort = true; if (wavespeedPollRef.current.timer) { clearTimeout(wavespeedPollRef.current.timer); wavespeedPollRef.current.timer = null; } } catch {}
         console.log(`[RenderStudio] Video generated in ${Math.round(elapsed/1000)}s`);
-        await subscriptionService.recordUsage('video_render', { amount: 250, description: 'Render Studio video generation (250 credits)' });
+        const debit = (Number(videoDuration) >= 10) ? 400 : 200;
+        await subscriptionService.recordUsage('video_render', { amount: debit, description: `Render Studio video generation (${debit} credits)` });
+        // Mark generation complete only when we have a playable asset
+        setIsGenerating(false);
       };
 
-      console.log('[RenderStudio] Runway create result', result);
+      console.log('[RenderStudio][frontend] create result', result);
       if (result && result.ok && (result.videoUrl || result.assetUrl)) {
         await finishAndRecord(result.videoUrl || result.assetUrl);
-      } else if (result && result.ok && (result.jobId || result.taskId)) {
-        // Poll Runway task
-        for (let i = 0; i < 300; i++) { // up to ~5 minutes at 1s
-          await new Promise(r => setTimeout(r, 1000));
-          const id = result.jobId || result.taskId;
-          const j = await aiRenderService.getRunwayVideoJob(id);
-          console.log('[Runway poll]', id, j?.status, j?.assetUrl ? 'asset' : 'no-asset');
-          if (j?.ok && (j.videoUrl || j.assetUrl)) {
-            await finishAndRecord(j.videoUrl || j.assetUrl);
-            setActiveMode('video');
-            break;
+      } else if (result && result.ok && (result.requestId || result.jobId || result.taskId)) {
+        const id = result.requestId || result.jobId || result.taskId;
+        console.log('[Wavespeed][frontend] created, starting immediate poll every 3s', id);
+        const doPoll = async (attempt = 0) => {
+          if (wavespeedPollRef.current.abort) return;
+          try {
+            const j = await aiRenderService.getWavespeedVideoJob(id);
+            console.log('[Wavespeed][frontend] poll tick', { id, status: j?.status, hasAsset: !!(j?.videoUrl || j?.assetUrl) });
+            if (j?.ok && (j.videoUrl || j.assetUrl)) {
+              await finishAndRecord(j.videoUrl || j.assetUrl);
+              return;
+            }
+            if (j && j.status === 'failed') throw new Error(j?.error || 'Video generation failed');
+            setProgress(p => Math.min(95, Math.max(p, 5 + attempt)));
+          } catch (e) {
+            console.warn('[Wavespeed][frontend] poll error', e);
           }
-          if (j && j.status === 'failed') throw new Error(j?.error || 'Video generation failed');
-          setProgress(p => Math.min(95, Math.max(p, 5 + i)));
-        }
+          // schedule next poll in 3s
+          try { console.log('[Wavespeed][frontend] scheduling next poll in 3s', { attempt: attempt + 1 }); } catch {}
+          wavespeedPollRef.current.timer = setTimeout(() => doPoll(attempt + 1), 3000);
+        };
+        doPoll(0);
       } else {
-        // If Runway creation failed immediately, surface its error
-        throw new Error(result?.error || 'Runway video generation failed');
+        // If creation failed immediately, surface its error
+        throw new Error(result?.error || 'Video generation failed');
       }
     } catch (e) {
       console.error('Video render failed:', e);
       setRenderError(e?.message || String(e));
-    } finally {
-      setIsGenerating(false);
-      setVideoPolling(false);
+      // Stop any scheduled polls on error
+      try {
+        wavespeedPollRef.current.abort = true;
+        if (wavespeedPollRef.current.timer) {
+          clearTimeout(wavespeedPollRef.current.timer);
+          wavespeedPollRef.current.timer = null;
+        }
+      } catch {}
+      // Ensure progress/ETA timers stop and UI exits generating state on error
       try { if (etaTimerRef.current) { clearInterval(etaTimerRef.current); etaTimerRef.current = null; } } catch {}
+      setIsGenerating(false);
+    } finally {
+      // Keep isGenerating state controlled by success/error paths to avoid early UI fallback
     }
   };
 
@@ -660,38 +746,26 @@ const RenderStudioPage = ({ onBack }) => {
 
             {/* Upload */}
             <div>
-              <label className="block text-sm font-semibold text-gray-300 mb-3">{activeMode==='video' && videoInputMode==='upscale' ? 'Upload Video' : 'Reference Image'}</label>
+              <label className="block text-sm font-semibold text-gray-300 mb-3">Reference Image</label>
               <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
               <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={handleVideoChange} />
               <button onClick={handleUploadClick} className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-studiosix-600 hover:bg-studiosix-700 text-white rounded-lg transition-colors">
                 <ArrowUpTrayIcon className="w-5 h-5" />
-                <span>{activeMode==='video' && videoInputMode==='upscale' ? 'Upload Video' : 'Upload Image'}</span>
+                <span>Upload Image</span>
               </button>
-              <p className="text-xs text-gray-500 mt-2">{activeMode==='video' && videoInputMode==='upscale' ? 'MP4, MOV. Max 40s, under 4096px per side' : 'PNG or JPG up to 10MB'}</p>
+              <p className="text-xs text-gray-500 mt-2">PNG or JPG up to 10MB</p>
             </div>
 
             {/* Prompt */}
             <div>
-              <div className="flex items-center space-x-2 mb-3">
-                <button onClick={() => setVideoInputMode('prompt')} className={`px-3 py-1.5 text-xs rounded-md border ${videoInputMode==='prompt' ? 'bg-studiosix-600 text-white border-studiosix-500' : 'bg-slate-800/50 text-gray-300 border-gray-700/60'}`}>Prompt</button>
-                <button onClick={() => setVideoInputMode('upscale')} className={`px-3 py-1.5 text-xs rounded-md border ${videoInputMode==='upscale' ? 'bg-studiosix-600 text-white border-studiosix-500' : 'bg-slate-800/50 text-gray-300 border-gray-700/60'}`}>Upscale</button>
-              </div>
+              <div className="flex items-center space-x-2 mb-3"></div>
               {videoInputMode === 'prompt' ? (
                 <>
               <label className="block text-sm font-semibold text-gray-300 mb-3">AI Prompt</label>
               <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={5} placeholder="Describe the scene, style, lighting..."
                 className="w-full px-4 py-3 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white placeholder-gray-400 focus:ring-2 focus:ring-studiosix-500 focus:border-transparent" />
                 </>
-              ) : (
-                <>
-                  <label className="block text-sm font-semibold text-gray-300 mb-2">Upscale Resolution</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => setUpscaleRes('2k')} className={`px-3 py-2 rounded-md border ${upscaleRes==='2k' ? 'border-studiosix-500 bg-studiosix-600/20 text-white' : 'border-gray-700 bg-gray-800/50 text-gray-200'}`}>2K</button>
-                    <button onClick={() => setUpscaleRes('4k')} className={`px-3 py-2 rounded-md border ${upscaleRes==='4k' ? 'border-studiosix-500 bg-studiosix-600/20 text-white' : 'border-gray-700 bg-gray-800/50 text-gray-200'}`}>4K</button>
-                  </div>
-                  <p className="text-xs text-gray-500 mt-2">We’ll preserve motion and composition and upscale the final clip.</p>
-                </>
-              )}
+              ) : null}
             </div>
 
             {/* Settings */}
@@ -751,26 +825,31 @@ const RenderStudioPage = ({ onBack }) => {
                       </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-semibold text-gray-300 mb-2">Frame Rate</label>
-                  <select
-                    value={videoFps}
-                    onChange={(e) => setVideoFps(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-gray-800/50 border border-gray-700/60 rounded-lg text-white focus:ring-2 focus:ring-studiosix-500 focus:border-transparent"
-                  >
-                    <option value={12}>12 fps (draft)</option>
-                    <option value={24}>24 fps (cinematic)</option>
-                    <option value={30}>30 fps</option>
-                  </select>
+                  <label className="block text-sm font-semibold text-gray-300 mb-2">Video Resolution</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['480p','720p','1080p'].map(r => {
+                      const locked = (r === '1080p') && !(isDemoBypass || tierInfo.id === 'pro' || tierInfo.id === 'studio' || tierInfo.id === 'enterprise');
+                      return (
+                        <button
+                          key={r}
+                          onClick={() => { if (!locked) setVideoResolution(r); }}
+                          disabled={locked}
+                          title={locked ? '1080p is available on Pro or Studio' : undefined}
+                          className={`px-3 py-2 rounded-md border ${videoResolution===r?'border-studiosix-500 bg-studiosix-600/20 text-white':'border-gray-700 bg-gray-800/50 text-gray-200 hover:border-studiosix-500'} ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          {r.toUpperCase()}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
                   </>
-                ) : (
-                  <div className="text-xs text-gray-400">Upscale uses Runway's upscale_v1 (4×, max 4096px). Video must be under 40s.</div>
-                )}
+                ) : null}
               </div>
             )}
 
             {/* Generate */}
-            <button onClick={handleGenerate} disabled={(activeMode==='video' && videoInputMode==='upscale' ? !window.__studioSixVideoDataUrl : !uploadedImage) || (activeMode==='video' && videoInputMode==='upscale' ? false : !prompt.trim()) || isGenerating}
+            <button onClick={handleGenerate} disabled={(activeMode==='video' ? !uploadedImage : !uploadedImage) || (activeMode==='video' ? !prompt.trim() : !prompt.trim()) || isGenerating}
               className={`w-full px-6 py-4 rounded-lg font-semibold transition-all duration-200 ${(!uploadedImage || !prompt.trim() || isGenerating) ? 'bg-gray-700/60 text-gray-400 cursor-not-allowed' : 'bg-gradient-to-r from-studiosix-500 to-studiosix-600 hover:from-studiosix-600 hover:to-studiosix-700 text-white shadow-lg hover:shadow-xl'}`}>
               {isGenerating ? (
                 <div className="flex items-center justify-center space-x-2">
@@ -940,11 +1019,38 @@ const RenderStudioPage = ({ onBack }) => {
       {isPreviewExpanded && (
         <div className="fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setIsPreviewExpanded(false)}>
           <div className="relative w-full max-w-6xl h-[85vh] bg-slate-900 border border-slate-700 rounded-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <button onClick={() => setIsPreviewExpanded(false)} className="absolute top-3 right-3 z-10 p-2 bg-slate-800/70 hover:bg-slate-700/80 text-white rounded-lg">
-              <XMarkIcon className="w-5 h-5" />
-            </button>
+            <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
+              {activeMode === 'video' && (
+                <button onClick={(e) => { e.stopPropagation(); setRenderError(null); setGeneratedVideo(null); handleGenerateVideo(); }} className="p-2 bg-studiosix-600/80 hover:bg-studiosix-700 text-white rounded-lg">
+                  <SparklesIcon className="w-5 h-5" />
+                </button>
+              )}
+              <button onClick={(e) => { e.stopPropagation(); handleDownload(); }} className="p-2 bg-slate-800/70 hover:bg-slate-700/80 text-white rounded-lg">
+                <ArrowDownTrayIcon className="w-5 h-5" />
+              </button>
+              <button onClick={() => setIsPreviewExpanded(false)} className="p-2 bg-slate-800/70 hover:bg-slate-700/80 text-white rounded-lg">
+                <XMarkIcon className="w-5 h-5" />
+              </button>
+            </div>
             <div className="absolute inset-0 flex items-center justify-center">
-              {activeMode === 'video' && generatedVideo ? (
+              {isGenerating && activeMode === 'video' && !generatedVideo ? (
+                <div className="flex flex-col items-center justify-center text-center p-6">
+                  <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin mb-4"></div>
+                  <div className="text-white text-sm">Generating video… This may take up to 5 minutes.</div>
+                  <div className="w-48 bg-white/20 rounded-full h-1 mt-3">
+                    <div className="bg-white/80 h-1 rounded-full transition-all" style={{ width: `${Math.max(5, Math.min(95, progress))}%` }}></div>
+                  </div>
+                </div>
+              ) : renderError && activeMode === 'video' && !generatedVideo ? (
+                <div className="text-center text-red-300 p-6">
+                  <div className="text-lg font-semibold mb-2">Video generation failed</div>
+                  <div className="text-sm opacity-90 mb-4">{renderError}</div>
+                  <div className="flex items-center justify-center gap-3">
+                    <button onClick={() => { setRenderError(null); setGeneratedVideo(null); handleGenerateVideo(); }} className="px-4 py-2 rounded-lg bg-studiosix-600 hover:bg-studiosix-700 text-white">Try again</button>
+                    <button onClick={() => setIsPreviewExpanded(false)} className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white">Close</button>
+                  </div>
+                </div>
+              ) : generatedVideo ? (
                 <video src={generatedVideo} className="w-full h-full object-contain" autoPlay muted loop controls />
               ) : activeMode === 'image' && generatedImage ? (
                 <div className="relative w-full h-full">
@@ -1119,6 +1225,7 @@ const RenderStudioPage = ({ onBack }) => {
           </div>
         </div>
       )}
+      <FloatingWhatsAppButton className="z-[70]" href={"https://chat.whatsapp.com/IjpspD39l1I7rZ9sOhtOrV?mode=ems_share_t"} />
     </div>
   );
 };

@@ -44,6 +44,8 @@ class SubscriptionService {
           imageRendersPerMonth: 3,          // 3 renders/month (Free requirement)
           maxImageResolution: '512x512',    // Up to 512px
           imageFormats: ['jpg'],            // Low-res JPG only
+          // Video limits
+          videoMaxResolution: 'none',       // No video rendering on Free
           // Model access
           availableModels: ['gpt-3.5-turbo'], // Basic model only
           availableRenderModels: ['sdxl-base'], // Basic SDXL
@@ -52,17 +54,22 @@ class SubscriptionService {
           cloudStorage: 0,                  // No cloud storage
           teamSeats: 1,                     // Individual only
           support: 'community',             // Community support
+          supportSLAHours: 0,
+          // Performance
+          renderSpeed: 'standard',
+          // Credits
+          monthlyCredits: 300,
           // Tool restrictions
           restrictedTools: ['advanced-stairs', 'complex-geometry', 'parametric-tools'],
           canExportBIM: false,              // No BIM export
           canExportHighRes: false           // No high-res export
         },
         features: [
-          '5,000 AI tokens/month',
-          '20 image renders/month',
+          '300 credits/month',
           'Basic AI model access',
           'Simple geometry tools only',
-          'Community support'
+          'Community support',
+          'No video rendering'
         ]
       },
       
@@ -80,6 +87,8 @@ class SubscriptionService {
           imageRendersPerMonth: 50,         // 50 renders/month (Pro requirement)
           maxImageResolution: '768x768',    // Up to 768px
           imageFormats: ['jpg', 'png'],     // JPG + PNG
+          // Video limits
+          videoMaxResolution: '1080p',      // 1080p video available from Pro
           // Model access
           availableModels: ['gpt-3.5-turbo', 'gpt-4'], // Basic + Advanced
           availableRenderModels: ['sdxl-base', 'sdxl-refiner'], // Enhanced SDXL
@@ -87,18 +96,24 @@ class SubscriptionService {
           maxProjectSize: 10,               // 10 projects
           cloudStorage: 1000,               // 1GB storage (MB)
           teamSeats: 1,                     // Individual
-          support: 'priority',              // Priority support (72h)
+          support: 'priority',              // Priority support
+          supportSLAHours: 48,
+          // Performance
+          renderSpeed: 'fast',
+          // Credits
+          monthlyCredits: 4000,
           // Tool access
           restrictedTools: ['enterprise-tools'], // Most tools available
           canExportBIM: true,               // IFC/DWG export
           canExportHighRes: false           // No 4K export
         },
         features: [
-          '50,000 AI tokens/month', 
-          '200 image renders/month',
+          '8,000 credits/month',
+          '1080p video renders',
           'Advanced AI models',
           'BIM exports (IFC/DWG)',
-          'Priority support (72h)',
+          'Priority support (48h)',
+          'Faster rendering speed',
           '1GB cloud storage'
         ]
       },
@@ -106,7 +121,7 @@ class SubscriptionService {
       studio: {
         id: 'studio',
         name: 'Studio Tier — Professional Plan',
-        price: 59,
+        price: 49,
         currency: 'USD',
         period: 'month', 
         description: 'Best for professional architects and small/medium firms',
@@ -117,6 +132,8 @@ class SubscriptionService {
           imageRendersPerMonth: 200,        // 200 renders/month (Studio requirement)
           maxImageResolution: '1024x1024',  // Up to 1024px
           imageFormats: ['jpg', 'png', 'png-transparent'], // All formats
+          // Video limits
+          videoMaxResolution: '1080p',      // 1080p video available
           // Model access
           availableModels: ['gpt-3.5-turbo', 'gpt-4', 'claude-3.5-sonnet'], // All models
           availableRenderModels: ['sdxl-base', 'sdxl-refiner', 'sdxl-style'], // All render models
@@ -124,7 +141,12 @@ class SubscriptionService {
           maxProjectSize: 100,              // 100 projects
           cloudStorage: 5000,               // 5GB storage (MB)
           teamSeats: 5,                     // Up to 5 team members
-          support: 'email',                 // Email support (48h)
+          support: 'priority',              // Priority support
+          supportSLAHours: 24,
+          // Performance
+          renderSpeed: 'fastest',
+          // Credits
+          monthlyCredits: 10000,
           // Tool access
           restrictedTools: [],              // All tools available
           canExportBIM: true,               // All BIM formats
@@ -132,12 +154,13 @@ class SubscriptionService {
           canExport4K: true                 // 4K downloads
         },
         features: [
-          '200,000 AI tokens/month',
-          '1,000 image renders/month', 
+          '20,000 credits/month',
+          '1080p video renders', 
           'All AI models (GPT-4, Claude)',
           'High-quality 4K exports',
           'Team collaboration (5 seats)',
-          'Email support (48h SLA)',
+          'Priority support (24h SLA)',
+          'Fastest rendering speed',
           '5GB cloud storage'
         ]
       },
@@ -215,7 +238,8 @@ class SubscriptionService {
     // Centralized credit costs (credits per action)
     this.creditCosts = {
       image_render: 100,
-      video_render: 250
+      // Base cost for video_render; UI passes explicit amount depending on duration
+      video_render: 200
     };
     
     // Load user subscription

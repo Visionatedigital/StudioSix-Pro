@@ -288,6 +288,136 @@ class AIRenderService {
       throw error;
     }
   }
+
+  /**
+   * Google Veo video generation (image-to-video)
+   * @param {Object} params
+   * @param {string} params.prompt
+   * @param {string} params.imageDataUrl
+   * @param {string} [params.aspectRatio]
+   * @param {number} [params.durationSec]
+   * @param {number} [params.fps]
+   * @param {string} [params.model] - e.g., 'veo-3'
+   */
+  async generateVideoWithGoogle({ prompt, imageDataUrl, aspectRatio = '16:9', durationSec = 4, fps = 24, model = 'veo-3' }) {
+    this.baseURL = computeApiBaseUrl();
+    let url = `${this.baseURL}/api/ai/google-video`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Do not send 'model' to avoid overriding backend Veo 3 default
+        body: JSON.stringify({ prompt, imageDataUrl, aspectRatio, durationSec })
+      });
+      const text = await res.text();
+      const json = JSON.parse(text);
+      return json;
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  async getGoogleVideoJob(jobId) {
+    this.baseURL = computeApiBaseUrl();
+    try {
+      const res = await fetch(`${this.baseURL}/api/ai/google-video/${encodeURIComponent(jobId)}`);
+      const json = await res.json();
+      return json;
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Wavespeed Seedance image-to-video
+   * @param {Object} params
+   * @param {string} params.prompt
+   * @param {string} [params.imageDataUrl] - data URL (image/png or image/jpeg)
+   * @param {string} [params.imageUrl] - public URL to an image
+   * @param {number} [params.durationSec] - seconds, e.g., 5
+   */
+  async generateVideoWithWavespeed({ prompt, imageDataUrl, imageUrl, durationSec = 5, model }) {
+    this.baseURL = computeApiBaseUrl();
+    try {
+      try {
+        console.log('[Wavespeed][frontend] start create', {
+          url: `${this.baseURL}/api/ai/wavespeed/video/start-and-wait`,
+          promptLen: typeof prompt === 'string' ? prompt.length : 0,
+          hasImageDataUrl: !!imageDataUrl,
+          imageUrl: imageUrl ? (imageUrl.slice ? imageUrl.slice(0, 60) + (imageUrl.length > 60 ? '…' : '') : true) : null,
+          durationSec,
+          model
+        });
+      } catch {}
+      const res = await fetch(`${this.baseURL}/api/ai/wavespeed/video/start-and-wait`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // Use a short wait window so UI can begin client polling quickly if needed
+        body: JSON.stringify({ prompt, imageDataUrl, imageUrl, duration: Number(durationSec) || 5, camera_fixed: false, seed: -1, timeoutSec: 20, model })
+      });
+      const text = await res.text();
+      let json = {}; try { json = JSON.parse(text); } catch {}
+      try {
+        console.log('[Wavespeed][frontend] create response', {
+          httpOk: res.ok,
+          status: res.status,
+          hasVideoUrl: !!json?.videoUrl,
+          hasAssetUrl: !!json?.assetUrl,
+          statusField: json?.status,
+          requestId: json?.requestId || json?.jobId || json?.taskId,
+          timeout: json?.timeout === true
+        });
+      } catch {}
+      // Normalize any proxy URL to absolute
+      if (json && typeof json.videoUrl === 'string' && json.videoUrl.startsWith('/')) {
+        json.videoUrl = `${this.baseURL}${json.videoUrl}`;
+      }
+      return json;
+    } catch (e) {
+      try { console.warn('[Wavespeed][frontend] create exception', e?.message || String(e)); } catch {}
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Poll a Runway task by ID
+   * @param {string} jobId
+   */
+  async getWavespeedVideoJob(jobId) {
+    this.baseURL = computeApiBaseUrl();
+    try {
+      console.log('[Wavespeed][frontend] poll GET', { url: `${this.baseURL}/api/ai/wavespeed/video/${encodeURIComponent(jobId)}?probe=1`, jobId });
+      const res = await fetch(`${this.baseURL}/api/ai/wavespeed/video/${encodeURIComponent(jobId)}?probe=1`);
+      let json = {}; try { json = await res.json(); } catch {}
+      try {
+        console.log('[Wavespeed][frontend] poll response', {
+          httpOk: res.ok,
+          status: res.status,
+          statusField: json?.status,
+          hasVideoUrl: !!json?.videoUrl,
+          hasAssetUrl: !!json?.assetUrl
+        });
+      } catch {}
+      // Ensure returned proxy URL is absolute to our API base
+      try {
+        if (json && typeof json.videoUrl === 'string' && json.videoUrl.startsWith('/')) {
+          json.videoUrl = `${this.baseURL}${json.videoUrl}`;
+        }
+      } catch {}
+      return json;
+    } catch (e) {
+      try { console.warn('[Wavespeed][frontend] poll exception', e?.message || String(e)); } catch {}
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
+   * Runway video upscale (REST)
+   * @param {Object} params
+   * @param {string} [params.videoDataUrl] - data URL (video/*)
+   * @param {string} [params.videoUrl] - HTTPS URL to a video
+   */
+  // Upscale via Runway removed in Wavespeed flow
 }
 
 // Export singleton instance
