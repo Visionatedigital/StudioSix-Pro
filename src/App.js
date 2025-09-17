@@ -69,6 +69,7 @@ import { WallIcon, SlabIcon, RampIcon, ColumnIcon, DoorIcon, WindowIcon, Opening
 import ResizableAIChat from './components/ResizableAIChat';
 import NativeAIChat from './components/NativeAIChat';
 import AIRenderOverlay from './components/AIRenderOverlay';
+import BIMComingSoonOverlay from './components/BIMComingSoonOverlay';
 import ViewportCaptureFrame from './components/ViewportCaptureFrame';
 import LiveStreamStatus from './components/LiveStreamStatus';
 import SaveDialog from './components/SaveDialog';
@@ -4272,6 +4273,14 @@ const AuthenticatedApp = () => {
     user_metadata: { full_name: 'Demo User' } 
   } : user;
 
+  // Internal pricing route within authenticated session
+  try {
+    const path = window.location.pathname;
+    if (path === '/app/pricing') {
+      return <PricingPage onClose={() => window.history.back()} />;
+    }
+  } catch {}
+
   return <MainApp 
     user={mockUser} 
     onRequestAuth={() => {
@@ -7184,6 +7193,8 @@ Would you like to sign out?
 
           {/* Toggle-Based Viewport: 2D Drafting OR 3D Visualization */}
           <div ref={viewport3DRef} className="w-full h-full relative">
+            {/* Coming Soon overlay for BIM modeler */}
+            <BIMComingSoonOverlay onTryRenderStudio={openRenderStudio} />
             {viewportMode === '2d' ? (
               /* 2D CAD Drafting Viewport */
               <CAD2DViewport

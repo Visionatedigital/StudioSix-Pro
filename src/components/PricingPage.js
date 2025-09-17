@@ -11,7 +11,9 @@
 import React, { useState, useEffect } from 'react';
 import './PricingPage.css';
 import subscriptionService from '../services/SubscriptionService';
-import paystackService from '../services/PaystackService';
+// Removed Paystack fallback in favor of PayPal subscriptions only
+// import paystackService from '../services/PaystackService';
+import PayPalService from '../services/PayPalService';
 import { useAuth } from '../hooks/useAuth';
 
 const PricingPage = ({ onClose, currentTier = 'free' }) => {
@@ -30,13 +32,15 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
   const [loading, setLoading] = useState(true);
   const [userLocation, setUserLocation] = useState('ZA');
   const [selectedBilling, setSelectedBilling] = useState('monthly');
+  const [selectedTierId, setSelectedTierId] = useState(currentTier || null);
   const [upgrading, setUpgrading] = useState(null);
   const [pendingUpgrade, setPendingUpgrade] = useState(null);
+  const [discounts, setDiscounts] = useState({}); // e.g., { pro: 70 }
 
   // Base prices in USD (display currency)
   const basePrices = {
     pro: { monthly: 19, yearly: 190 }, // $19/month, $190/year
-    studio: { monthly: 59, yearly: 590 }, // $59/month, $590/year
+    studio: { monthly: 49, yearly: 490 }, // $49/month, $490/year
     enterprise: { monthly: 299, yearly: 2990 }, // $299/month, $2990/year
     education: { monthly: 0, yearly: 0 } // Custom pricing - contact sales
   };
@@ -53,6 +57,7 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
     'ZAR': 'R',
     'KES': 'KSh',
     'GHS': 'GH₵',
+    'UGX': 'USh',
     'CAD': 'C$',
     'AUD': 'A$',
     'JPY': '¥',
@@ -60,10 +65,13 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
     'INR': '₹'
   };
 
+  // Available currencies for selector (ordered by common usage)
+  const availableCurrencies = ['USD', 'EUR', 'GBP', 'ZAR', 'NGN', 'KES', 'UGX', 'GHS', 'CAD', 'AUD', 'JPY', 'CNY', 'INR'];
+
   // Location to currency mapping
   const locationCurrencyMap = {
     'US': 'USD', 'CA': 'CAD', 'GB': 'GBP', 'AU': 'AUD', 'JP': 'JPY',
-    'NG': 'NGN', 'ZA': 'ZAR', 'KE': 'KES', 'GH': 'GHS', 'IN': 'INR',
+    'NG': 'NGN', 'ZA': 'ZAR', 'KE': 'KES', 'GH': 'GHS', 'UG': 'UGX', 'IN': 'INR',
     'CN': 'CNY', 'DE': 'EUR', 'FR': 'EUR', 'ES': 'EUR', 'IT': 'EUR'
   };
 
@@ -76,6 +84,47 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
     // Also check multiple times in case of timing issues
     setTimeout(() => checkPendingUpgrade(), 1000);
     setTimeout(() => checkPendingUpgrade(), 2000);
+  }, []);
+
+  // Parse discount from URL (e.g., /pricing?discount=70&tier=pro)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      // Optional: allow configuring PayPal via URL for local testing
+      const qClient = params.get('paypal_client_id');
+      const qPro = params.get('paypal_plan_pro');
+      const qStudio = params.get('paypal_plan_studio');
+      if (qClient) localStorage.setItem('paypal_client_id', qClient);
+      if (qPro) localStorage.setItem('paypal_plan_pro', qPro);
+      if (qStudio) localStorage.setItem('paypal_plan_studio', qStudio);
+      const promo = params.get('promo'); // fallback like pro70
+      const tierParam = params.get('tier') || params.get('plan');
+      const tiersParam = params.get('tiers'); // comma-separated list
+      const discountParam = Number(params.get('discount') || params.get('pro_discount') || (promo && /([0-9]{1,2})$/.exec(promo)?.[1]));
+      const inferredTier = (tierParam || (promo && /^[a-z]+/i.exec(promo)?.[0]) || '').toLowerCase();
+      let tierIds = [];
+      if (tiersParam) {
+        tierIds = String(tiersParam).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      } else if (inferredTier) {
+        if (inferredTier === 'all') tierIds = ['pro', 'studio']; else tierIds = [inferredTier];
+      } else {
+        // If no tier specified but discount present, apply to both Pro and Studio by default
+        tierIds = ['pro', 'studio'];
+      }
+      if (discountParam && discountParam > 0 && discountParam < 100 && tierIds.length > 0) {
+        const obj = tierIds.reduce((acc, t) => { acc[t] = discountParam; return acc; }, {});
+        setDiscounts(obj);
+        localStorage.setItem('studiosix_discount', JSON.stringify({ ...obj, ts: Date.now() }));
+      } else {
+        const saved = localStorage.getItem('studiosix_discount');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            setDiscounts(parsed || {});
+          } catch {}
+        }
+      }
+    } catch {}
   }, []);
 
   useEffect(() => {
@@ -146,6 +195,23 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
     } catch (error) {
       console.warn('Error processing pending upgrade:', error);
       localStorage.removeItem('pending_upgrade');
+    }
+  };
+
+  const handleCurrencyChange = (event) => {
+    try {
+      const newCurrency = event.target.value;
+      localStorage.setItem('force_currency', newCurrency);
+      setCurrency(newCurrency);
+      setUserLocation(getCountryFromCurrency(newCurrency));
+      if (newCurrency !== 'USD') {
+        const rates = getOfflineExchangeRates(newCurrency);
+        setExchangeRates(rates);
+      } else {
+        setExchangeRates({});
+      }
+    } catch (error) {
+      console.warn('Failed to change currency:', error);
     }
   };
 
@@ -250,9 +316,20 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
     }
   };
 
+  const getEffectivePriceUSD = (tierId, billing) => {
+    try {
+      const base = basePrices[tierId]?.[billing] || 0;
+      const pct = Number(discounts[tierId] || 0);
+      if (pct > 0 && pct < 100) {
+        return Math.round(base * (100 - pct) / 100);
+      }
+      return base;
+    } catch { return 0; }
+  };
+
   const getCountryFromCurrency = (currency) => {
     const currencyToCountry = {
-      'USD': 'US', 'EUR': 'DE', 'GBP': 'GB', 'ZAR': 'ZA',
+      'USD': 'US', 'EUR': 'DE', 'GBP': 'GB', 'ZAR': 'ZA', 'UGX': 'UG',
       'CAD': 'CA', 'AUD': 'AU', 'JPY': 'JP', 'CNY': 'CN',
       'INR': 'IN', 'NGN': 'NG', 'KES': 'KE', 'GHS': 'GH'
     };
@@ -272,6 +349,7 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
       'ZAR': 18.5,   // 1 USD ≈ 18.5 ZAR
       'NGN': 1580,   // 1 USD ≈ 1580 NGN
       'KES': 129,    // 1 USD ≈ 129 KES
+      'UGX': 3800,   // 1 USD ≈ 3800 UGX
       'GHS': 15.7    // 1 USD ≈ 15.7 GHS
     };
     
@@ -326,8 +404,7 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
         popular: false,
         current: currentTier === 'free',
         features: [
-          '5,000 AI tokens per month',
-          '20 image renders per month',
+          '300 credits per month',
           'GPT-3.5 Turbo access',
           'Basic geometry tools',
           'Community support',
@@ -336,6 +413,7 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
         limitations: [
           'No BIM exports',
           'No advanced AI models',
+          'No video rendering',
           'Limited tool access'
         ],
         buttonText: currentTier === 'free' ? 'Current Plan' : 'Downgrade',
@@ -345,16 +423,17 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
         id: 'pro',
         name: 'Pro Tier',
         subtitle: 'Best for designers and professionals',
-        monthlyPrice: basePrices.pro.monthly,
-        yearlyPrice: basePrices.pro.yearly,
+        monthlyPrice: getEffectivePriceUSD('pro', 'monthly'),
+        yearlyPrice: getEffectivePriceUSD('pro', 'yearly'),
         popular: true,
         current: currentTier === 'pro',
         features: [
-          '50,000 AI tokens per month',
-          '200 image renders per month',
+          '4,000 credits per month',
+          '1080p video renders',
           'GPT-3.5 + GPT-4 access',
           'BIM exports (IFC/DWG)',
-          'Priority support (72h SLA)',
+          'Priority support (48h SLA)',
+          'Faster rendering speed',
           '1GB cloud storage',
           'Up to 768px image resolution'
         ],
@@ -366,21 +445,22 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
         id: 'studio',
         name: 'Studio Tier',
         subtitle: 'For teams and advanced workflows',
-        monthlyPrice: basePrices.studio.monthly,
-        yearlyPrice: basePrices.studio.yearly,
+        monthlyPrice: getEffectivePriceUSD('studio', 'monthly'),
+        yearlyPrice: getEffectivePriceUSD('studio', 'yearly'),
         popular: false,
         current: currentTier === 'studio',
         features: [
-          '200,000 AI tokens per month',
-          '1,000 image renders per month',
+          '10,000 credits per month',
+          '1080p video renders',
           'All AI models (GPT-4, Claude 3.5)',
           'High-quality BIM + 4K renders',
           'Team collaboration (5 seats)',
-          'Email support (48h SLA)',
+          'Priority support (24h SLA)',
+          'Fastest rendering speed',
           '5GB cloud storage',
           'Up to 1024px image resolution'
         ],
-        savings: '4x more tokens than Pro',
+        savings: '40x more tokens than Free',
         buttonText: currentTier === 'studio' ? 'Current Plan' : 'Upgrade to Studio',
         disabled: currentTier === 'studio'
       },
@@ -483,21 +563,22 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
     }
 
     // Validate user email - redirect to sign in if not authenticated
+    // If not authenticated and we're inside the app, open internal auth; if on public route, continue old behavior
     if (!user?.email) {
-      console.log('❌ User not authenticated, storing pending upgrade and redirecting to auth');
-      // Store the intended upgrade tier for after sign in
-      localStorage.setItem('pending_upgrade', JSON.stringify({
-        tier: tier.id,
-        billing: selectedBilling,
-        timestamp: new Date().toISOString()
-      }));
-      
-      // Store return URL to come back to pricing page
-      localStorage.setItem('auth_return_url', '/pricing');
-      
-      // Redirect to sign in page
-      window.location.href = '/auth/callback';
-      return;
+      console.log('❌ User not authenticated at upgrade; attempting in-app auth');
+      try {
+        // Signal main app to open auth overlay instead of redirecting away
+        window.dispatchEvent(new CustomEvent('studiosix-open-auth'));
+        // Remember pending upgrade
+        localStorage.setItem('pending_upgrade', JSON.stringify({ tier: tier.id, billing: selectedBilling, timestamp: new Date().toISOString() }));
+        return;
+      } catch {
+        // Fallback: traditional redirect for public pricing page
+        localStorage.setItem('pending_upgrade', JSON.stringify({ tier: tier.id, billing: selectedBilling, timestamp: new Date().toISOString() }));
+        localStorage.setItem('auth_return_url', '/pricing');
+        window.location.href = '/auth/callback';
+        return;
+      }
     }
 
     console.log('✅ User authenticated, proceeding with payment flow for:', tier.id);
@@ -507,100 +588,28 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
     setUpgrading(tier.id);
 
     try {
-      console.log('🔧 Validating Paystack configuration...');
-      // Validate Paystack configuration
-      const configValidation = paystackService.validateConfiguration();
-      console.log('⚙️ Config validation result:', configValidation);
-      
-      if (!configValidation.valid) {
-        console.error('❌ Paystack configuration invalid:', configValidation.errors);
-        throw new Error(`Payment configuration error: ${configValidation.errors.join(', ')}`);
-      }
-
-      console.log('💰 Calculating prices...');
-      const priceUSD = selectedBilling === 'monthly' ? tier.monthlyPrice : tier.yearlyPrice;
-      const displayPrice = convertPrice(priceUSD);
-      const priceZAR = Math.round(priceUSD * usdToZarRate); // Convert USD to ZAR for Paystack
-
-      console.log('💵 Price calculations:', {
-        priceUSD,
-        displayPrice,
-        priceZAR,
-        usdToZarRate,
-        selectedBilling
-      });
-
-      // Validate converted price
-      if (!displayPrice || displayPrice <= 0) {
-        console.error('❌ Invalid price calculated:', { displayPrice, priceUSD, priceZAR });
-        throw new Error('Invalid payment amount calculated');
-      }
-
-      console.log('📦 Creating payment data...');
-      const paymentData = {
-        email: user.email,
-        amount: priceZAR * 100, // Use ZAR price for Paystack, expects cents
-        currency: 'ZAR', // Always charge in ZAR since that's what Paystack account supports
-        plan: tier.id,
-        billing_cycle: selectedBilling,
-        callback_url: `${window.location.origin}/payment/callback`,
-        metadata: {
-          user_id: user?.id || 'anonymous',
-          user_email: user.email,
-          current_tier: currentTier,
-          upgrade_tier: tier.id,
-          original_price_usd: priceUSD,
-          price_zar: priceZAR,
-          displayed_price: displayPrice,
-          displayed_currency: currency,
-          usd_to_zar_rate: usdToZarRate,
-          exchange_rate: exchangeRates[currency] || 1,
-          user_location: userLocation,
-          upgrade_timestamp: new Date().toISOString()
-        }
+      // Prefer PayPal Subscriptions modal
+      const paypalPlanMap = {
+        pro: process.env.REACT_APP_PAYPAL_PLAN_PRO || window.PAYPAL_PLAN_PRO || localStorage.getItem('paypal_plan_pro'),
+        studio: process.env.REACT_APP_PAYPAL_PLAN_STUDIO || window.PAYPAL_PLAN_STUDIO || localStorage.getItem('paypal_plan_studio')
       };
-
-      console.log('💳 Payment data created:', {
-        ...paymentData,
-        metadata: { ...paymentData.metadata, user_email: '[REDACTED]' }
-      });
-
-      console.log('🚀 Calling paystackService.initializePayment...');
-      const result = await paystackService.initializePayment(paymentData);
-      console.log('📋 Payment initialization result:', result);
-      
-      if (result.success) {
-        console.log('✅ Payment initialization successful!');
-        console.log('🔗 Authorization URL:', result.authorization_url);
-        console.log('📋 Reference:', result.reference || result.data?.reference);
-        
-        // Store payment attempt for tracking
-        const pendingPayment = {
-          reference: result.reference || result.data?.reference,
-          plan: tier.id,
-          amount: displayPrice,
-          currency: currency,
-          amount_zar: priceZAR,
-          timestamp: new Date().toISOString()
-        };
-        localStorage.setItem('pending_payment', JSON.stringify(pendingPayment));
-        console.log('💾 Stored pending payment:', pendingPayment);
-
-        // Redirect to Paystack payment page
-        console.log('🚀 Redirecting to Paystack payment page...');
-        console.log('🔗 Full redirect URL:', result.authorization_url);
-        
-        if (result.authorization_url) {
-          window.location.href = result.authorization_url;
-          console.log('✅ Redirect command executed');
-        } else {
-          console.error('❌ No authorization_url in result:', result);
-          throw new Error('No payment URL received from Paystack');
+      const paypalClientId = process.env.REACT_APP_PAYPAL_CLIENT_ID || window.PAYPAL_CLIENT_ID || localStorage.getItem('paypal_client_id');
+      if ((selectedBilling === 'monthly') && (paypalPlanMap[tier.id])) {
+        console.log('🟦 Opening PayPal subscription modal for plan:', paypalPlanMap[tier.id]);
+        try {
+          const sub = await PayPalService.openSubscriptionModal(paypalPlanMap[tier.id], paypalClientId);
+          console.log('✅ PayPal subscription approved:', sub);
+          alert('Subscription started. Welcome to ' + tier.name + '!');
+          // Optimistically mark upgrade locally; server webhook should sync real status
+          try { await subscriptionService.upgradeTo(tier.id, 'paypal_subscription'); } catch {}
+          return;
+        } catch (e) {
+          console.warn('PayPal subscription flow failed or was cancelled.', e);
+          throw e;
         }
-      } else {
-        console.error('❌ Payment initialization failed:', result);
-        throw new Error(result.message || 'Payment initialization failed');
       }
+      // If we reach here, PayPal is not configured for this tier/billing
+      throw new Error('PayPal subscription not configured for this plan.');
 
     } catch (error) {
       console.error('❌ Upgrade failed with error:', error);
@@ -652,7 +661,10 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
   const tiers = getPricingTiers();
 
   return (
-    <div className="pricing-page">
+    <div className="pricing-page relative overflow-x-hidden">
+      {/* Background gradient to match landing page hero */}
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-studiosix-950"></div>
+      <div className="relative z-10">
       {onClose && (
         <button className="pricing-close" onClick={onClose}>
           <span>×</span>
@@ -663,6 +675,19 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
         <h1>Choose Your StudioSix Plan</h1>
         <p>Unlock the full potential of AI-powered architectural design</p>
         
+        {/* Currency selector */}
+        <div className="currency-row">
+          <div className="currency-selector" aria-label="Currency selector">
+            <label htmlFor="currency-select">Currency</label>
+            <select id="currency-select" value={currency} onChange={handleCurrencyChange}>
+              {availableCurrencies.map(cur => (
+                <option key={cur} value={cur}>
+                  {currencySymbols[cur] || ''} {cur}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
         <div className="billing-toggle">
           <button 
@@ -754,7 +779,12 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
         }).map(tier => (
           <div 
             key={tier.id}
-            className={`pricing-card ${tier.popular ? 'popular' : ''} ${tier.current ? 'current' : ''}`}
+            className={`pricing-card tier-${tier.id} ${tier.popular ? 'popular' : ''} ${tier.current ? 'current' : ''} ${selectedTierId === tier.id ? 'selected' : ''}`}
+            onClick={() => setSelectedTierId(tier.id)}
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedTierId(tier.id); } }}
+            role="button"
+            aria-pressed={selectedTierId === tier.id}
           >
             {tier.popular && <div className="popular-badge">Most Popular</div>}
             {tier.current && <div className="current-badge">Current Plan</div>}
@@ -781,6 +811,19 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
                       <span className="price-period">
                         {selectedBilling === 'monthly' ? '/month' : '/year'}
                       </span>
+                      {/* Show crossed-out original when discount applies */}
+                      {(() => {
+                        const pct = discounts[tier.id];
+                        if (!pct || pct <= 0 || pct >= 100) return null;
+                        const original = selectedBilling === 'monthly' ? basePrices[tier.id]?.monthly : basePrices[tier.id]?.yearly;
+                        if (!original || original <= 0) return null;
+                        return (
+                          <>
+                            <span className="price-original">{formatPrice(original)}</span>
+                            <span className="discount-badge">-{pct}%</span>
+                          </>
+                        );
+                      })()}
                       {selectedBilling === 'yearly' && (
                         <div className="yearly-savings">
                           {formatPrice(Math.round(tier.yearlyPrice / 12))}/month when paid yearly
@@ -889,6 +932,7 @@ const PricingPage = ({ onClose, currentTier = 'free' }) => {
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

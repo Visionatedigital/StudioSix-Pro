@@ -7,7 +7,16 @@ export function getApiBase() {
     return envBase.replace(/\/$/, '');
   }
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
-    return window.location.origin;
+    try {
+      const url = new URL(window.location.href);
+      // In dev, prefer backend on 8080 if app is served from 3000
+      if ((url.hostname === 'localhost' || url.hostname === '127.0.0.1') && url.port === '3000') {
+        return 'http://localhost:8080';
+      }
+      return window.location.origin;
+    } catch {
+      return window.location.origin;
+    }
   }
   // Last-resort fallback to relative origin
   return '';

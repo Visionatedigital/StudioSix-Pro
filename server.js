@@ -57,7 +57,9 @@ app.use(helmet({
         "https://www.paypal.com",
         "https://*.paypal.com",
         "https://www.paypalobjects.com",
-        "https://*.paypalobjects.com"
+        "https://*.paypalobjects.com",
+        // Allow Runway API outbound from server proxy when browser hits our API
+        "https://api.runwayml.com"
       ],
       fontSrc: ["'self'", "data:"],
       objectSrc: ["'none'"],
@@ -101,6 +103,115 @@ app.get('/health', (req, res) => {
 // Simple test endpoint
 app.get('/test', (req, res) => {
   res.json({ message: 'Test endpoint working', timestamp: new Date().toISOString() });
+});
+
+// Lightweight return/cancel routes for PayPal redirect flow
+app.get('/payment/paypal/return', (req, res) => {
+  // Let the SPA handle success/capture in PaymentSuccess route
+  res.redirect('/payment/success');
+});
+
+app.get('/payment/paypal/cancel', (req, res) => {
+  // Route back to pricing so the user can retry
+  res.redirect('/pricing');
+});
+
+// ---------------- PayPal (Card) Integration for production server -----------------
+const PAYPAL_MODE = (process.env.PAYPAL_MODE || 'live').toLowerCase();
+const PAYPAL_CLIENT_ID = process.env.PAYPAL_CLIENT_ID || process.env.REACT_APP_PAYPAL_CLIENT_ID;
+const PAYPAL_SECRET = process.env.PAYPAL_SECRET;
+const PAYPAL_API_BASE = PAYPAL_MODE === 'live' ? 'https://api-m.paypal.com' : 'https://api-m.sandbox.paypal.com';
+
+// Expose client ID to frontend (read-only)
+app.get('/api/payments/paypal/client-id', (req, res) => {
+  try {
+    res.json({ ok: true, clientId: PAYPAL_CLIENT_ID || '' });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+async function paypalAccessToken() {
+  if (!PAYPAL_CLIENT_ID || !PAYPAL_SECRET) throw new Error('PayPal credentials missing');
+  const basic = Buffer.from(`${PAYPAL_CLIENT_ID}:${PAYPAL_SECRET}`).toString('base64');
+  const r = await fetch(`${PAYPAL_API_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Authorization': `Basic ${basic}` },
+    body: 'grant_type=client_credentials',
+  });
+  const j = await r.json();
+  if (!r.ok) {
+    console.error('[PayPal] oauth error', r.status, j);
+    throw new Error(j.error || 'paypal oauth failed');
+  }
+  return j.access_token;
+}
+
+// Create PayPal order
+app.post('/api/payments/paypal/create-order', async (req, res) => {
+  try {
+    const { amountUSD, tokens, userId, email } = req.body || {};
+    const value = Number(amountUSD || 0).toFixed(2);
+    if (!amountUSD || Number(amountUSD) <= 0) return res.status(400).json({ ok: false, error: 'amountUSD required' });
+    if (!PAYPAL_CLIENT_ID || !PAYPAL_SECRET) return res.status(500).json({ ok: false, error: 'PayPal not configured' });
+    const access = await paypalAccessToken();
+    const hostBase = `${req.protocol}://${req.get('host')}`;
+    const returnUrl = `${hostBase}/payment/paypal/return`;
+    const cancelUrl = `${hostBase}/payment/paypal/cancel`;
+    const body = {
+      intent: 'CAPTURE',
+      purchase_units: [
+        {
+          amount: { currency_code: 'USD', value },
+          custom_id: JSON.stringify({ kind: 'render_tokens', tokens, userId, email })
+        }
+      ],
+      application_context: {
+        brand_name: 'StudioSix Pro',
+        landing_page: 'LOGIN',
+        user_action: 'PAY_NOW',
+        shipping_preference: 'NO_SHIPPING',
+        return_url: returnUrl,
+        cancel_url: cancelUrl
+      }
+    };
+    const r = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${access}` },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      console.error('[PayPal] create order error', r.status, j);
+      return res.status(r.status).json({ ok: false, error: j });
+    }
+    res.json({ ok: true, id: j.id, links: j.links || [] });
+  } catch (e) {
+    console.error('[PayPal] create-order exception', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
+
+// Capture PayPal order
+app.post('/api/payments/paypal/capture', async (req, res) => {
+  try {
+    const { orderId } = req.body || {};
+    if (!orderId) return res.status(400).json({ ok: false, error: 'orderId required' });
+    const access = await paypalAccessToken();
+    const r = await fetch(`${PAYPAL_API_BASE}/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${access}` }
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      console.error('[PayPal] capture error', r.status, j);
+      return res.status(r.status).json({ ok: false, error: j });
+    }
+    res.json({ ok: true, data: j });
+  } catch (e) {
+    console.error('[PayPal] capture exception', e);
+    res.status(500).json({ ok: false, error: String(e) });
+  }
 });
 
 // Email API endpoints (integrated from email-proxy-server.js)
@@ -225,6 +336,8 @@ app.post('/api/add-to-waitlist', async (req, res) => {
     });
   }
 });
+
+// (Removed) Runway proxy — migrated to Google Veo video flow
 
 // Catch all handler: send back React's index.html file for any non-API routes
 app.get('*', (req, res) => {

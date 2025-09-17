@@ -236,6 +236,26 @@ rm chatgpt-cookies.json
 npm run chatgpt-cookies
 ```
 
+## API Keys
+
+- Set `WAVESPEED_API_KEY` in your environment for the video generation pipeline (Seedance i2v).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

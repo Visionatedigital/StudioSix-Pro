@@ -26,6 +26,7 @@ import recentProjectsManager from '../utils/RecentProjectsManager';
 import AnimatedPromptBox from './AnimatedPromptBox';
 import RenderTeaserOverlay from './RenderTeaserOverlay';
 import autoSaveService from '../services/AutoSaveService';
+import FloatingWhatsAppButton from './FloatingWhatsAppButton';
 
 const PROJECT_TEMPLATES = [
   {
@@ -929,7 +930,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
                 </h3>
                 
                 {/* Fixed height container to maintain layout balance */}
-                <div className="h-auto lg:h-80 flex flex-col">
+                <div className="h-auto lg:h-40 flex flex-col">
                   <div className="flex-1 flex flex-col space-y-3 overflow-hidden">
                     {loadingProjects ? (
                       // Loading state - centered
@@ -1027,6 +1028,22 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
                 </div>
               </div>
 
+              {/* Promo banner: 70% off Pro plans */}
+              <div className="relative rounded-xl overflow-hidden mb-4 cursor-pointer group" onClick={() => {
+                try {
+                  const url = new URL(window.location.origin + '/app/pricing');
+                  url.search = '?discount=70&tiers=pro,studio';
+                  window.location.assign(url.toString());
+                } catch {
+                  window.location.href = '/app/pricing?discount=70&tiers=pro,studio';
+                }
+              }}>
+                <img src="/Launchday%20Banner/Get%2070%25%20off%20on%20us.png" alt="Get 70% off Pro" className="w-full h-28 object-cover" />
+                <div className="absolute inset-0 flex items-center justify-end px-4">
+                  <button className="px-3 py-1.5 bg-studiosix-600 hover:bg-studiosix-700 text-white rounded-md text-sm font-semibold shadow">See Pricing</button>
+                </div>
+              </div>
+
               {/* Quick actions moved above */}
             </div>
           </div>
@@ -1117,6 +1134,7 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
           if (typeof onOpenRenderStudio === 'function') onOpenRenderStudio();
         }}
       />
+      <FloatingWhatsAppButton href={"https://chat.whatsapp.com/IjpspD39l1I7rZ9sOhtOrV?mode=ems_share_t"} />
     </div>
   );
 };
