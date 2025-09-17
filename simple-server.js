@@ -1509,11 +1509,13 @@ app.post('/api/payments/paypal/capture', async (req, res) => {
         }
         const tracked = paypalOrders.get(orderId) || {};
         const tokens = meta?.tokens || tracked.tokens || usdToTokens(pu.amount?.value || 0);
+        const payerEmail = (j && (j.payer && j.payer.email_address)) || null;
         const userId = meta?.userId || tracked.userId || null;
-        const email = meta?.email || tracked.email || null;
+        const email = meta?.email || tracked.email || payerEmail || null;
         if (tokens && (userId || email)) {
           if (userId) {
-            await incrementRenderCreditsByUserId(userId, tokens);
+            try { await incrementRenderCreditsByUserId(userId, tokens); }
+            catch (e) { if (email) await incrementRenderCreditsByEmail(email, tokens); else throw e; }
           } else if (email) {
             await incrementRenderCreditsByEmail(email, tokens);
           }
@@ -1559,11 +1561,14 @@ app.post('/api/payments/paypal/webhook', async (req, res) => {
         const custom = event.resource?.custom_id || pu?.custom_id || null;
         if (custom) { try { meta = JSON.parse(custom); } catch {} }
         const tokens = meta?.tokens || usdToTokens(event.resource?.amount?.value || 0);
-        const userId = meta?.userId || null;
-        const email = meta?.email || null;
+      const userId = meta?.userId || null;
+      const email = meta?.email || (event?.resource && event.resource?.payer && event.resource.payer.email_address) || null;
         if (tokens && (userId || email)) {
-          if (userId) await incrementRenderCreditsByUserId(userId, tokens);
-          else if (email) await incrementRenderCreditsByEmail(email, tokens);
+        if (userId) {
+          try { await incrementRenderCreditsByUserId(userId, tokens); }
+          catch (e) { if (email) await incrementRenderCreditsByEmail(email, tokens); else throw e; }
+        }
+        else if (email) await incrementRenderCreditsByEmail(email, tokens);
           console.log('[PayPal] webhook credited', tokens);
         }
       } catch (e) { console.warn('[PayPal] webhook credit error', e); }
@@ -1643,9 +1648,9 @@ app.post('/api/mobilemoney/request', async (req, res) => {
     console.log('[MM] request-payment OK', j.payment_id || j.data?.payment_id, j.status || j.data?.status);
     // track mapping for callback crediting
     try {
-      const userId = req.headers['x-user-id'] || null;
-      const email = req.headers['x-user-email'] || null;
-      console.log('[MM] req headers', { reqHeaders: req });
+      // Accept user context from headers or body (frontend sends both now)
+      const userId = req.headers['x-user-id'] || req.body?.userId || null;
+      const email = req.headers['x-user-email'] || req.body?.email || null;
       const tokens = ugxToTokens(amount);
       if (j.payment_id || (j.data && j.data.payment_id)) {
         const pid = j.payment_id || j.data.payment_id;
@@ -1850,8 +1855,9 @@ app.get('/api/mobilemoney/callback-status/:paymentId', (req, res) => {
 // Fallback crediting path when frontend polling detects success and callback is not yet pointing to us
 app.post('/api/mobilemoney/credit-after-poll', express.json(), async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'] || null;
-    const email = req.headers['x-user-email'] || null;
+    // Accept userId/email from headers or body
+    const userId = req.headers['x-user-id'] || req.body?.userId || null;
+    const email = req.headers['x-user-email'] || req.body?.email || null;
     const { paymentId } = req.body || {};
     if (!paymentId) return res.status(400).json({ ok: false, error: 'paymentId required' });
     // Verify success with provider to avoid blind crediting
@@ -1875,7 +1881,16 @@ app.post('/api/mobilemoney/credit-after-poll', express.json(), async (req, res) 
     const tokens = tracked.tokens || ugxToTokens(amount);
     let newBal = null;
     if (userId) {
-      newBal = await incrementRenderCreditsByUserId(userId, tokens);
+      try {
+        newBal = await incrementRenderCreditsByUserId(userId, tokens);
+      } catch (e) {
+        // If id path fails (e.g., email was mistakenly sent as id), try email fallback
+        if (email) {
+          newBal = await incrementRenderCreditsByEmail(email, tokens);
+        } else {
+          throw e;
+        }
+      }
     } else if (email) {
       newBal = await incrementRenderCreditsByEmail(email, tokens);
     } else {

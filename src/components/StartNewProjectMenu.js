@@ -175,13 +175,31 @@ const StartNewProjectMenu = ({ onStartProject, onOpenExisting, user, onSignOut, 
     loadProjectsAndCheckRecovery();
   }, [user]);
 
-  // Always show Render Teaser shortly after every sign-in
+  // Show Render Teaser once per sign-in. If user signs out, reset.
+  const lastUserIdRef = useRef(null);
   useEffect(() => {
-    if (user) {
-      const id = setTimeout(() => setShowTeaser(true), 1200);
-      return () => clearTimeout(id);
+    const currentUserKey = user?.id || user?.email || null;
+    if (currentUserKey) {
+      const teaserKey = `teaser_shown_${currentUserKey}`;
+      const alreadyShown = (() => { try { return sessionStorage.getItem(teaserKey) === '1'; } catch { return false; } })();
+      if (!alreadyShown) {
+        const id = setTimeout(() => {
+          setShowTeaser(true);
+          try { sessionStorage.setItem(teaserKey, '1'); } catch {}
+        }, 1200);
+        return () => clearTimeout(id);
+      } else {
+        setShowTeaser(false);
+      }
+      lastUserIdRef.current = currentUserKey;
+    } else {
+      // On sign out, clear the last user's teaser key so it shows next login
+      if (lastUserIdRef.current) {
+        try { sessionStorage.removeItem(`teaser_shown_${lastUserIdRef.current}`); } catch {}
+      }
+      lastUserIdRef.current = null;
+      setShowTeaser(false);
     }
-    setShowTeaser(false);
   }, [user]);
 
   const handleTemplateSelect = (template) => {

@@ -212,10 +212,20 @@ const RenderStudioPage = ({ onBack }) => {
       setIsPaying(true);
       // Best-effort fetch of user email for server-side credit mapping
       let emailForHeaders = '';
+      // Determine a safe userId for headers (avoid sending email as ID)
+      const rawUserId = subscriptionService.currentUserId || '';
+      const looksLikeEmail = /@/.test(String(rawUserId || ''));
+      const looksLikeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(rawUserId || ''));
+      const userIdForHeaders = looksLikeUuid ? rawUserId : '';
       try {
         const profile = await (subscriptionService.getDatabaseProfile ? subscriptionService.getDatabaseProfile() : Promise.resolve(null));
         emailForHeaders = (profile && profile.email) ? profile.email : '';
       } catch {}
+      // Guard: block payment if we have neither a valid id nor an email
+      if (!userIdForHeaders && !emailForHeaders) {
+        alert('Please sign in before purchasing credits.');
+        return;
+      }
       // Determine method
       if (paymentMethod === 'mtn') {
         // Accept local 0XXXXXXXXX (10 digits) and normalize to local format for test API
@@ -230,10 +240,10 @@ const RenderStudioPage = ({ onBack }) => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-User-Id': subscriptionService.currentUserId || '',
+            'X-User-Id': userIdForHeaders || '',
             'X-User-Email': emailForHeaders || ''
           },
-          body: JSON.stringify({ contact: mtnNumber, amount: amountUGX, message: `StudioSix ${amountToCredits(topUpAmount)} credits` })
+          body: JSON.stringify({ contact: mtnNumber, amount: amountUGX, message: `StudioSix ${amountToCredits(topUpAmount)} credits`, userId: userIdForHeaders || '', email: emailForHeaders || '' })
         });
         const j = await r.json();
         if (!j.ok) throw new Error(j.error || 'Mobile money init failed');
@@ -260,11 +270,12 @@ const RenderStudioPage = ({ onBack }) => {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Id': subscriptionService.currentUserId || '',
+                        'X-User-Id': userIdForHeaders || '',
                         'X-User-Email': emailForHeaders || ''
                       },
-                      body: JSON.stringify({ paymentId: pid })
+                      body: JSON.stringify({ paymentId: pid, userId: userIdForHeaders || '', email: emailForHeaders || '' })
                     });
+                    try { await subscriptionService.refreshCreditsFromDatabase?.(); } catch {}
                   } catch {}
                   setMmUiState('success');
                 }
@@ -284,11 +295,12 @@ const RenderStudioPage = ({ onBack }) => {
                       method: 'POST',
                       headers: {
                         'Content-Type': 'application/json',
-                        'X-User-Id': subscriptionService.currentUserId || '',
+                        'X-User-Id': userIdForHeaders || '',
                         'X-User-Email': emailForHeaders || ''
                       },
-                      body: JSON.stringify({ paymentId: pid })
+                      body: JSON.stringify({ paymentId: pid, userId: userIdForHeaders || '', email: emailForHeaders || '' })
                     });
+                    try { await subscriptionService.refreshCreditsFromDatabase?.(); } catch {}
                   } catch {}
                   setMmUiState('success');
                 } else {
@@ -308,6 +320,10 @@ const RenderStudioPage = ({ onBack }) => {
           const profile = await (subscriptionService.getDatabaseProfile ? subscriptionService.getDatabaseProfile() : Promise.resolve(null));
           email = profile?.email || email;
         } catch {}
+        if (!email) {
+          alert('Please sign in before purchasing credits.');
+          return;
+        }
         const clientId = process.env.REACT_APP_PAYPAL_CLIENT_ID || '';
         let sdkLoaded = true;
         try {
@@ -316,7 +332,7 @@ const RenderStudioPage = ({ onBack }) => {
           console.warn('[PayPal] SDK load error (will fallback to redirect)', e);
           sdkLoaded = false;
         }
-        const order = await PayPalService.createOrder(topUpAmount, amountToCredits(topUpAmount), subscriptionService.currentUserId || '', email);
+        const order = await PayPalService.createOrder(topUpAmount, amountToCredits(topUpAmount), (looksLikeUuid ? rawUserId : ''), email);
         // Use PayPal popup flow if available
         if (sdkLoaded && window.paypal && window.paypal.Buttons) {
           await new Promise((resolve, reject) => {
@@ -387,7 +403,7 @@ const RenderStudioPage = ({ onBack }) => {
         }
         // Success
         await subscriptionService.recordUsage('image_render', { amount: 0, description: `Top-up ${amountToCredits(topUpAmount)} credits purchased` });
-        subscriptionService.addRenderCredits(amountToCredits(topUpAmount));
+        try { await subscriptionService.refreshCreditsFromDatabase?.(); } catch {}
         alert(`Payment successful. You purchased ${amountToCredits(topUpAmount)} credits.`);
         setShowTopUp(false);
       }
