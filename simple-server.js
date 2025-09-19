@@ -2312,6 +2312,306 @@ async function requireAdmin(req, res, next) {
   }
 }
 
+// --- Wavespeed image generation/edit (google/nano-banana/edit) ---
+const WAVESPEED_API_KEY = process.env.WAVESPEED_API_KEY || process.env.WAVE_SPEED_API_KEY || process.env.WS_API_KEY || '';
+
+// Helper to robustly find an image URL or inline data in a Wavespeed response
+function findImageFromWavespeed(json) {
+  try {
+    // Direct fields
+    if (typeof json?.imageUrl === 'string') return { url: json.imageUrl };
+    if (typeof json?.assetUrl === 'string') return { url: json.assetUrl };
+    if (typeof json?.url === 'string' && /(png|jpg|jpeg|webp)(\?|$)/i.test(json.url)) return { url: json.url };
+    if (typeof json?.output_image === 'string') return { dataUrl: json.output_image };
+    if (typeof json?.data?.imageUrl === 'string') return { url: json.data.imageUrl };
+    if (typeof json?.data?.url === 'string' && /(png|jpg|jpeg|webp)(\?|$)/i.test(json.data.url)) return { url: json.data.url };
+    if (typeof json?.data?.output_image === 'string') return { dataUrl: json.data.output_image };
+    // Candidates/outputs arrays
+    const outputs = json?.outputs || json?.data?.outputs || [];
+    if (Array.isArray(outputs) && outputs.length) {
+      for (const o of outputs) {
+        if (typeof o === 'string') {
+          if (/^data:image\//.test(o)) return { dataUrl: o };
+          if (/(https?:\/\/)/i.test(o) && /(png|jpg|jpeg|webp)(\?|$)/i.test(o)) return { url: o };
+          // Heuristic: very long base64-like string without prefix
+          if (/^[A-Za-z0-9+/=]{500,}$/.test(o)) return { base64: o };
+        }
+        if (o && typeof o === 'object') {
+          const u = o.url || o.imageUrl || o.href;
+          if (typeof u === 'string' && (/^data:image\//.test(u) || /(png|jpg|jpeg|webp)(\?|$)/i.test(u))) {
+            if (/^data:image\//.test(u)) return { dataUrl: u };
+            return { url: u };
+          }
+          // Some objects may embed base64 string under 'data'
+          const b64 = o.data || o.base64 || o.bytes;
+          if (typeof b64 === 'string' && /^[A-Za-z0-9+/=]{500,}$/.test(b64)) return { base64: b64 };
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// Create an image edit/generation task and wait briefly for a result
+app.post('/api/ai/wavespeed/image/start-and-wait', async (req, res) => {
+  try {
+    const { prompt, imageDataUrl, secondaryImageDataUrl, model, timeoutSec = 15 } = req.body || {};
+    if (!WAVESPEED_API_KEY) {
+      return res.status(503).json({ ok: false, error: 'Wavespeed API key not configured' });
+    }
+    if (!prompt) {
+      return res.status(400).json({ ok: false, error: 'prompt required' });
+    }
+
+    const selectedModel = String(model || 'google/nano-banana/edit');
+    // Model-specific endpoint for nano-banana/edit
+    const isNanoBanana = /nano-banana\/edit/i.test(selectedModel);
+    const endpoint = isNanoBanana
+      ? 'https://api.wavespeed.ai/api/v3/google/nano-banana/edit'
+      : 'https://api.wavespeed.ai/api/v3/predictions';
+    // Build payload according to endpoint
+    const createBody = isNanoBanana
+      ? {
+          enable_base64_output: true,
+          enable_sync_mode: false,
+          images: [
+            ...(imageDataUrl ? [imageDataUrl] : []),
+            ...(secondaryImageDataUrl ? [secondaryImageDataUrl] : [])
+          ],
+          output_format: 'png',
+          prompt: String(prompt)
+        }
+      : {
+          model: selectedModel,
+          input: {
+            prompt: String(prompt),
+            image: imageDataUrl || undefined,
+            image2: secondaryImageDataUrl || undefined
+          }
+        };
+
+    const createResp = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${WAVESPEED_API_KEY}`
+      },
+      body: JSON.stringify(createBody)
+    });
+    const createText = await createResp.text();
+    let createJson = {}; try { createJson = JSON.parse(createText); } catch {}
+    if (!createResp.ok) {
+      return res.status(502).json({ ok: false, error: createJson?.error || createText || 'create failed' });
+    }
+    const requestId = createJson?.id || createJson?.requestId || createJson?.taskId || createJson?.jobId || createJson?.data?.id || createJson?.result?.id;
+    if (!requestId) {
+      // nano-banana/edit may return outputs array directly or base64 flag
+      if (createJson && createJson.outputs) {
+        const found = findImageFromWavespeed(createJson);
+        if (found) {
+          if (found.dataUrl || found.url) {
+            return res.json({ ok: true, status: 'completed', output_image: found.dataUrl || found.url });
+          }
+          if (found.base64) {
+            const fmt = (createBody && createBody.output_format) || 'png';
+            return res.json({ ok: true, status: 'completed', output_image: `data:image/${fmt};base64,${found.base64}` });
+          }
+        }
+      }
+      return res.json({ ok: true, status: createJson?.status || 'running', meta: createJson });
+    }
+
+    // Brief wait/poll loop for fast completions
+    const started = Date.now();
+    const maxWait = Math.max(1, Math.min(60, Number(timeoutSec) || 15)) * 1000;
+    while (Date.now() - started < maxWait) {
+      try {
+        const r = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(requestId)}/result`, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${WAVESPEED_API_KEY}` }
+        });
+        const raw = await r.text();
+        let j = {}; try { j = JSON.parse(raw); } catch {}
+        if (r.ok) {
+          const status = j?.status || j?.data?.status || (j?.ok === true ? 'completed' : 'running');
+          const found = findImageFromWavespeed(j);
+          if (status === 'completed' && found) {
+            if (found.dataUrl || found.url) {
+              return res.json({ ok: true, status: 'completed', output_image: found.dataUrl || found.url });
+            }
+            if (found.base64) {
+              const fmt = (createBody && createBody.output_format) || 'png';
+              return res.json({ ok: true, status: 'completed', output_image: `data:image/${fmt};base64,${found.base64}` });
+            }
+          }
+          if (status === 'failed') {
+            return res.status(500).json({ ok: false, status: 'failed', error: j?.error || 'image generation failed' });
+          }
+        }
+      } catch (e) {}
+      await new Promise(r => setTimeout(r, 1500));
+    }
+
+    return res.json({ ok: true, status: 'running', requestId });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Poll an existing Wavespeed image task
+app.get('/api/ai/wavespeed/image/:id', async (req, res) => {
+  try {
+    if (!WAVESPEED_API_KEY) return res.status(503).json({ ok: false, error: 'Wavespeed API key not configured' });
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const r = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(id)}/result`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${WAVESPEED_API_KEY}` }
+    });
+    const raw = await r.text();
+    let j = {}; try { j = JSON.parse(raw); } catch {}
+    if (!r.ok) return res.status(502).json({ ok: false, error: j?.error || raw || 'poll failed' });
+    const status = j?.status || j?.data?.status || (j?.ok === true ? 'completed' : 'running');
+    const found = findImageFromWavespeed(j);
+    if (status === 'completed' && found && (found.dataUrl || found.url)) {
+      return res.json({ ok: true, status: 'completed', output_image: found.dataUrl || found.url });
+    }
+    if (status === 'failed') return res.json({ ok: false, status: 'failed', error: j?.error || 'failed' });
+    return res.json({ ok: true, status: status });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// --- Wavespeed video generation (Seedance i2v) ---
+function findVideoFromWavespeed(json) {
+  try {
+    const direct = json?.videoUrl || json?.assetUrl || json?.url || json?.result?.videoUrl || json?.result?.url;
+    if (typeof direct === 'string' && /(https?:\/\/).+\.(mp4|mov)(\?|$)/i.test(direct)) return direct;
+    const arrays = [json?.outputs, json?.data?.outputs];
+    for (const arr of arrays) {
+      if (Array.isArray(arr)) {
+        for (const v of arr) {
+          if (typeof v === 'string' && /(https?:\/\/).+\.(mp4|mov)(\?|$)/i.test(v)) return v;
+          if (v && typeof v === 'object' && typeof v.url === 'string' && /(https?:\/\/).+\.(mp4|mov)(\?|$)/i.test(v.url)) return v.url;
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
+// Create video job and wait briefly; client will poll afterward
+app.post('/api/ai/wavespeed/video/start-and-wait', async (req, res) => {
+  try {
+    const apiKey = WAVESPEED_API_KEY;
+    if (!apiKey) return res.status(500).json({ ok: false, error: 'WAVESPEED_API_KEY not configured' });
+    const { prompt = '', imageDataUrl, imageUrl, duration = 5, camera_fixed = false, seed = -1, timeoutSec = 300, model } = req.body || {};
+    // Normalize image: prefer public URL; if only data URL provided, attempt upload to Supabase bucket 'models'
+    let image = String(imageUrl || '').trim() || null;
+    if (!image && imageDataUrl) {
+      const m = /^data:(.*?);base64,(.*)$/.exec(String(imageDataUrl));
+      if (!m) return res.status(400).json({ ok: false, error: 'imageDataUrl must be data:*;base64,*' });
+      try {
+        const mime = m[1] || 'image/png';
+        const b64 = m[2];
+        const buf = Buffer.from(b64, 'base64');
+        const ext = (/png/i.test(mime) ? 'png' : (/jpeg|jpg/i.test(mime) ? 'jpg' : 'png'));
+        const key = `wavespeed/input/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        if (typeof supabaseAdmin?.storage?.from === 'function') {
+          const { error: upErr } = await supabaseAdmin.storage.from('models').upload(key, buf, { contentType: mime, upsert: true });
+          if (!upErr) {
+            const { data: publicUrl } = supabaseAdmin.storage.from('models').getPublicUrl(key);
+            if (publicUrl?.publicUrl) image = publicUrl.publicUrl;
+          }
+        }
+        if (!image) image = imageDataUrl; // fallback
+      } catch { image = imageDataUrl; }
+    }
+    if (!image) return res.status(400).json({ ok: false, error: 'imageDataUrl or imageUrl required' });
+
+    // Model-specific endpoint path
+    const modelPath = (() => {
+      const m = String(model || '').toLowerCase();
+      if (/480p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-480p';
+      if (/720p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-720p';
+      return 'bytedance/seedance-v1-pro-i2v-1080p';
+    })();
+    const createBody = { camera_fixed: !!camera_fixed, duration: Number(duration) || 5, image, prompt: String(prompt || ''), seed: (Number.isFinite(seed) ? Number(seed) : -1) };
+    const createRes = await fetch(`https://api.wavespeed.ai/api/v3/${modelPath}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` }, body: JSON.stringify(createBody)
+    });
+    const createRaw = await createRes.text();
+    let createJson = {}; try { createJson = JSON.parse(createRaw); } catch {}
+    if (!createRes.ok) return res.status(createRes.status).json({ ok: false, error: createJson?.error || createJson || createRaw });
+    let requestId = createJson?.requestId || createJson?.request_id || createJson?.id || createJson?.jobId || createJson?.predictionId || createJson?.prediction_id || createJson?.data?.id || null;
+    // If immediate video link present
+    const immediate = findVideoFromWavespeed(createJson);
+    if (immediate) return res.json({ ok: true, status: 'completed', assetUrl: immediate, videoUrl: `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(immediate)}` });
+
+    if (requestId) { try { pollWavespeedUntilDone(requestId, apiKey); } catch {} }
+    const start = Date.now();
+    const maxMs = Math.max(5, Math.min(600, Number(timeoutSec) || 300)) * 1000;
+    while (requestId && Date.now() - start < maxMs) {
+      try {
+        const pr = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(requestId)}/result`, { headers: { 'Authorization': `Bearer ${apiKey}` } });
+        const rtxt = await pr.text();
+        let pj = {}; try { pj = JSON.parse(rtxt); } catch {}
+        if (pr.ok) {
+          const status = pj?.status || pj?.data?.status || (pj?.ok === true ? 'completed' : 'running');
+          const url = findVideoFromWavespeed(pj);
+          if (status === 'completed' && url) return res.json({ ok: true, status: 'completed', assetUrl: url, videoUrl: `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(url)}` });
+          if (status === 'failed') return res.json({ ok: false, status: 'failed', requestId });
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, 3000));
+    }
+    if (!requestId) return res.status(502).json({ ok: false, error: 'Provider did not return a job ID. Please try again.' });
+    return res.json({ ok: true, status: 'running', requestId, timeout: true });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Poll a video job by ID
+app.get('/api/ai/wavespeed/video/:id', async (req, res) => {
+  try {
+    if (!WAVESPEED_API_KEY) return res.status(503).json({ ok: false, error: 'Wavespeed API key not configured' });
+    const id = String(req.params.id || '').trim();
+    if (!id) return res.status(400).json({ ok: false, error: 'id required' });
+    const r = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(id)}/result`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${WAVESPEED_API_KEY}` }
+    });
+    const raw = await r.text();
+    let j = {}; try { j = JSON.parse(raw); } catch {}
+    if (!r.ok) return res.status(502).json({ ok: false, error: j?.error || raw || 'poll failed' });
+    const status = j?.status || j?.data?.status || (j?.ok === true ? 'completed' : 'running');
+    const url = findVideoFromWavespeed(j);
+    if (status === 'completed' && url) return res.json({ ok: true, status: 'completed', videoUrl: url, assetUrl: url });
+    if (status === 'failed') return res.json({ ok: false, status: 'failed', error: j?.error || 'failed' });
+    return res.json({ ok: true, status });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
+// Proxy remote video through our server to avoid COEP/CORS issues and allow range requests
+app.get('/api/ai/wavespeed/video/proxy', async (req, res) => {
+  try {
+    const url = String(req.query.url || '').trim();
+    if (!/^https?:\/\//i.test(url)) return res.status(400).end();
+    const r = await fetch(url, { headers: { 'Range': req.headers['range'] || '' } });
+    // Pass through status and headers to support streaming/range
+    res.status(r.status);
+    r.headers.forEach((v, k) => { try { res.setHeader(k, v); } catch {} });
+    if (r.body && r.body.pipe) { r.body.pipe(res); } else { const buf = await r.arrayBuffer(); res.end(Buffer.from(buf)); }
+  } catch (e) {
+    try { console.warn('[proxy] error', e?.message || String(e)); } catch {}
+    res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
+
 app.get('/api/admin/credits', requireAdmin, async (req, res) => {
   try {
     if (!supabaseAdmin) throw new Error('Supabase admin not configured');

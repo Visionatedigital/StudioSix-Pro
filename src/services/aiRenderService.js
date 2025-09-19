@@ -66,6 +66,41 @@ class AIRenderService {
   }
 
   /**
+   * Wavespeed image generation/edit using google/nano-banana/edit
+   * Accepts a base image and optional secondary image and returns a data URL or direct URL
+   */
+  async generateImageWithWavespeed({ prompt, imageDataUrl, secondaryImageDataUrl, model = 'google/nano-banana/edit', timeoutSec = 15 }) {
+    this.baseURL = computeApiBaseUrl();
+    try {
+      const res = await fetch(`${this.baseURL}/api/ai/wavespeed/image/start-and-wait`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt, imageDataUrl, secondaryImageDataUrl, model, timeoutSec })
+      });
+      const text = await res.text();
+      let json = {}; try { json = JSON.parse(text); } catch {}
+      // Normalize wavespeed responses that return plain URLs
+      if (json && json.ok && !json.output_image && typeof json.url === 'string') {
+        json.output_image = json.url;
+      }
+      return json;
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  async getWavespeedImageJob(jobId) {
+    this.baseURL = computeApiBaseUrl();
+    try {
+      const res = await fetch(`${this.baseURL}/api/ai/wavespeed/image/${encodeURIComponent(jobId)}`);
+      const json = await res.json();
+      return json;
+    } catch (e) {
+      return { ok: false, error: e?.message || String(e) };
+    }
+  }
+
+  /**
    * Start AI rendering job
    * @param {string} prompt - The rendering prompt
    * @param {string} image - Base64 encoded image

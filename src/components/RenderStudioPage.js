@@ -491,29 +491,55 @@ const RenderStudioPage = ({ onBack }) => {
       const current = aiSettingsService.getRenderSettings();
       // Beef up prompt
       const enhanced = `${prompt}\n\nPhotorealistic, realistic materials, soft daylight, balanced exposure, high fidelity architectural rendering. Target: ${imageSize}, quality: ${quality}.`;
-      const result = await aiRenderService.generateWithGoogle({
+      const result = await aiRenderService.generateImageWithWavespeed({
         prompt: enhanced,
         imageDataUrl: uploadedImage,
-        quality,
-        imageSize,
-        model: 'gemini-2.5-flash-image-preview'
+        model: 'google/nano-banana/edit',
+        timeoutSec: 15
       });
-      console.log('[RenderStudio] generateWithGoogle result.ok?', result?.ok);
+      console.log('[RenderStudio] generateWithWavespeed result.ok?', result?.ok);
       if (result && result.ok && result.output_image) {
         setGeneratedImage(result.output_image);
         setBaselineImageForCompare(uploadedImage);
         setProgress(100);
         // Record usage
         await subscriptionService.recordUsage('image_render', { amount: 100, description: 'Render Studio image generation (100 credits)' });
+        setIsGenerating(false);
       } else {
-        console.warn('[RenderStudio] Generation failed, payload:', result);
-        throw new Error(result?.error?.title || 'Generation failed');
+        const jobId = result?.requestId || result?.jobId || result?.taskId;
+        if (jobId) {
+          const poll = async (attempt = 0) => {
+            try {
+              const j = await aiRenderService.getWavespeedImageJob(jobId);
+              if (j?.ok && j?.output_image) {
+                setGeneratedImage(j.output_image);
+                setBaselineImageForCompare(uploadedImage);
+                setProgress(100);
+                await subscriptionService.recordUsage('image_render', { amount: 100, description: 'Render Studio image generation (100 credits)' });
+                setIsGenerating(false);
+                return;
+              }
+              if (j && j.status === 'failed') {
+                setRenderError('Render generation error');
+                setIsGenerating(false);
+                return;
+              }
+              setProgress(p => Math.min(95, Math.max(p, 5 + attempt)));
+            } catch (e) {}
+            setTimeout(() => poll(attempt + 1), 2000);
+          };
+          poll(0);
+        } else {
+          console.warn('[RenderStudio] Generation failed, payload:', result);
+          throw new Error(result?.error?.title || result?.error || 'Generation failed');
+        }
       }
     } catch (e) {
       console.error('Render failed:', e);
       setRenderError('Render generation error');
-    } finally {
       setIsGenerating(false);
+    } finally {
+      // isGenerating is cleared on success/failure paths to avoid premature UI stop
     }
   };
 
@@ -674,15 +700,14 @@ const RenderStudioPage = ({ onBack }) => {
     try {
       const current = aiSettingsService.getRenderSettings();
       const enhanced = `Edit the image with the following targeted change: ${editPrompt}. Keep all other aspects unchanged. Preserve layout, composition, camera, lighting and materials except the requested change. Target: ${imageSize}, quality: ${quality}.`;
-      const result = await aiRenderService.generateWithGoogle({
+      const result = await aiRenderService.generateImageWithWavespeed({
         prompt: enhanced,
-        imageDataUrl: generatedImage, // use last output as new input
+        imageDataUrl: generatedImage,
         secondaryImageDataUrl: editSecondaryImage || undefined,
-        quality,
-        imageSize,
-        model: 'gemini-2.5-flash-image-preview'
+        model: 'google/nano-banana/edit',
+        timeoutSec: 15
       });
-      console.log('[RenderStudio] edit result.ok?', result?.ok);
+      console.log('[RenderStudio] edit via Wavespeed ok?', result?.ok);
       if (result && result.ok && result.output_image) {
         // Baseline becomes previous output for comparison
         setBaselineImageForCompare(generatedImage);
@@ -691,15 +716,44 @@ const RenderStudioPage = ({ onBack }) => {
         setIsEditing(false);
         setProgress(100);
         await subscriptionService.recordUsage('image_render', { amount: 100, description: 'Render Studio edit (100 credits)' });
+        setIsGenerating(false);
       } else {
-        console.warn('[RenderStudio] Edit failed, payload:', result);
-        throw new Error(result?.error?.title || 'Edit failed');
+        const jobId = result?.requestId || result?.jobId || result?.taskId;
+        if (jobId) {
+          const poll = async (attempt = 0) => {
+            try {
+              const j = await aiRenderService.getWavespeedImageJob(jobId);
+              if (j?.ok && j?.output_image) {
+                setBaselineImageForCompare(generatedImage);
+                setGeneratedImage(j.output_image);
+                setCompareSlider(50);
+                setIsEditing(false);
+                setProgress(100);
+                await subscriptionService.recordUsage('image_render', { amount: 100, description: 'Render Studio edit (100 credits)' });
+                setIsGenerating(false);
+                return;
+              }
+              if (j && j.status === 'failed') {
+                setRenderError('Edit failed');
+                setIsGenerating(false);
+                return;
+              }
+              setProgress(p => Math.min(95, Math.max(p, 5 + attempt)));
+            } catch (e) {}
+            setTimeout(() => poll(attempt + 1), 2000);
+          };
+          poll(0);
+        } else {
+          console.warn('[RenderStudio] Edit failed, payload:', result);
+          throw new Error(result?.error?.title || result?.error || 'Edit failed');
+        }
       }
     } catch (e) {
       console.error('❌ Edit failed:', e);
       setRenderError(e.message || 'Edit failed');
-    } finally {
       setIsGenerating(false);
+    } finally {
+      // isGenerating is cleared on success/failure paths to avoid premature UI stop
     }
   };
 
