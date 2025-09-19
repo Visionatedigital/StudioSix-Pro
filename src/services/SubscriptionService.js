@@ -299,9 +299,10 @@ class SubscriptionService {
    */
   handleUserChange(user) {
     const newUserId = user?.id || user?.email || null;
+      console.warn('💰 Subscription: User changed from', this.currentUserId, 'to', newUserId);
     
     if (newUserId !== this.currentUserId) {
-      console.log('💰 Subscription: User changed from', this.currentUserId, 'to', newUserId);
+      console.warn('💰 Subscription: User changed from', this.currentUserId, 'to', newUserId);
       this.currentUserId = newUserId;
       this.loadUserSubscription();
       this.notifySubscriptionChange();

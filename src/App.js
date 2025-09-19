@@ -4230,14 +4230,14 @@ const AuthenticatedApp = () => {
     );
   }
 
-  // Show auth flow if requested or (not authenticated and auth is configured)
-  if (showAuthFlow || (isAuthConfigured && !isAuthenticated && !skipAuth)) {
+  // Only show auth flow if explicitly forced, or if not authenticated and auth is configured
+  if ((showAuthFlow && !isAuthenticated) || (isAuthConfigured && !isAuthenticated && !skipAuth)) {
     console.log('🔄 Showing AuthLandingPage because:', {
       showAuthFlow,
       isAuthConfigured,
       isAuthenticated,
       skipAuth,
-      condition: showAuthFlow || (isAuthConfigured && !isAuthenticated && !skipAuth)
+      condition: (showAuthFlow && !isAuthenticated) || (isAuthConfigured && !isAuthenticated && !skipAuth)
     });
     return (
       <AuthLandingPage 

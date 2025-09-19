@@ -47,6 +47,22 @@ const RenderStudioPage = ({ onBack }) => {
   const [mmUiState, setMmUiState] = useState('idle'); // 'idle' | 'awaiting' | 'success' | 'failed'
   const fileInputRef = useRef(null);
   const videoInputRef = useRef(null);
+  // Auto-close payment box and refresh credits (no full reload)
+  React.useEffect(() => {
+    if (mmUiState === 'success') {
+      const t = setTimeout(async () => {
+        try { await subscriptionService.refreshCreditsFromDatabase?.(); } catch {}
+        setShowTopUp(false);
+      }, 1500);
+      return () => clearTimeout(t);
+    }
+    if (mmUiState === 'timeout' || mmUiState === 'failed') {
+      const t = setTimeout(() => {
+        setShowTopUp(false);
+      }, 3000);
+      return () => clearTimeout(t);
+    }
+  }, [mmUiState]);
   React.useEffect(() => {
     const open = () => setShowTopUp(true);
     window.addEventListener('open-token-topup', open);
@@ -252,8 +268,12 @@ const RenderStudioPage = ({ onBack }) => {
         setMmStatus(j.data?.status || 'pending');
         setMmPolling(true);
         setMmUiState('awaiting');
-        // Poll for up to 2 minutes
+        // Exponential backoff polling for up to 5 minutes
         const started = Date.now();
+        let pollCount = 0;
+        const maxDuration = 5 * 60 * 1000; // 5 minutes
+        const minDelay = 3000; // 3s
+        const maxDelay = 30000; // 30s
         const poll = async () => {
           if (!pid) return;
           try {
@@ -283,36 +303,20 @@ const RenderStudioPage = ({ onBack }) => {
                 return;
               }
             }
-            // Also check if our server has seen the callback already
-            try {
-              const cr = await fetch(`${API_BASE}/api/mobilemoney/callback-status/${encodeURIComponent(pid)}`);
-              const cj = await cr.json();
-              if (cj?.ok && (cj.status === 'successful' || cj.status === 'failed')) {
-                setMmPolling(false);
-                if (cj.status === 'successful') {
-                  try {
-                    await fetch(`${API_BASE}/api/mobilemoney/credit-after-poll`, {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        'X-User-Id': userIdForHeaders || '',
-                        'X-User-Email': emailForHeaders || ''
-                      },
-                      body: JSON.stringify({ paymentId: pid, userId: userIdForHeaders || '', email: emailForHeaders || '' })
-                    });
-                    try { await subscriptionService.refreshCreditsFromDatabase?.(); } catch {}
-                  } catch {}
-                  setMmUiState('success');
-                } else {
-                  setMmUiState('failed');
-                }
-                return;
-              }
-            } catch {}
           } catch {}
-          if (Date.now() - started < 120000) setTimeout(poll, 5000); else setMmPolling(false);
+          pollCount++;
+          const elapsed = Date.now() - started;
+          if (elapsed < maxDuration) {
+            // Exponential backoff: delay = minDelay * 2^pollCount, capped at maxDelay
+            let delay = minDelay * Math.pow(2, pollCount);
+            if (delay > maxDelay) delay = maxDelay;
+            setTimeout(poll, delay);
+          } else {
+            setMmPolling(false);
+            setMmUiState('timeout');
+          }
         };
-        setTimeout(poll, 5000);
+        setTimeout(poll, minDelay);
       } else {
         // PayPal card checkout (USD)
         let email = 'user@example.com';
@@ -1227,6 +1231,15 @@ const RenderStudioPage = ({ onBack }) => {
                             </div>
                           </div>
                         )}
+                        {mmUiState === 'timeout' && (
+                          <div className="flex items-start gap-3">
+                            <XCircleIcon className="w-6 h-6 text-yellow-400" />
+                            <div className="flex-1 text-sm text-yellow-300">
+                              <div className="font-semibold">Payment status could not be retrieved</div>
+                              <div>If payment is completed, tokens will be loaded. You may close this window.</div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1337,4 +1350,5 @@ const RenderSaleBanner = () => {
   );
 };
 
+// (moved) Auto-close payment box useEffect now lives inside RenderStudioPage
 

@@ -1,17 +1,22 @@
-#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+// =================================================================
+// FINAL DEVELOPMENT MODE CATCH-ALL ROUTE (MUST BE LAST)
+// =================================================================
+// This must be placed after 'app' is defined and all routes are set up
+// (Move this block to the end of the file, after all other app.* routes)
 
 // Load environment variables from .env file
 require('dotenv').config();
 
 console.log('Starting StudioSix Pro simple server...');
-console.log('Node version:', process.version);
-console.log('Environment:', process.env.NODE_ENV);
-console.log('Port:', process.env.PORT);
-console.log('RESEND_API_KEY configured:', !!process.env.RESEND_API_KEY);
+//console.log('Node version:', process.version);
+//console.log('Environment:', process.env.NODE_ENV);
+//console.log('Port:', process.env.PORT);
+//console.log('RESEND_API_KEY configured:', !!process.env.RESEND_API_KEY);
 
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
 const cors = require('cors');
 const helmet = require('helmet');
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
@@ -27,7 +32,6 @@ const OpenAI = require('openai');
 }
 
 const app = express();
-const PORT = process.env.PORT || 8080;
 
 console.log('OpenAI API Key configured:', !!process.env.OPENAI_API_KEY);
 
@@ -224,7 +228,7 @@ async function pollWavespeedUntilDone(id, apiKey) {
 // --- Supabase Admin (Service Role) for server-side credit updates ---
 const { createClient } = require('@supabase/supabase-js');
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.REACT_APP_SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY;
 let supabaseAdmin = null;
 if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
   supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -264,8 +268,20 @@ async function getUserByEmail(email) {
   return data;
 }
 
-async function incrementRenderCreditsByEmail(email, amount) {
+
+// Idempotent crediting: check credited_payments table before incrementing
+async function incrementRenderCreditsByEmail(email, amount, paymentId) {
   if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+  if (!paymentId) throw new Error('paymentId required for idempotency');
+  // Check if already credited
+  const { data: already, error: checkErr } = await supabaseAdmin
+    .from('credited_payments')
+    .select('id')
+    .eq('payment_id', paymentId)
+    .single();
+  if (already) return null; // Already credited, skip
+  if (checkErr && checkErr.code !== 'PGRST116') throw checkErr;
+  // Credit user
   const user = await getUserByEmail(email);
   const { data, error } = await supabaseAdmin
     .from('user_profiles')
@@ -274,11 +290,23 @@ async function incrementRenderCreditsByEmail(email, amount) {
     .select('render_credits')
     .single();
   if (error) throw error;
+  // Record credited payment
+  await supabaseAdmin.from('credited_payments').insert({ payment_id: paymentId, user_id: user.id, email, amount });
   return data.render_credits;
 }
 
-async function incrementRenderCreditsByUserId(userId, amount) {
+async function incrementRenderCreditsByUserId(userId, amount, paymentId) {
   if (!supabaseAdmin) throw new Error('Supabase admin not configured');
+  if (!paymentId) throw new Error('paymentId required for idempotency');
+  // Check if already credited
+  const { data: already, error: checkErr } = await supabaseAdmin
+    .from('credited_payments')
+    .select('id')
+    .eq('payment_id', paymentId)
+    .single();
+  if (already) return null; // Already credited, skip
+  if (checkErr && checkErr.code !== 'PGRST116') throw checkErr;
+  // Credit user
   const { data: current, error: e1 } = await supabaseAdmin
     .from('user_profiles')
     .select('render_credits')
@@ -292,6 +320,8 @@ async function incrementRenderCreditsByUserId(userId, amount) {
     .select('render_credits')
     .single();
   if (error) throw error;
+  // Record credited payment
+  await supabaseAdmin.from('credited_payments').insert({ payment_id: paymentId, user_id: userId, amount });
   return data.render_credits;
 }
 
@@ -437,7 +467,6 @@ app.post('/api/ai/google-video', async (req, res) => {
     const location = process.env.VERTEX_LOCATION || 'us-central1';
     const modelPath = process.env.VERTEX_VEO_MODEL || 'publishers/google/models/veo-2.0-generate-preview';
     if (!prompt) return res.status(400).json({ ok: false, error: 'prompt required' });
-
     // Build instances
     const instance = { prompt: String(prompt) };
     if (imageDataUrl && typeof imageDataUrl === 'string') {
@@ -453,7 +482,6 @@ app.post('/api/ai/google-video', async (req, res) => {
         sampleCount: sampleCount
       }
     };
-
     // OAuth token
     const { GoogleAuth } = require('google-auth-library');
     const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
@@ -599,8 +627,8 @@ app.post('/api/tools/:name', async (req, res) => {
   }
 });
 
-console.log('Current working directory:', process.cwd());
-console.log('Available files:', fs.readdirSync(process.cwd()).filter(f => !f.startsWith('.')));
+//console.log('Current working directory:', process.cwd());
+//console.log('Available files:', fs.readdirSync(process.cwd()).filter(f => !f.startsWith('.')));
 
 // Health check endpoint - this should work regardless of build status
 app.get('/health', (req, res) => {
@@ -1204,19 +1232,8 @@ if (fs.existsSync(buildPath)) {
     `);
   });
   
-  app.get('*', (req, res) => {
-    res.status(503).send(`
-      <html>
-        <head><title>StudioSix Pro - Building...</title></head>
-        <body>
-          <h1>StudioSix Pro</h1>
-          <p>Application is building... Please wait.</p>
-          <p>Build directory not found at: ${buildPath}</p>
-          <p><a href="/health">Health Check</a></p>
-        </body>
-      </html>
-    `);
-  });
+  // Move this catch-all route to the very end of the file, after all API routes are defined.
+  // (Implementation: Remove from here and re-add at the end of the file)
 }
 
 // =================================================================
@@ -1514,10 +1531,10 @@ app.post('/api/payments/paypal/capture', async (req, res) => {
         const email = meta?.email || tracked.email || payerEmail || null;
         if (tokens && (userId || email)) {
           if (userId) {
-            try { await incrementRenderCreditsByUserId(userId, tokens); }
-            catch (e) { if (email) await incrementRenderCreditsByEmail(email, tokens); else throw e; }
+            try { await incrementRenderCreditsByUserId(userId, tokens, orderId); }
+            catch (e) { if (email) await incrementRenderCreditsByEmail(email, tokens, orderId); else throw e; }
           } else if (email) {
-            await incrementRenderCreditsByEmail(email, tokens);
+            await incrementRenderCreditsByEmail(email, tokens, orderId);
           }
           console.log(`[PayPal] Credited ${tokens} tokens for order ${orderId}`);
         }
@@ -1565,10 +1582,10 @@ app.post('/api/payments/paypal/webhook', async (req, res) => {
       const email = meta?.email || (event?.resource && event.resource?.payer && event.resource.payer.email_address) || null;
         if (tokens && (userId || email)) {
         if (userId) {
-          try { await incrementRenderCreditsByUserId(userId, tokens); }
-          catch (e) { if (email) await incrementRenderCreditsByEmail(email, tokens); else throw e; }
+          try { await incrementRenderCreditsByUserId(userId, tokens, event.resource?.id || null); }
+          catch (e) { if (email) await incrementRenderCreditsByEmail(email, tokens, event.resource?.id || null); else throw e; }
         }
-        else if (email) await incrementRenderCreditsByEmail(email, tokens);
+        else if (email) await incrementRenderCreditsByEmail(email, tokens, event.resource?.id || null);
           console.log('[PayPal] webhook credited', tokens);
         }
       } catch (e) { console.warn('[PayPal] webhook credit error', e); }
@@ -1588,7 +1605,7 @@ const EIRMOND_BASE = process.env.EIRMOND_BASE || 'https://pay.eirmondserv.com';
 const EIRMOND_OAUTH = process.env.EIRMOND_OAUTH || 'https://pay.eirmondserv.com';
 const EIRMOND_TEST_MODE = String(process.env.EIRMOND_TEST_MODE || '').toLowerCase() === 'true';
 const WEBHOOK_MIRROR_URL = process.env.WEBHOOK_MIRROR_URL || '';
-console.log('[MM] Config:', {
+/*console.log('[MM] Config:', {
   base: EIRMOND_BASE,
   oauth: EIRMOND_OAUTH,
   testMode: EIRMOND_TEST_MODE,
@@ -1596,9 +1613,9 @@ console.log('[MM] Config:', {
   hasSecret: !!EIRMOND_API_SECRET,
   hasCbSecret: !!EIRMOND_CALLBACK_SECRET,
   mirror: !!WEBHOOK_MIRROR_URL
-});
+});*/
 
-const mobileMoneyRequests = new Map(); // payment_id -> { userId, email, tokens }
+// Supabase table 'mobile_money_requests' will be used for payment tracking
 const mobileMoneyCallbackStatus = new Map(); // payment_id -> 'pending'|'successful'|'failed'
 
 function ugxToTokens(ugx) {
@@ -1623,7 +1640,7 @@ async function eirmondToken() {
     console.error('[MM] OAuth error', r.status, j);
     throw new Error(j.error || 'oauth failed');
   }
-  console.log('[MM] OAuth OK, expires_in:', j.expires_in);
+  //console.log('[MM] OAuth OK, expires_in:', j.expires_in);
   return j.access_token;
 }
 
@@ -1634,7 +1651,7 @@ app.post('/api/mobilemoney/request', async (req, res) => {
     if (!contact || !amount) return res.status(400).json({ ok: false, error: 'contact and amount required' });
     const token = await eirmondToken();
     const path = EIRMOND_TEST_MODE ? '/test-api/request-payment' : '/api/request-payment';
-    console.log('[MM] request-payment', { path, maskedContact: String(contact).replace(/\d(?=\d{4})/g,'*'), amount });
+    //console.log('[MM] request-payment', { path, maskedContact: String(contact).replace(/\d(?=\d{4})/g,'*'), amount });
     const r = await fetch(`${EIRMOND_BASE}${path}`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -1645,7 +1662,7 @@ app.post('/api/mobilemoney/request', async (req, res) => {
       console.error('[MM] request-payment error', r.status, j);
       return res.status(r.status).json({ ok: false, ...j });
     }
-    console.log('[MM] request-payment OK', j.payment_id || j.data?.payment_id, j.status || j.data?.status);
+    //console.log('[MM] request-payment OK', j.payment_id || j.data?.payment_id, j.status || j.data?.status);
     // track mapping for callback crediting
     try {
       // Accept user context from headers or body (frontend sends both now)
@@ -1654,10 +1671,33 @@ app.post('/api/mobilemoney/request', async (req, res) => {
       const tokens = ugxToTokens(amount);
       if (j.payment_id || (j.data && j.data.payment_id)) {
         const pid = j.payment_id || j.data.payment_id;
-        mobileMoneyRequests.set(pid, { userId, email, tokens });
-        console.log('[MM] request-payment OK', { mobileMoneyRequests: mobileMoneyRequests });
+        // Store payment request in Supabase
+        try {
+          const { data, error } = await supabaseAdmin.from('mobile_money_requests').insert([
+            {
+              payment_id: pid,
+              user_id: userId,
+              email: email,
+              amount: amount,
+              tokens: tokens,
+              status: 'pending',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            }
+          ]);
+          //console.log('[MM] Supabase insert result', { data, error, pid });
+          if (error) {
+            console.error('[MM] Supabase insert error', error);
+          } else {
+            //console.log('[MM] Supabase insert OK', pid);
+          }
+        } catch (e) {
+          console.error('[MM] Supabase insert exception', e);
+        }
       }
-    } catch {}
+    } catch (e){
+      console.log('[MM] No user context provided for payment', e);
+    }
     res.json({ ok: true, data: j });
   } catch (e) {
     res.status(500).json({ ok: false, error: String(e) });
@@ -1694,7 +1734,6 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
     const debugData = {};
     const debugFlag = (req.query && (req.query.debug === '1' || req.query.debug === 'true')) || req.headers['x-debug-mm'] === '1';
     debugSteps.push('enter');
-    console.log('[MM DBG] enter', { contentType: req.headers['content-type'] });
     debugData.headers = Object.assign({}, req.headers);
     let rawBody = req.body;
     if (rawBody == null) rawBody = '';
@@ -1703,7 +1742,6 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
       try { rawBody = JSON.stringify(rawBody); } catch { rawBody = String(rawBody); }
     }
     debugSteps.push(`raw:${typeof rawBody}:${String(rawBody).length}`);
-    console.log('[MM DBG] raw length', String(rawBody).length);
     debugData.rawBodyLength = String(rawBody).length;
     debugData.rawBodySnippet = String(rawBody).slice(0, 500);
     //process.exit(0);
@@ -1724,9 +1762,6 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
     }
     const theirSigNorm = (theirSig || '').trim().toLowerCase();
     const calcNorm = (calc || '').trim().toLowerCase();
-    if (EIRMOND_CALLBACK_SECRET) {
-      console.log('[MM DBG] sig prefixes', (theirSigNorm||'').slice(0,8), (calcNorm||'').slice(0,8));
-    }
     debugData.signature = { theirSig, ourSig: calc, theirSigNorm, ourSigNorm: calcNorm, secretSet: !!EIRMOND_CALLBACK_SECRET };
     if (!EIRMOND_CALLBACK_SECRET) {
       console.warn('[MM] No CALLBACK secret set; skipping signature verification in test mode');
@@ -1740,11 +1775,6 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
           const altSecret = s.replace(/o/g, '0').replace(/O/g, '0');
           alt = require('crypto').createHmac('sha256', altSecret).update(rawBody).digest('hex');
         }
-        console.warn('[MM] MM callback invalid signature', {
-          theirSig: (theirSigNorm||'').slice(0,16)+"…",
-          ourSig: (calcNorm||'').slice(0,16)+"…",
-          altSigIfOto0: alt ? alt.slice(0,16)+"…" : 'n/a'
-        });
         debugData.signature.altSigIfOto0 = alt;
       } catch {
         debugSteps.push('sig-err');
@@ -1762,7 +1792,7 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
     let payload = {};
     try { payload = JSON.parse(rawBody || '{}'); }
     catch (e) {
-      console.error('[MM] callback JSON parse error', e, 'body snippet:', String(rawBody).slice(0,200));
+      //console.error('[MM] callback JSON parse error', e, 'body snippet:', String(rawBody).slice(0,200));
       debugSteps.push('json-err');
       res.set('X-Debug-MM', debugSteps.join('|'));
       if (debugFlag) {
@@ -1770,45 +1800,54 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
       }
       return res.status(200).end('Invalid JSON provided.');
     }
-    console.log('📲 MobileMoney callback:', { status: payload.status, payment_id: payload.payment_id, amount: payload.amount });
-    console.error('[MM DBG] test 2:');
     if (payload.payment_id && payload.status) {
       debugSteps.push('store-status');
       mobileMoneyCallbackStatus.set(payload.payment_id, String(payload.status).toLowerCase());
     }
-    console.error('[MM DBG] test 3:');
+    //console.error('[MM DBG] test 3:');
     // On success, credit renders based on amount (UGX pricing: $5→5, $10→12, $20→30, $50→80, $100→160)
     const stLower = String(payload.status || '').toLowerCase();
     if (stLower === 'successful' || stLower === 'success') {
       try {
         debugSteps.push('credit-try');
-        console.log('[MM DBG] credit-try', { mobileMoneyRequests: mobileMoneyRequests.get(payload.payment_id) });
-        const map = mobileMoneyRequests.get(payload.payment_id) || {};
-        console.log('[MM DBG] map', { map });
-
-        console.log('[MM DBG] mm requests map', { mobileMoneyRequests: mobileMoneyRequests });
-        const ugx = Number(payload.amount || 0);
-        const tokens = map.tokens || ugxToTokens(ugx);
-        debugData.map = map;
-        debugData.tokens = tokens;
-        if (map.userId) {
-          console.log('[MM DBG] credit by userId', { userId: map.userId, tokens });
-          let oldBal = null;
-          try { oldBal = await getCreditsByUserId(map.userId); } catch {}
-          const newBal = await incrementRenderCreditsByUserId(map.userId, tokens);
-          console.log(`✅ MobileMoney credited ${tokens} to user ${map.userId}. New balance: ${newBal}`);
-          debugSteps.push('credit-user-ok');
-          debugData.credit = { by: 'userId', userId: map.userId, tokens, oldBal, newBal };
-        } else if (map.email) {
-          console.log('[MM DBG] credit by email', { email: map.email, tokens });
-          let oldBal = null;
-          try { const u = await getUserByEmail(map.email); oldBal = (u && u.render_credits) || 0; } catch {}
-          const newBal = await incrementRenderCreditsByEmail(map.email, tokens);
-          console.log(`✅ MobileMoney credited ${tokens} to ${map.email}. New balance: ${newBal}`);
-          debugSteps.push('credit-email-ok');
-          debugData.credit = { by: 'email', email: map.email, tokens, oldBal, newBal };
-        }else{
-          console.log('[MM DBG] userId and email not found. Map is empty', { map });
+        // Look up payment in Supabase
+        const { data: reqRows, error: reqErr } = await supabaseAdmin
+          .from('mobile_money_requests')
+          .select('*')
+          .eq('payment_id', payload.payment_id)
+          .limit(1);
+        if (reqErr || !reqRows || reqRows.length === 0) {
+          console.error('[MM] Supabase lookup error or not found', reqErr);
+          debugSteps.push('supabase-lookup-fail');
+        } else {
+          const map = reqRows[0];
+          const ugx = Number(payload.amount || 0);
+          const tokens = map.tokens || ugxToTokens(ugx);
+          debugData.map = map;
+          debugData.tokens = tokens;
+          if (map.user_id) {
+            //console.log('[MM DBG] credit by userId', { userId: map.user_id, tokens });
+            let oldBal = null;
+            try { oldBal = await getCreditsByUserId(map.user_id); } catch {}
+            const newBal = await incrementRenderCreditsByUserId(map.user_id, tokens, payload.payment_id);
+            //console.log(`✅ MobileMoney credited ${tokens} to user ${map.user_id}. New balance: ${newBal}`);
+            debugSteps.push('credit-user-ok');
+            debugData.credit = { by: 'userId', userId: map.user_id, tokens, oldBal, newBal };
+          } else if (map.email) {
+            //console.log('[MM DBG] credit by email', { email: map.email, tokens });
+            let oldBal = null;
+            try { const u = await getUserByEmail(map.email); oldBal = (u && u.render_credits) || 0; } catch {}
+            const newBal = await incrementRenderCreditsByEmail(map.email, tokens, payload.payment_id);
+            //console.log(`✅ MobileMoney credited ${tokens} to ${map.email}. New balance: ${newBal}`);
+            debugSteps.push('credit-email-ok');
+            debugData.credit = { by: 'email', email: map.email, tokens, oldBal, newBal };
+          } else {
+            //console.log('[MM DBG] userId and email not found. Map is empty', { map });
+          }
+          // Update status in Supabase
+          await supabaseAdmin.from('mobile_money_requests')
+            .update({ status: 'completed', updated_at: new Date().toISOString() })
+            .eq('payment_id', payload.payment_id);
         }
       } catch (e) { console.error('MM credit error:', e); }
     }
@@ -1816,7 +1855,7 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
     if (WEBHOOK_MIRROR_URL) {
       try {
         await fetch(WEBHOOK_MIRROR_URL, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Original-Signature': theirSig }, body: rawBody });
-        console.log('[MM] mirrored callback to', WEBHOOK_MIRROR_URL);
+        //console.log('[MM] mirrored callback to', WEBHOOK_MIRROR_URL);
         debugSteps.push('mirror-ok');
         debugData.mirrored = true;
       } catch {}
@@ -1834,7 +1873,7 @@ app.post('/api/payments/mobilemoney/callback', express.text({ type: '*/*' }), as
         amount: payload && payload.amount
       });
     }
-    console.error('[MM DBG] end of callback:', debugSteps, debugData);
+    //console.error('[MM DBG] end of callback:', debugSteps, debugData);
     res.status(200).end('OK');
   } catch (e) {
     console.error('MM callback error:', e);
@@ -1851,19 +1890,34 @@ app.get('/api/mobilemoney/callback-status/:paymentId', (req, res) => {
     res.status(500).json({ ok: false, error: String(e) });
   }
 });
-
+// --- DEBUG: List all user IDs in user_profiles as seen by backend ---
+app.get('/api/debug/list-user-profile-ids', async (req, res) => {
+  try {
+    if (!supabaseAdmin) return res.status(500).json({ ok: false, error: 'supabase admin not configured' });
+    const { data, error } = await supabaseAdmin
+      .from('user_profiles')
+      .select('id')
+      .limit(100);
+    if (error) {
+      return res.status(500).json({ ok: false, error });
+    }
+    res.json({ ok: true, count: data.length, ids: data.map(row => row.id) });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e) });
+  }
+});
 // Fallback crediting path when frontend polling detects success and callback is not yet pointing to us
 app.post('/api/mobilemoney/credit-after-poll', express.json(), async (req, res) => {
   try {
     // Accept userId/email from headers or body
     const userId = req.headers['x-user-id'] || req.body?.userId || null;
     const email = req.headers['x-user-email'] || req.body?.email || null;
-    const { paymentId } = req.body || {};
+    const paymentId = req.headers['x-payment-id'] || req.body?.paymentId || null;
     if (!paymentId) return res.status(400).json({ ok: false, error: 'paymentId required' });
     // Verify success with provider to avoid blind crediting
     const token = await eirmondToken();
     const path = EIRMOND_TEST_MODE ? '/test-api/get-payment-status/' : '/api/get-payment-status/';
-    console.log('[MM] credit-after-poll verify', { paymentId, path });
+    //console.log('[MM] credit-after-poll verify', { paymentId, path });
     const r = await fetch(`${EIRMOND_BASE}${path}${encodeURIComponent(paymentId)}`, { headers: { Authorization: `Bearer ${token}` } });
     const j = await r.json();
     if (!r.ok) {
@@ -1875,28 +1929,41 @@ app.post('/api/mobilemoney/credit-after-poll', express.json(), async (req, res) 
       console.warn('[MM] credit-after-poll not-success', st);
       return res.status(400).json({ ok: false, error: `payment not successful (${st||'unknown'})` });
     }
-    // Determine token amount
-    const tracked = mobileMoneyRequests.get(paymentId) || {};
-    const amount = Number(j.amount || j.data?.amount || 0);
-    const tokens = tracked.tokens || ugxToTokens(amount);
+    // Look up payment in Supabase
+    let tokens = null;
+    try {
+      const { data: reqRows, error: reqErr } = await supabaseAdmin
+        .from('mobile_money_requests')
+        .select('*')
+        .eq('payment_id', paymentId)
+        .limit(1);
+      if (!reqErr && reqRows && reqRows.length > 0) {
+        tokens = reqRows[0].tokens || ugxToTokens(Number(j.amount || j.data?.amount || 0));
+      } else {
+        tokens = ugxToTokens(Number(j.amount || j.data?.amount || 0));
+      }
+    } catch (e) {
+      tokens = ugxToTokens(Number(j.amount || j.data?.amount || 0));
+    }
     let newBal = null;
+    //console.log('[MM] credit-after-poll crediting', { userId, email, amount, tokens, paymentId });
     if (userId) {
       try {
-        newBal = await incrementRenderCreditsByUserId(userId, tokens);
+        console.log('[MM] credit-after-poll increment by userId', { userId, tokens, paymentId });
+        newBal = await incrementRenderCreditsByUserId(userId, tokens, paymentId);
       } catch (e) {
         // If id path fails (e.g., email was mistakenly sent as id), try email fallback
         if (email) {
-          newBal = await incrementRenderCreditsByEmail(email, tokens);
+          newBal = await incrementRenderCreditsByEmail(email, tokens, paymentId);
         } else {
           throw e;
         }
       }
     } else if (email) {
-      newBal = await incrementRenderCreditsByEmail(email, tokens);
+      newBal = await incrementRenderCreditsByEmail(email, tokens, paymentId);
     } else {
       return res.status(400).json({ ok: false, error: 'Missing user context' });
     }
-    console.log('[MM] credit-after-poll credited', { tokens, newBal });
     res.json({ ok: true, credited: tokens, balance: newBal });
   } catch (e) {
     console.error('[MM] credit-after-poll exception', e);
@@ -1906,15 +1973,12 @@ app.post('/api/mobilemoney/credit-after-poll', express.json(), async (req, res) 
 
 // Initialize payment endpoint
 app.post('/api/payments/initialize', async (req, res) => {
-  console.log('💳 Payment initialization request:', req.body);
-  
   if (!PAYSTACK_SECRET_KEY) {
     return res.status(500).json({
       success: false,
       message: 'Paystack secret key not configured'
     });
   }
-
   try {
     const {
       email,
@@ -1955,7 +2019,7 @@ app.post('/api/payments/initialize', async (req, res) => {
       paystackPayload.plan = plan_code;
     }
 
-    console.log('📤 Sending to Paystack:', paystackPayload);
+    //console.log('📤 Sending to Paystack:', paystackPayload);
 
     // Initialize payment with Paystack
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
@@ -1978,7 +2042,7 @@ app.post('/api/payments/initialize', async (req, res) => {
       });
     }
 
-    console.log('✅ Payment initialized successfully:', result.data.reference);
+    //console.log('✅ Payment initialized successfully:', result.data.reference);
     
     res.json({
       success: true,
@@ -1999,7 +2063,7 @@ app.post('/api/payments/initialize', async (req, res) => {
 // Verify payment endpoint
 app.get('/api/payments/verify/:reference', async (req, res) => {
   const { reference } = req.params;
-  console.log('🔍 Payment verification request for:', reference);
+  //console.log('🔍 Payment verification request for:', reference);
 
   if (!PAYSTACK_SECRET_KEY) {
     return res.status(500).json({
@@ -2028,7 +2092,7 @@ app.get('/api/payments/verify/:reference', async (req, res) => {
       });
     }
 
-    console.log('✅ Payment verification result:', result.data.status);
+    //console.log('✅ Payment verification result:', result.data.status);
     
     res.json({
       success: true,
@@ -2048,7 +2112,7 @@ app.get('/api/payments/verify/:reference', async (req, res) => {
 
 // Create subscription plan endpoint
 app.post('/api/payments/plans', async (req, res) => {
-  console.log('📋 Plan creation request:', req.body);
+  //console.log('📋 Plan creation request:', req.body);
 
   if (!PAYSTACK_SECRET_KEY) {
     return res.status(500).json({
@@ -2171,7 +2235,8 @@ app.post('/api/payments/webhook', express.raw({type: 'application/json'}), (req,
               const email = event.data.customer.email;
               const tokens = parseInt(md.tokens, 10);
               if (tokens > 0 && supabaseAdmin) {
-                const newBal = await incrementRenderCreditsByEmail(email, tokens);
+                const paymentId = event.data.reference || event.data.id || null;
+                const newBal = await incrementRenderCreditsByEmail(email, tokens, paymentId);
                 console.log(`✅ Credited ${tokens} renders to ${email}. New balance: ${newBal}`);
               }
             }
@@ -2840,7 +2905,7 @@ Make this look like a professional architectural rendering suitable for client p
   }
 }
 
-// ==================== AUTONOMOUS AGENT API ROUTES ====================
+// ==================== AUTONOMOUS AGENT API ROUTTES ====================
 
 // In-memory storage for agent runs and approvals (use Redis in production)
 const agentRuns = new Map();
@@ -3158,546 +3223,30 @@ app.post('/api/agent/stop', (req, res) => {
   }
 });
 
-// ==================== END AUTONOMOUS AGENT ROUTES ====================
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`StudioSix Pro server is running on port ${PORT}`);
-  console.log(`Health check available at: http://localhost:${PORT}/health`);
-  console.log(`AI Render available at: http://localhost:${PORT}/api/ai-render`);
-  console.log(`Wavespeed create: POST http://localhost:${PORT}/api/ai/wavespeed/video`);
-  console.log(`Wavespeed poll:   GET  http://localhost:${PORT}/api/ai/wavespeed/video/:id`);
-  console.log(`🤖 Autonomous Agent API available at: http://localhost:${PORT}/api/agent/*`);
-  console.log(`📡 Agent WebSocket available at: ws://localhost:8081/ws/agent`);
-  console.log('Paystack integration:', {
-    secretKey: !!PAYSTACK_SECRET_KEY,
-    publicKey: !!PAYSTACK_PUBLIC_KEY
+// =================================================================
+// FINAL DEVELOPMENT MODE CATCH-ALL ROUTE (MUST BE LAST)
+// =================================================================
+if (!fs.existsSync(path.join(__dirname, 'build'))) {
+  app.get('*', (req, res) => {
+    res.status(503).send(`
+      <html>
+        <head><title>StudioSix Pro - Building...</title></head>
+        <body>
+          <h1>StudioSix Pro</h1>
+          <p>Application is building... Please wait.</p>
+          <p>Build directory not found at: ${path.join(__dirname, 'build')}</p>
+          <p><a href="/health">Health Check</a></p>
+        </body>
+      </html>
+    `);
   });
+}
+  
+// Start the Express server
+// Start the Express server (only declare PORT once)
+if (typeof PORT === 'undefined') {
+  var PORT = process.env.PORT || 8080;
+}
+app.listen(PORT, () => {
+  console.log(`StudioSix Pro server running on port ${PORT}`);
 });
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
-
-// ... existing code ...
-// Wavespeed Seedance create (image-to-video)
-app.post('/api/ai/wavespeed/video', async (req, res) => {
-  try {
-    const apiKey = process.env.WAVESPEED_API_KEY;
-    if (!apiKey) return res.status(500).json({ ok: false, error: 'WAVESPEED_API_KEY not configured' });
-    const { prompt = '', imageDataUrl, imageUrl, duration = 5, camera_fixed = false, seed = -1, model } = req.body || {};
-    let image = String(imageUrl || '').trim() || null;
-    if (!image && imageDataUrl) {
-      const isDataUri = /^data:(.*?);base64,(.*)$/.exec(String(imageDataUrl));
-      if (!isDataUri) return res.status(400).json({ ok: false, error: 'imageDataUrl must be data:*;base64,*' });
-      // Upload to Supabase to obtain a public HTTPS URL that Wavespeed accepts
-      try {
-        const mime = isDataUri[1] || 'image/png';
-        const b64 = isDataUri[2];
-        const buf = Buffer.from(b64, 'base64');
-        const ext = (/png/i.test(mime) ? 'png' : (/jpeg|jpg/i.test(mime) ? 'jpg' : 'png'));
-        const key = `wavespeed/input/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-        if (!supabaseAdmin) {
-          // Fallback in dev: pass data URI directly
-          image = imageDataUrl;
-        } else {
-          const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
-            .from('models')
-            .upload(key, buf, { contentType: mime, upsert: true });
-          if (uploadErr) {
-            image = imageDataUrl; // fallback
-          } else {
-            const { data: publicUrl } = supabaseAdmin.storage
-              .from('models')
-              .getPublicUrl(key);
-            if (publicUrl && publicUrl.publicUrl) {
-              image = publicUrl.publicUrl;
-            } else {
-              image = imageDataUrl; // fallback
-            }
-          }
-        }
-      } catch (e) {
-        // On any upload error, fallback to data URI
-        image = imageDataUrl;
-      }
-    }
-    if (!image) return res.status(400).json({ ok: false, error: 'imageDataUrl or imageUrl required' });
-
-    const body = {
-      camera_fixed: !!camera_fixed,
-      duration: Number(duration) || 5,
-      image,
-      prompt: String(prompt || ''),
-      seed: (Number.isFinite(seed) ? Number(seed) : -1)
-    };
-    // Select endpoint by model; default to 1080p if unspecified
-    const modelPath = (() => {
-      const m = String(model || '').toLowerCase();
-      if (/480p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-480p';
-      if (/720p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-720p';
-      return 'bytedance/seedance-v1-pro-i2v-1080p';
-    })();
-    const r = await fetch(`https://api.wavespeed.ai/api/v3/${modelPath}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(body)
-    });
-    const raw = await r.text();
-    let j = {}; try { j = JSON.parse(raw); } catch {}
-    if (!r.ok) return res.status(r.status).json({ ok: false, error: j?.error || j || raw });
-    const requestId = (
-      j?.requestId || j?.request_id || j?.id || j?.jobId || j?.predictionId || j?.prediction_id ||
-      j?.data?.requestId || j?.data?.id || j?.data?.jobId || null
-    );
-    if (requestId) {
-      try { pollWavespeedUntilDone(requestId, apiKey); } catch {}
-    }
-    // Some providers may return a URL immediately
-    const immediateUrl = (typeof j?.videoUrl === 'string' && j.videoUrl) || null;
-    return res.json({ ok: true, requestId, provider: 'wavespeed', videoUrl: immediateUrl || undefined, raw: j });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-
-// Wavespeed video proxy must be registered BEFORE the dynamic :id route
-app.get('/api/ai/wavespeed/video/proxy', async (req, res) => {
-  try {
-    const url = String(req.query.url || '');
-    if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error: 'invalid url' });
-
-    const headers = {};
-    const range = req.headers['range'];
-    if (range && typeof range === 'string') headers['Range'] = range;
-    if (!headers['Range']) headers['Range'] = 'bytes=0-';
-    headers['User-Agent'] = headers['User-Agent'] || 'StudioSix-Proxy/1.0 (+node-fetch)';
-
-    const r = await fetch(url, { method: 'GET', headers });
-    if (!r.ok && r.status !== 206) {
-      const txt = await r.text().catch(() => '');
-      return res.status(r.status).json({ ok: false, error: txt || 'fetch failed' });
-    }
-
-    let contentType = r.headers.get('content-type') || 'video/mp4';
-    if (/^binary\/octet-stream/i.test(contentType)) contentType = 'video/mp4';
-    const contentLength = r.headers.get('content-length');
-    const contentRange = r.headers.get('content-range');
-    const acceptRanges = r.headers.get('accept-ranges') || 'bytes';
-
-    res.status(contentRange ? 206 : (r.status || 200));
-    res.setHeader('Content-Type', contentType);
-    if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
-    if (contentRange) res.setHeader('Content-Range', contentRange);
-    if (contentLength) res.setHeader('Content-Length', contentLength);
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    if (req.method === 'HEAD') return res.end();
-    if (r.body && r.body.pipe) {
-      r.body.pipe(res);
-    } else {
-      const buf = await r.arrayBuffer();
-      res.end(Buffer.from(buf));
-    }
-  } catch (e) {
-    try { console.warn('[proxy] error', e?.message || String(e)); } catch {}
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-
-// Wavespeed result polling
-app.get('/api/ai/wavespeed/video/:id', async (req, res) => {
-  try {
-    const apiKey = process.env.WAVESPEED_API_KEY;
-    if (!apiKey) return res.status(500).json({ ok: false, error: 'WAVESPEED_API_KEY not configured' });
-    const id = req.params.id;
-    // Test hook to validate frontend preview flow without calling provider
-    if (id === 'test') {
-      const assetUrl = 'https://sample-videos.com/video321/mp4/720/big_buck_bunny_720p_1mb.mp4';
-      const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(assetUrl)}`;
-      return res.json({ ok: true, status: 'completed', assetUrl, videoUrl: proxy, raw: { test: true } });
-    }
-    const cached = wavespeedTaskCache.get(id);
-    if (cached) {
-      const proxy = cached.assetUrl ? `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(cached.assetUrl)}` : null;
-      return res.json({ ok: cached.status !== 'failed', status: cached.status === 'timeout' ? 'running' : cached.status, assetUrl: cached.assetUrl, videoUrl: proxy || cached.assetUrl, cached: true });
-    }
-    try { pollWavespeedUntilDone(id, apiKey); } catch {}
-    // Fast path: if no cache yet, avoid blocking the request; client can poll again
-    if (String(req.query.probe || '') !== '1') {
-      return res.json({ ok: true, status: 'running', cached: false });
-    }
-    const r = await fetchWithTimeout(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(id)}/result`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    }, 8000);
-    const raw = await r.text();
-    let j = {}; try { j = JSON.parse(raw); } catch {}
-    if (!r.ok) return res.status(r.status).json({ ok: false, error: j?.error || j || raw });
-    // Robust status detection: support wrapper { code, message, data: { status } }
-    const status = (() => {
-      if (typeof j?.status === 'string') return j.status;
-      if (typeof j?.data?.status === 'string') return j.data.status;
-      if (j?.ok === true || j?.data?.ok === true) return 'completed';
-      // Some providers use boolean flags
-      if (j?.data && j.data.outputs && Array.isArray(j.data.outputs) && j.data.outputs.length > 0) return 'completed';
-      return 'running';
-    })();
-    const findFirstMp4Url = (obj) => {
-      try {
-        const seen = new Set();
-        const stack = [obj];
-        while (stack.length) {
-          const cur = stack.pop();
-          if (!cur || typeof cur !== 'object') continue;
-          if (seen.has(cur)) continue;
-          seen.add(cur);
-          for (const key of Object.keys(cur)) {
-            const val = cur[key];
-            if (typeof val === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(val)) return val;
-            if (val && typeof val === 'object') stack.push(val);
-            if (Array.isArray(val)) for (const v of val) stack.push(v);
-          }
-        }
-      } catch {}
-      return null;
-    };
-    const assetUrl = (() => {
-      if (typeof j?.videoUrl === 'string') return j.videoUrl;
-      if (typeof j?.assetUrl === 'string') return j.assetUrl;
-      if (typeof j?.url === 'string') return j.url;
-      if (typeof j?.result?.videoUrl === 'string') return j.result.videoUrl;
-      if (typeof j?.result?.url === 'string') return j.result.url;
-      if (Array.isArray(j?.outputs)) {
-        const s = j.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
-        if (s) return s;
-        const o = j.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
-        return o?.url || null;
-      }
-      if (Array.isArray(j?.data?.outputs)) {
-        const s = j.data.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
-        if (s) return s;
-        const o = j.data.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
-        if (o?.url) return o.url;
-      }
-      if (typeof j?.data?.videoUrl === 'string') return j.data.videoUrl;
-      if (typeof j?.data?.url === 'string') return j.data.url;
-      const deep = findFirstMp4Url(j);
-      return deep || null;
-    })();
-    try { console.log(`[wavespeed] result ${id} status=${status} url=${assetUrl ? 'yes' : 'no'}`); } catch {}
-    if (status === 'completed' && assetUrl) {
-      const proxy = assetUrl ? `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(assetUrl)}` : null;
-      return res.json({ ok: true, status: 'completed', assetUrl, videoUrl: proxy || assetUrl, raw: j });
-    }
-    if (status === 'failed') return res.json({ ok: false, status: 'failed', raw: j });
-    return res.json({ ok: true, status: 'running', raw: j });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-
-// Stream/proxy a Wavespeed result URL to the client without exposing referer
-app.get('/api/ai/wavespeed/video/proxy', async (req, res) => {
-  try {
-    const url = String(req.query.url || '');
-    if (!/^https?:\/\//i.test(url)) return res.status(400).json({ ok: false, error: 'invalid url' });
-
-    // Pass through Range header so HTML5 <video> can stream/seek
-    const headers = {};
-    const range = req.headers['range'];
-    if (range && typeof range === 'string') headers['Range'] = range;
-    // If no range provided, some players still expect bytes support; request from start to allow 206
-    if (!headers['Range']) headers['Range'] = 'bytes=0-';
-
-    // Some CDNs require a UA
-    headers['User-Agent'] = headers['User-Agent'] || 'StudioSix-Proxy/1.0 (+node-fetch)';
-
-    const r = await fetch(url, { method: 'GET', headers });
-    if (!r.ok && r.status !== 206) {
-      const txt = await r.text().catch(() => '');
-      return res.status(r.status).json({ ok: false, error: txt || 'fetch failed' });
-    }
-
-    // Propagate streaming headers
-    let contentType = r.headers.get('content-type') || 'video/mp4';
-    // Normalize generic binary type to mp4 for browsers
-    if (/^binary\/octet-stream/i.test(contentType)) contentType = 'video/mp4';
-    const contentLength = r.headers.get('content-length');
-    const contentRange = r.headers.get('content-range');
-    const acceptRanges = r.headers.get('accept-ranges') || 'bytes';
-
-    res.status(contentRange ? 206 : (r.status || 200));
-    res.setHeader('Content-Type', contentType);
-    if (acceptRanges) res.setHeader('Accept-Ranges', acceptRanges);
-    if (contentRange) res.setHeader('Content-Range', contentRange);
-    if (contentLength) res.setHeader('Content-Length', contentLength);
-    res.setHeader('Cache-Control', 'no-store');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-
-    if (req.method === 'HEAD') return res.end();
-
-    if (r.body && r.body.pipe) {
-      r.body.pipe(res);
-    } else {
-      const buf = await r.arrayBuffer();
-      res.end(Buffer.from(buf));
-    }
-  } catch (e) {
-    try { console.warn('[proxy] error', e?.message || String(e)); } catch {}
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-
-// Combined start-and-wait endpoint: create a Wavespeed job and wait (poll) up to 5 minutes
-app.post('/api/ai/wavespeed/video/start-and-wait', async (req, res) => {
-  try {
-    const apiKey = process.env.WAVESPEED_API_KEY;
-    if (!apiKey) return res.status(500).json({ ok: false, error: 'WAVESPEED_API_KEY not configured' });
-    const { prompt = '', imageDataUrl, imageUrl, duration = 5, camera_fixed = false, seed = -1, timeoutSec = 300, model } = req.body || {};
-
-    // Normalize image input (re-use logic from create route)
-    let image = String(imageUrl || '').trim() || null;
-    if (!image && imageDataUrl) {
-      const isDataUri = /^data:(.*?);base64,(.*)$/.exec(String(imageDataUrl));
-      if (!isDataUri) return res.status(400).json({ ok: false, error: 'imageDataUrl must be data:*;base64,*' });
-      try {
-        const mime = isDataUri[1] || 'image/png';
-        const b64 = isDataUri[2];
-        const buf = Buffer.from(b64, 'base64');
-        const ext = (/png/i.test(mime) ? 'png' : (/jpeg|jpg/i.test(mime) ? 'jpg' : 'png'));
-        const key = `wavespeed/input/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-        if (!supabaseAdmin) {
-          image = imageDataUrl; // fallback in dev
-        } else {
-          const { data: uploadData, error: uploadErr } = await supabaseAdmin.storage
-            .from('models')
-            .upload(key, buf, { contentType: mime, upsert: true });
-          if (uploadErr) {
-            image = imageDataUrl; // fallback
-          } else {
-            const { data: publicUrl } = supabaseAdmin.storage
-              .from('models')
-              .getPublicUrl(key);
-            if (publicUrl && publicUrl.publicUrl) image = publicUrl.publicUrl; else image = imageDataUrl;
-          }
-        }
-      } catch (e) {
-        image = imageDataUrl; // fallback on error
-      }
-    }
-    if (!image) return res.status(400).json({ ok: false, error: 'imageDataUrl or imageUrl required' });
-
-    // Create job
-    const createBody = {
-      camera_fixed: !!camera_fixed,
-      duration: Number(duration) || 5,
-      image,
-      prompt: String(prompt || ''),
-      seed: (Number.isFinite(seed) ? Number(seed) : -1)
-    };
-    const modelPath = (() => {
-      const m = String(model || '').toLowerCase();
-      if (/480p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-480p';
-      if (/720p/.test(m)) return 'bytedance/seedance-v1-pro-i2v-720p';
-      return 'bytedance/seedance-v1-pro-i2v-1080p';
-    })();
-    const createRes = await fetch(`https://api.wavespeed.ai/api/v3/${modelPath}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(createBody)
-    });
-    const createRaw = await createRes.text();
-    let createJson = {}; try { createJson = JSON.parse(createRaw); } catch {}
-    try { console.log('[wavespeed] create start-and-wait response', createJson); } catch {}
-    if (!createRes.ok) return res.status(createRes.status).json({ ok: false, error: createJson?.error || createJson || createRaw });
-
-    // Try to extract a request/prediction ID from multiple possible locations
-    let requestId = (
-      createJson?.requestId || createJson?.request_id || createJson?.id || createJson?.jobId || createJson?.predictionId || createJson?.prediction_id ||
-      createJson?.data?.requestId || createJson?.data?.id || createJson?.data?.jobId || null
-    );
-    if (!requestId) {
-      // Deep search for an ID-like value
-      try {
-        const seen = new Set();
-        const stack = [createJson];
-        while (stack.length && !requestId) {
-          const cur = stack.pop();
-          if (!cur || typeof cur !== 'object') continue;
-          if (seen.has(cur)) continue;
-          seen.add(cur);
-          for (const key of Object.keys(cur)) {
-            const val = cur[key];
-            if (typeof val === 'string') {
-              // Match plausible IDs
-              if (/^[a-z0-9]{8,}$/i.test(val)) { requestId = val; break; }
-              // Or extract from prediction URL
-              const m = /\/predictions\/([^\/?#]+)/i.exec(val);
-              if (m && m[1]) { requestId = m[1]; break; }
-            }
-            if (val && typeof val === 'object') stack.push(val);
-            if (Array.isArray(val)) for (const v of val) stack.push(v);
-          }
-        }
-      } catch {}
-    }
-    // If provider already returned a URL or completed outputs, respond immediately
-    const immediateUrl = (typeof createJson?.videoUrl === 'string' && createJson.videoUrl) || null;
-    if (immediateUrl) {
-      const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(immediateUrl)}`;
-      return res.json({ ok: true, status: 'completed', requestId: requestId || null, assetUrl: immediateUrl, videoUrl: proxy });
-    }
-    if ((createJson?.status === 'completed' || createJson?.ok === true) && Array.isArray(createJson?.outputs)) {
-      const first = createJson.outputs.find(u => typeof u === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(u));
-      if (first) {
-        const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(first)}`;
-        return res.json({ ok: true, status: 'completed', requestId: requestId || null, assetUrl: first, videoUrl: proxy });
-      }
-    }
-
-    // Kick background poller and wait up to timeoutSec
-    if (requestId) {
-      try { console.log(`[wavespeed] enqueue background poll ${requestId}`); pollWavespeedUntilDone(requestId, apiKey); } catch {}
-    }
-    const started = Date.now();
-    const maxMs = Math.max(5, Math.min(600, Number(timeoutSec) || 300)) * 1000; // clamp 5s..600s
-    try { console.log(`[wavespeed] start-and-wait begin ${requestId || 'no-id'} for up to ${Math.round(maxMs/1000)}s`); } catch {}
-    while (Date.now() - started < maxMs) {
-      try {
-        const cached = requestId ? wavespeedTaskCache.get(requestId) : null;
-        if (cached && cached.status === 'completed' && cached.assetUrl) {
-          const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(cached.assetUrl)}`;
-          return res.json({ ok: true, status: 'completed', requestId, assetUrl: cached.assetUrl, videoUrl: proxy });
-        }
-        if (cached && cached.status === 'failed') {
-          return res.json({ ok: false, status: 'failed', requestId });
-        }
-        // If provider reports completed with outputs at create-time via data.*
-        if (createJson && createJson.data && (createJson.data.status === 'completed' || createJson.data.ok === true) && Array.isArray(createJson.data.outputs)) {
-          const first = createJson.data.outputs.find(u => typeof u === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(u));
-          if (first) {
-            const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(first)}`;
-            return res.json({ ok: true, status: 'completed', requestId, assetUrl: first, videoUrl: proxy });
-          }
-        }
-        // Fallback: query provider directly if cache not ready yet
-        if (requestId && (!cached || cached.status === 'running')) {
-          const r = await fetch(`https://api.wavespeed.ai/api/v3/predictions/${encodeURIComponent(requestId)}/result`, {
-            method: 'GET',
-            headers: { 'Authorization': `Bearer ${apiKey}` }
-          });
-          const raw = await r.text();
-          let j = {}; try { j = JSON.parse(raw); } catch {}
-          if (r.ok) {
-            const status = j?.status || (j?.ok === true ? 'completed' : 'running');
-            try { console.log(`[wavespeed] start-and-wait probe ${requestId} status=${status}`); } catch {}
-            // Reuse deep search similar to GET polling route
-            const findFirstMp4Url = (obj) => {
-              try {
-                const seen = new Set();
-                const stack = [obj];
-                while (stack.length) {
-                  const cur = stack.pop();
-                  if (!cur || typeof cur !== 'object') continue;
-                  if (seen.has(cur)) continue;
-                  seen.add(cur);
-                  for (const key of Object.keys(cur)) {
-                    const val = cur[key];
-                    if (typeof val === 'string' && /(https?:\/\/[^\s]+\.(mp4|mov))(\?[^\s]*)?$/i.test(val)) return val;
-                    if (val && typeof val === 'object') stack.push(val);
-                    if (Array.isArray(val)) for (const v of val) stack.push(v);
-                  }
-                }
-              } catch {}
-              return null;
-            };
-            const assetUrl = (() => {
-              if (typeof j?.videoUrl === 'string') return j.videoUrl;
-              if (typeof j?.assetUrl === 'string') return j.assetUrl;
-              if (typeof j?.url === 'string') return j.url;
-              if (typeof j?.result?.videoUrl === 'string') return j.result.videoUrl;
-              if (typeof j?.result?.url === 'string') return j.result.url;
-              if (Array.isArray(j?.outputs)) {
-                const s = j.outputs.find(u => typeof u === 'string' && /(mp4|mov)(\?|$)/i.test(u));
-                if (s) return s;
-                const o = j.outputs.find(o => typeof o === 'object' && typeof o?.url === 'string');
-                return o?.url || null;
-              }
-              const deep = findFirstMp4Url(j);
-              return deep || null;
-            })();
-            if (status === 'completed' && assetUrl) {
-              const proxy = `/api/ai/wavespeed/video/proxy?url=${encodeURIComponent(assetUrl)}`;
-              return res.json({ ok: true, status: 'completed', requestId, assetUrl, videoUrl: proxy });
-            }
-            if (status === 'failed') return res.json({ ok: false, status: 'failed', requestId });
-          }
-        }
-      } catch {}
-      await new Promise(r => setTimeout(r, 3000));
-    }
-    try { console.warn(`[wavespeed] start-and-wait timeout ${requestId || 'no-id'}`); } catch {}
-    // If we reach here and never had a job ID, surface a clearer error to the client
-    if (!requestId) return res.status(502).json({ ok: false, error: 'Provider did not return a job ID. Please try again.' });
-    return res.json({ ok: true, status: 'running', requestId, timeout: true });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-
-// --- Runway video upscale (REST) ---
-app.post('/api/ai/runway/upscale', async (req, res) => {
-  try {
-    const apiKey = process.env.RUNWAY_API_KEY || process.env.RUNWAYML_API_SECRET || process.env.RUNWAYML_API_KEY;
-    if (!apiKey) return res.status(500).json({ ok: false, error: 'Runway API key not configured' });
-    const { videoDataUrl, videoUrl, resolution = '2k' } = req.body || {};
-    let uri = String(videoUrl || '').trim() || null;
-    if (!uri && videoDataUrl) {
-      // Allow data URI pass-through
-      if (!/^data:video\//i.test(String(videoDataUrl))) return res.status(400).json({ ok: false, error: 'videoDataUrl must be data:video/*;base64,*' });
-      uri = videoDataUrl;
-    }
-    if (!uri) return res.status(400).json({ ok: false, error: 'videoUrl or videoDataUrl required' });
-
-    const r = await fetch('https://api.runwayml.com/v1/video_upscale', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'X-Runway-Version': '2024-11-06'
-      },
-      body: JSON.stringify({ videoUri: uri, model: 'upscale_v1' })
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) return res.status(r.status).json({ ok: false, error: j?.error || j });
-    // Response includes task id
-    return res.json({ ok: true, taskId: j?.id || j?.taskId || j?.jobId || null, runway: j });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e?.message || String(e) });
-  }
-});
-// ... existing code ...
